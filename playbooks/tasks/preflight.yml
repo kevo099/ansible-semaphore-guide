@@ -1,0 +1,58 @@
+---
+# Imported before fact gathering, so a missing --limit fails before SSH.
+- name: Require an explicit lab target
+  ansible.builtin.assert:
+    that:
+      - ansible_limit | default('') | length > 0
+      - ansible_limit | default('') not in ['all', '*']
+    fail_msg: >-
+      Choose a host or lab group with --limit, for example --limit lab-ubuntu
+      or --limit lab. Every play is also restricted to the lab inventory group.
+    quiet: true
+
+- name: Gather operating-system facts
+  ansible.builtin.setup:
+    gather_subset:
+      - min
+
+- name: Reject operating systems outside this lesson
+  ansible.builtin.assert:
+    that:
+      - >-
+        (ansible_facts['distribution'] == 'Ubuntu' and
+         ansible_facts['distribution_version'] == '24.04') or
+        (ansible_facts['distribution'] in ['AlmaLinux', 'RedHat'] and
+         ansible_facts['distribution_major_version'] == '9')
+      - ansible_facts['service_mgr'] == 'systemd'
+    fail_msg: >-
+      This lesson supports Ubuntu 24.04 and AlmaLinux/RHEL 9 with
+      systemd. Found {{ ansible_facts['distribution'] }}
+      {{ ansible_facts['distribution_version'] }} using
+      {{ ansible_facts['service_mgr'] }}. Review the OS mapping before extending it.
+    quiet: true
+
+- name: Load the reviewed names for this OS family
+  ansible.builtin.include_vars:
+    file: "{{ playbook_dir }}/vars/{{ ansible_facts['os_family'] }}.yml"
+
+- name: Verify the operating system's package bindings are ready
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - -c
+      - "{{ 'import apt' if ansible_facts['os_family'] == 'Debian' else 'import dnf' }}"
+  register: lab_package_binding
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Explain missing bootstrap prerequisites
+  ansible.builtin.assert:
+    that:
+      - lab_package_binding.rc == 0
+    fail_msg: >-
+      /usr/bin/python3 cannot load the OS package binding. Install
+      {{ 'python3-apt' if ansible_facts['os_family'] == 'Debian' else 'python3-dnf' }}
+      using this target's VM console/bootstrap, then rerun the lesson.
+      Nothing is installed automatically by this prerequisite check.
+    quiet: true

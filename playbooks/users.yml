@@ -1,0 +1,57 @@
+---
+- name: Practice groups and ordinary local accounts
+  hosts: lab
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    lab_practice_users:
+      - lab_alice
+      - lab_bob
+  pre_tasks:
+    - name: Check scope and supported operating system
+      ansible.builtin.import_tasks: tasks/preflight.yml
+      tags: always
+
+    - name: Keep this exercise within its reserved account names
+      ansible.builtin.assert:
+        that:
+          - lab_practice_users is sequence
+          - lab_practice_users is not string
+          - lab_practice_users | length > 0
+          - lab_practice_users | unique | length == lab_practice_users | length
+          - lab_practice_users | select('match', '^lab_[a-z][a-z0-9_]{0,19}$') | list | length == lab_practice_users | length
+        fail_msg: Use a nonempty list of unique lab_ names such as lab_alice.
+        quiet: true
+  tasks:
+    - name: Inspect whether the practice group already exists
+      ansible.builtin.getent:
+        database: group
+        key: lab_learners
+        fail_key: false
+
+    - name: Create the practice group
+      ansible.builtin.group:
+        name: lab_learners
+        state: present
+
+    - name: Create ordinary users with locked passwords
+      ansible.builtin.user:
+        name: "{{ item }}"
+        comment: Ansible practice account
+        group: lab_learners
+        groups: ''
+        append: false
+        shell: /bin/bash
+        create_home: true
+        password_lock: true
+        state: present
+      loop: "{{ lab_practice_users }}"
+      when: not ansible_check_mode or ansible_facts['getent_group']['lab_learners'] is not none
+
+    - name: Explain a first-run preview limitation
+      ansible.builtin.debug:
+        msg: >-
+          CHECK MODE: lab_learners does not exist yet. Its creation was predicted;
+          user creation waits for a real group. No login key or sudo access is added.
+      when: ansible_check_mode and ansible_facts['getent_group']['lab_learners'] is none

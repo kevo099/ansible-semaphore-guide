@@ -1,0 +1,93 @@
+---
+- name: Publish a small local practice website
+  hosts: lab
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    lab_web_message: I deployed this page with Ansible.
+  pre_tasks:
+    - name: Check scope and supported operating system
+      ansible.builtin.import_tasks: tasks/preflight.yml
+      tags: always
+  tasks:
+    - name: Inspect services before changing packages
+      ansible.builtin.service_facts:
+
+    - name: Install nginx on Ubuntu without starting the package's default website
+      ansible.builtin.apt:
+        name: nginx
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+        lock_timeout: 120
+        auto_install_module_deps: false
+        policy_rc_d: 101
+      when: ansible_facts['os_family'] == 'Debian'
+
+    - name: Install nginx on AlmaLinux or RHEL
+      ansible.builtin.dnf:
+        name: nginx
+        state: present
+        lock_timeout: 120
+      when: ansible_facts['os_family'] == 'RedHat'
+
+    - name: Configure the installed webserver
+      when: not ansible_check_mode or 'nginx.service' in ansible_facts['services']
+      block:
+        - name: Publish the practice page
+          ansible.builtin.template:
+            src: practice.html.j2
+            dest: /usr/share/nginx/html/ansible-lab.html
+            owner: root
+            group: root
+            mode: '0644'
+
+        - name: Validate and install a loopback-only nginx configuration
+          ansible.builtin.template:
+            src: nginx.conf.j2
+            dest: /etc/nginx/nginx.conf
+            owner: root
+            group: root
+            mode: '0644'
+            validate: /usr/sbin/nginx -t -c %s
+          notify: Reload nginx
+
+        - name: Enable and start nginx
+          ansible.builtin.systemd_service:
+            name: nginx.service
+            enabled: true
+            state: started
+
+    - name: Explain a first-run preview limitation
+      ansible.builtin.debug:
+        msg: >-
+          CHECK MODE: nginx is not installed yet. Its package change was predicted;
+          templates, service setup, and HTTP verification wait for a real install.
+      when: ansible_check_mode and 'nginx.service' not in ansible_facts['services']
+
+    - name: Apply any pending configuration reload before testing
+      ansible.builtin.meta: flush_handlers
+
+    - name: Read the website from inside the target VM
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8080/
+        status_code: 200
+        return_content: true
+        use_proxy: false
+      register: lab_web_response
+      when: not ansible_check_mode
+
+    - name: Confirm nginx served the managed page
+      ansible.builtin.assert:
+        that:
+          - "'Ansible practice site' in lab_web_response.content"
+        fail_msg: Port 8080 answered, but it did not serve this lesson's page.
+        quiet: true
+      when: not ansible_check_mode
+
+  handlers:
+    - name: Reload nginx
+      ansible.builtin.systemd_service:
+        name: nginx.service
+        state: reloaded

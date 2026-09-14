@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ansible practice site</title>
+</head>
+<body>
+  <h1>Ansible practice site</h1>
+  <p>{{ lab_web_message | e }}</p>
+  <p>Host: {{ inventory_hostname | e }}</p>
+  <p>OS: {{ ansible_facts['distribution'] | e }} {{ ansible_facts['distribution_version'] | e }}</p>
+</body>
+</html>

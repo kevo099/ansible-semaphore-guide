@@ -1,0 +1,54 @@
+---
+- name: Manage a banner and time service
+  hosts: lab
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  pre_tasks:
+    - name: Check scope and supported operating system
+      ansible.builtin.import_tasks: tasks/preflight.yml
+      tags: always
+  tasks:
+    - name: Write a recognizable managed banner
+      ansible.builtin.copy:
+        content: |
+          Ansible practice lab: {{ inventory_hostname }}
+          This banner is managed by playbooks/baseline.yml.
+        dest: /etc/motd
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Inspect services before changing packages
+      ansible.builtin.service_facts:
+
+    - name: Install chrony on Ubuntu
+      ansible.builtin.apt:
+        name: chrony
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+        lock_timeout: 120
+        auto_install_module_deps: false
+      when: ansible_facts['os_family'] == 'Debian'
+
+    - name: Install chrony on AlmaLinux or RHEL
+      ansible.builtin.dnf:
+        name: chrony
+        state: present
+        lock_timeout: 120
+      when: ansible_facts['os_family'] == 'RedHat'
+
+    - name: Enable and start the time service
+      ansible.builtin.systemd_service:
+        name: "{{ lab_time_service }}"
+        state: started
+        enabled: true
+      when: not ansible_check_mode or lab_time_service in ansible_facts['services']
+
+    - name: Explain a first-run preview limitation
+      ansible.builtin.debug:
+        msg: >-
+          CHECK MODE: chrony is not installed yet. Package and banner changes
+          were predicted; service enable/start must be checked after a real install.
+      when: ansible_check_mode and lab_time_service not in ansible_facts['services']

@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+# One-time bootstrap for a fresh Ubuntu 24.04 amd64 controller.
+# No arguments or --plan: print the plan only. --apply: install on this VM.
+set -euo pipefail
+umask 077
+
+usage() {
+  cat <<'EOF'
+Usage: bash scripts/install-controller.sh [--plan | --apply]
+
+Creates a native Semaphore 2.19.12 / PostgreSQL 16 / Ansible 2.20.8
+controller on a fresh Ubuntu 24.04 amd64 VM. It does not create a VM.
+
+The default is a read-only plan. --apply requires root and refuses existing
+Semaphore, PostgreSQL or /opt/ansible-venv state. It installs software and
+starts services. It creates fresh secrets locally and never prints them.
+Semaphore and PostgreSQL listen on loopback. Target credentials and verified
+SSH host keys must be configured separately before any job can run.
+EOF
+}
+
+mode=${1:---plan}
+[[ $# -le 1 ]] || { usage; exit 2; }
+case "$mode" in
+  --help|-h) usage; exit 0 ;;
+  --plan)
+    usage
+    cat <<'EOF'
+
+Plan:
+  1. Check the fresh Ubuntu VM and architecture.
+  2. Install Python 3.12, Git, SSH client and PostgreSQL 16.
+  3. Create /opt/ansible-venv with pinned ansible-core.
+  4. Create the unprivileged semaphore service account.
+  5. Generate /etc/semaphore/config.json and the initial admin password.
+  6. Create a dedicated PostgreSQL role/database with local SCRAM authentication.
+  7. Download and SHA-256-check the pinned Semaphore Community archive.
+  8. Run schema migrations and create the first admin account.
+  9. Install the restricted systemd service and check loopback readiness.
+EOF
+    exit 0
+    ;;
+  --apply) ;;
+  *) usage; exit 2 ;;
+esac
+
+[[ $(id -u) == 0 ]] || { echo 'Run --apply with sudo on the new controller VM.'; exit 1; }
+source /etc/os-release
+[[ "$ID" == ubuntu && "$VERSION_ID" == 24.04 ]] || { echo 'Requires Ubuntu 24.04.'; exit 1; }
+[[ $(dpkg --print-architecture) == amd64 ]] || { echo 'The pinned binary requires amd64.'; exit 1; }
+[[ -d /run/systemd/system ]] || { echo 'Requires a VM running systemd.'; exit 1; }
+
+for path in /etc/semaphore /opt/ansible-venv /usr/local/bin/semaphore \
+            /var/lib/semaphore /etc/postgresql /var/lib/postgresql \
+            /etc/systemd/system/semaphore.service; do
+  [[ ! -e "$path" && ! -L "$path" ]] || { echo "Existing state: $path. Use the recovery guide, not this fresh installer."; exit 1; }
+done
+if command -v semaphore >/dev/null; then
+  echo 'Semaphore is already on PATH; refusing to replace an existing installation.'
+  exit 1
+fi
+if getent passwd semaphore >/dev/null; then
+  echo 'The semaphore account already exists; refusing to reuse it.'
+  exit 1
+fi
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+repo_dir=$(cd -- "$script_dir/.." && pwd)
+for path in controller_config.py create-database.py create-admin.py check-controller.py; do
+  [[ -f "$script_dir/$path" ]] || { echo "Missing helper: $path"; exit 1; }
+done
+[[ -f "$repo_dir/templates/semaphore.service" ]] || { echo 'Missing service template.'; exit 1; }
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y python3.12 python3.12-venv git curl tar openssh-client postgresql-16 ca-certificates
+python3.12 -m venv /opt/ansible-venv
+/opt/ansible-venv/bin/pip install --disable-pip-version-check 'ansible-core==2.20.8'
+chmod -R go+rX /opt/ansible-venv
+[[ $(cat /var/lib/postgresql/16/main/PG_VERSION) == 16 ]] || { echo 'Expected PostgreSQL 16 main cluster.'; exit 1; }
+
+useradd --system --create-home --home-dir /var/lib/semaphore --shell /usr/sbin/nologin semaphore
+install -d -o root -g semaphore -m 0750 /etc/semaphore
+install -d -o semaphore -g semaphore -m 0700 /var/lib/semaphore /var/lib/semaphore/tmp
+python3.12 "$script_dir/controller_config.py" --directory /etc/semaphore
+chown root:semaphore /etc/semaphore/config.json
+chmod 0640 /etc/semaphore/config.json
+install -o root -g semaphore -m 0640 /dev/null /etc/semaphore/known_hosts
+cat > /etc/semaphore/gitconfig <<'EOF'
+[safe]
+    directory = /opt/ansible-guide.git
+EOF
+chown root:semaphore /etc/semaphore/gitconfig
+chmod 0640 /etc/semaphore/gitconfig
+
+cat > /etc/postgresql/16/main/conf.d/ansible-guide.conf <<'EOF'
+# Settings for the dedicated guide controller only.
+listen_addresses = 'localhost'
+password_encryption = 'scram-sha-256'
+EOF
+chmod 0644 /etc/postgresql/16/main/conf.d/ansible-guide.conf
+# Prepend rules specific to this database and role; retain distribution defaults.
+python3.12 - <<'PY'
+from pathlib import Path
+p=Path('/etc/postgresql/16/main/pg_hba.conf')
+original=p.read_text()
+p.write_text(
+    '# Dedicated Semaphore TCP login\n'
+    'host semaphore semaphore 127.0.0.1/32 scram-sha-256\n'
+    'host semaphore semaphore ::1/128 scram-sha-256\n' + original
+)
+PY
+systemctl enable --now postgresql postgresql@16-main
+systemctl restart postgresql@16-main
+python3.12 "$script_dir/create-database.py"
+
+install -d -m 0700 /var/cache/ansible-semaphore-guide
+cd /var/cache/ansible-semaphore-guide
+archive=semaphore_community_2.19.12_linux_amd64.tar.gz
+digest=2576f8a473c5e91bd0d7833976111c56f0ad43720210f9ca437037d10acd97cc
+curl --fail --location --retry 3 --output "$archive" \
+  "https://github.com/semaphoreui/semaphore/releases/download/v2.19.12/$archive"
+printf '%s  %s\n' "$digest" "$archive" | sha256sum --check --status
+tar -xzf "$archive" semaphore
+install -m 0755 semaphore /usr/local/bin/semaphore
+runuser -u semaphore -- /usr/local/bin/semaphore migrate --config /etc/semaphore/config.json
+python3.12 "$script_dir/create-admin.py"
+install -o root -g root -m 0644 "$repo_dir/templates/semaphore.service" /etc/systemd/system/semaphore.service
+systemctl daemon-reload
+systemctl enable --now semaphore
+
+for attempt in {1..30}; do
+  if curl -fsS -o /dev/null http://127.0.0.1:3000/api/ping; then break; fi
+  sleep 1
+done
+python3.12 "$script_dir/check-controller.py"
+printf '\nController installed. Continue with SSH trust and the Semaphore UI guide.\n'
+printf 'The initial admin password is in /etc/semaphore/initial-admin-password (root only).\n'

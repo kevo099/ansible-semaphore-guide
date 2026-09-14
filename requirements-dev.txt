@@ -1,0 +1,4 @@
+# Use a separate Python 3.12 virtual environment for source validation.
+ansible-core==2.20.8
+ansible-lint==26.8.0
+PyYAML==6.0.3

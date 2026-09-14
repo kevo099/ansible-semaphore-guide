@@ -1,0 +1,15 @@
+# Copy to lab.ini and replace these example hostnames with your target addresses.
+# This file contains no login password, sudo password or private-key material.
+[ubuntu]
+lab-ubuntu ansible_host=ubuntu.example.test
+
+[enterprise_linux]
+lab-alma ansible_host=alma.example.test
+
+[lab:children]
+ubuntu
+enterprise_linux
+
+[lab:vars]
+ansible_user=svc_ansible
+ansible_python_interpreter=/usr/bin/python3

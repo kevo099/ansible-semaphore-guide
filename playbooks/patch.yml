@@ -1,0 +1,95 @@
+---
+- name: Patch one lab machine at a time
+  hosts: lab
+  become: true
+  gather_facts: false
+  serial: 1
+  any_errors_fatal: true
+  vars:
+    allow_reboot: false
+  pre_tasks:
+    - name: Check scope and supported operating system
+      ansible.builtin.import_tasks: tasks/preflight.yml
+      tags: always
+
+    - name: Require a real boolean for reboot approval
+      ansible.builtin.assert:
+        that:
+          - allow_reboot is boolean
+        fail_msg: >-
+          Pass JSON or YAML booleans, for example -e '{"allow_reboot":true}'.
+          The key=value form produces strings and is rejected.
+        quiet: true
+  tasks:
+    - name: Upgrade Ubuntu packages without removals
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+        upgrade: dist
+        fail_on_autoremove: true
+        autoremove: false
+        lock_timeout: 120
+        auto_install_module_deps: false
+      when: ansible_facts['os_family'] == 'Debian'
+
+    - name: Install the EL reboot-check plugin
+      ansible.builtin.dnf:
+        name: dnf-plugins-core
+        state: present
+        lock_timeout: 120
+      when: ansible_facts['os_family'] == 'RedHat'
+
+    # Updating to repository versions is the explicit purpose of this lesson.
+    - name: Upgrade AlmaLinux or RHEL packages # noqa: package-latest
+      ansible.builtin.dnf:
+        name: '*'
+        state: latest
+        update_cache: true
+        lock_timeout: 120
+      when: ansible_facts['os_family'] == 'RedHat'
+
+    - name: Explain what check mode cannot predict
+      ansible.builtin.debug:
+        msg: >-
+          CHECK MODE: package changes above are predictions using available
+          repository metadata. No updates or reboot were applied. The reboot
+          decision is unknown until updates have actually run; it was skipped.
+      when: ansible_check_mode
+
+    - name: Detect and optionally handle a reboot after real patching
+      when: not ansible_check_mode
+      block:
+        - name: Read the Ubuntu reboot marker
+          ansible.builtin.stat:
+            path: /var/run/reboot-required
+          register: lab_reboot_marker
+          when: ansible_facts['os_family'] == 'Debian'
+
+        - name: Ask DNF whether a reboot is required
+          ansible.builtin.command:
+            argv: [dnf, needs-restarting, -r]
+          register: lab_reboot_hint
+          changed_when: false
+          failed_when: lab_reboot_hint.rc not in [0, 1]
+          when: ansible_facts['os_family'] == 'RedHat'
+
+        - name: Record the operating system's reboot advice
+          ansible.builtin.set_fact:
+            lab_reboot_needed: >-
+              {{ (lab_reboot_marker.stat.exists | default(false)) or
+                 ((lab_reboot_hint.rc | default(0)) == 1) }}
+
+        - name: Reboot only when required and explicitly approved
+          ansible.builtin.reboot:
+            reboot_timeout: 900
+            connect_timeout: 10
+            post_reboot_delay: 10
+          when: lab_reboot_needed and allow_reboot
+
+        - name: Report the completed patch result
+          ansible.builtin.debug:
+            msg: >-
+              {{ inventory_hostname }}: updates completed. Reboot
+              {{ 'completed and connection restored' if (lab_reboot_needed and allow_reboot)
+                 else ('required; left for the operator' if lab_reboot_needed
+                 else 'not requested by the operating system') }}.

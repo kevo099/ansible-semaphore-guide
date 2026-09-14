@@ -1,0 +1,26 @@
+# Managed by playbooks/webserver.yml. This file owns the complete lab config.
+user {{ lab_web_user }};
+worker_processes 1;
+pid /run/nginx.pid;
+error_log /var/log/nginx/error.log warn;
+
+events {
+    worker_connections 256;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    access_log off;
+
+    server {
+        listen 127.0.0.1:8080;
+        server_name localhost;
+        root /usr/share/nginx/html;
+        index ansible-lab.html;
+
+        location / {
+            try_files $uri $uri/ =404;
+        }
+    }
+}

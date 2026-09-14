@@ -1,0 +1,3 @@
+---
+lab_time_service: chronyd.service
+lab_web_user: nginx

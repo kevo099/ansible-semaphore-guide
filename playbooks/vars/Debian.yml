@@ -1,0 +1,3 @@
+---
+lab_time_service: chrony.service
+lab_web_user: www-data

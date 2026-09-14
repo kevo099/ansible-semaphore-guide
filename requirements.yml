@@ -1,0 +1,5 @@
+---
+# All five lessons use ansible.builtin. No Galaxy download is needed.
+# If you add a collection later, declare a reviewed version here.
+collections: []
+roles: []

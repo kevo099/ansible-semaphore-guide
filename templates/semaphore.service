@@ -1,0 +1,33 @@
+[Unit]
+Description=Semaphore UI for Ansible practice
+Wants=network-online.target
+After=network-online.target postgresql@16-main.service
+Requires=postgresql@16-main.service
+
+[Service]
+User=semaphore
+Group=semaphore
+WorkingDirectory=/var/lib/semaphore
+Environment=HOME=/var/lib/semaphore
+Environment=PATH=/opt/ansible-venv/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/local/bin/semaphore server --config /etc/semaphore/config.json
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/semaphore
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,3 @@
+# Install in a controller venv with Python 3.12, 3.13, or 3.14.
+# This release supports the Python 3.9 supplied by EL9 targets.
+ansible-core==2.20.8
