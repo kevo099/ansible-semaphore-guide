@@ -10,7 +10,7 @@ the controller**, so you can run the first lessons before choosing a Git host.
 
 ## Goal
 
-Get from a fresh VM to a Semaphore project with eight scoped task templates in
+Get from a fresh VM to a Semaphore project with eleven scoped task templates in
 one reviewed run, and understand what the installer decided for you.
 
 ## What the installer creates
@@ -21,8 +21,8 @@ one reviewed run, and understand what the installer decided for you.
 | Database | PostgreSQL 16 from the AppStream module stream, loopback only, SCRAM login |
 | Application | Semaphore Community 2.19.12, checksum-verified, `127.0.0.1:3000`, hardened `semaphore.service` |
 | Secrets | `/etc/semaphore/config.json`, initial admin password, `svc_ansible` RSA 4096 key pair; all root-only, never printed |
-| Lab folder | `/opt/ansible-lab` owned by you, readable by the service: `ansible.cfg`, the five playbooks, an empty `inventories/lab.ini`, a local Git history |
-| Semaphore objects | Project **Ansible Practice**; keys **None** and **Practice target SSH**; repository **Local lab folder**; inventory **Lab inventory file**; variable groups **Practice defaults** and **Allow required reboot**; templates Ping, Baseline preview, Baseline apply, Users, Webserver, Patch preview, Patch no reboot, Patch allow required reboot |
+| Lab folder | `/opt/ansible-lab` owned by you, readable by the service: `ansible.cfg`, the seven playbooks, the report summarizer, an empty `inventories/lab.ini`, a local Git history |
+| Semaphore objects | Project **Ansible Practice**; keys **None** and **Practice target SSH**; repository **Local lab folder**; inventory **Lab inventory file**; variable groups **Practice defaults** and **Allow required reboot**; eleven templates: Ping, Baseline preview, Baseline apply, Users, Webserver, Patch preview, Patch no reboot, Patch allow required reboot, STIG audit, STIG apply, STIG apply allow reboot |
 
 Every template passes `--limit lab` in its CLI arguments, because the
 playbooks' preflight requires an explicit limit and this release does not turn
@@ -51,7 +51,7 @@ the virtual environment or the lab folder. It is not an upgrade tool.
 
 **Check:** the run ends with the readiness JSON from `check-controller.py`
 reporting `"passed": true`, followed by the seeding summary naming the project,
-the inventory file and eight template identifiers. Then:
+the inventory file and eleven template identifiers. Then:
 
 ```bash
 sudo systemctl is-active postgresql semaphore
@@ -117,6 +117,35 @@ inventory file path, and one host answering with its distribution.
 There is nothing to sync and nothing cached; the file is the truth. The trade
 is that a half-edited file is also the truth, which is the reason the Git
 chapter exists.
+
+## Do: the vendor STIG lessons
+
+Two of the seeded templates wrap the operating-system vendor's own STIG
+tooling, the same commands [chapter 9](09-security-benchmarks.md) walks through
+by hand: the packaged SCAP Security Guide `stig` profile on RHEL and
+AlmaLinux, and the Ubuntu Security Guide `disa_stig` profile on Ubuntu. The
+guide adds no rules of its own.
+
+- **STIG audit (vendor scan only)** installs the scanner where missing, runs
+  the assessment, keeps the XML and HTML on the target under
+  `/var/log/stig-practice/`, fetches them to the controller and prints outcome
+  counts. It changes no policy. Ubuntu needs `usg` already installed through
+  your own Ubuntu Pro attachment; the playbook explains and stops otherwise.
+- **STIG apply (vendor fixes, approval required)** scans, applies the vendor
+  remediation with `oscap --remediate` or `usg fix`, optionally reboots, and
+  scans again. Its Run dialog asks you to confirm that a recovery point for
+  that exact target exists. From the CLI the same gate is
+  `-e '{"stig_confirm": true}'`.
+
+**Check:** after an audit, the task log ends with a JSON summary of pass,
+fail, not-applicable and not-checked counts, and a path under the controller
+home of the service or of your account, depending on where you ran it.
+
+**Concept:** vendor remediation is not gentle. It commonly removes
+passwordless sudo, tightens SSH and changes kernel parameters, and a first
+pass often leaves failing rules that need a reboot or a manual decision. Run
+it only against a disposable target with console access, and add a sudo
+password credential to the inventory afterwards.
 
 ## Do: move to a real repository later
 

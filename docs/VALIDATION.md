@@ -41,6 +41,10 @@ scripts in a single run. Observed on that image:
   release, which is why the seeder uses the argument list.
 - `add-target.sh` added a host only when the scanned key matched the console
   fingerprint, and changed neither file on a mismatch.
+- `stig-audit.yml` was run from the controller's command line against the
+  RHEL controller itself as a disposable local target: the scanner installed,
+  the vendor STIG profile evaluated, the report was fetched and summarized.
+  The Ubuntu path and `stig-apply.yml` were syntax-checked and linted only.
 
 Not established by this: AlmaLinux and Rocky images, RHEL without working
 repositories, a controller restore onto this path, or images newer than the

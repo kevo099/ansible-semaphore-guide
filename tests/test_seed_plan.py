@@ -60,7 +60,10 @@ class SeedPlanTests(unittest.TestCase):
         plan = self.plan()
         reboot_env = IDS["environments"]["Allow required reboot"]
         allowed = [t["name"] for t in plan["templates"] if t["environment_id"] == reboot_env]
-        self.assertEqual(allowed, ["Patch, allow required reboot"])
+        self.assertEqual(allowed, ["Patch, allow required reboot", "STIG apply, allow required reboot"])
+        for template in plan["templates"]:
+            if template["environment_id"] == reboot_env:
+                self.assertIn("allow required reboot", template["name"].lower())
         self.assertEqual(json.loads(plan["environments"]["Allow required reboot"]["json"]), {"allow_reboot": True})
         self.assertEqual(json.loads(plan["environments"]["Practice defaults"]["json"]), {})
 
@@ -68,6 +71,15 @@ class SeedPlanTests(unittest.TestCase):
         self.assertEqual(seed.parse_body(b"pong"), "pong")
         self.assertEqual(seed.parse_body(b'{"id": 3}'), {"id": 3})
         self.assertIsNone(seed.parse_body(b""))
+
+    def test_stig_apply_templates_prompt_for_a_recovery_point(self):
+        for template in self.plan()["templates"]:
+            if template["playbook"].endswith("stig-apply.yml"):
+                self.assertEqual(template["survey_vars"][0]["name"], "recovery_snapshot_ack")
+                self.assertTrue(template["survey_vars"][0]["required"])
+                self.assertEqual(template["survey_vars"][0]["values"][0]["value"], "SNAPSHOT READY")
+            else:
+                self.assertEqual(template["survey_vars"], [])
 
     def test_plan_carries_no_private_key_material(self):
         self.assertNotIn("PRIVATE", json.dumps(self.plan()))

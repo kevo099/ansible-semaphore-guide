@@ -54,9 +54,10 @@ Plan:
   8. Run schema migrations and create the first admin account.
   9. Install the restricted systemd service and check loopback readiness.
  10. Generate the svc_ansible automation key pair (public key is printed as a path).
- 11. Copy the guide playbooks into the local lab folder with an empty inventory.
+ 11. Copy the guide playbooks, including the vendor STIG lessons, and the report
+     summarizer into the local lab folder with an empty inventory.
  12. Seed Semaphore through its API: project, keys, local folder repository,
-     file inventory, variable groups and one task template per lesson.
+     file inventory, variable groups and eleven scoped task templates.
 PLAN
   exit 0
 fi
@@ -177,6 +178,8 @@ chmod 0644 /etc/semaphore/svc_ansible.pub
 install -d -o "$editor" -g semaphore -m 2750 "$lab_dir" "$lab_dir/inventories"
 cp -r "$repo_dir/playbooks" "$lab_dir/playbooks"
 install -o "$editor" -g semaphore -m 0640 "$repo_dir/ansible.cfg" "$lab_dir/ansible.cfg"
+install -d -o "$editor" -g semaphore -m 2750 "$lab_dir/scripts"
+install -o "$editor" -g semaphore -m 0640 "$repo_dir/scripts/summarize_xccdf.py" "$lab_dir/scripts/summarize_xccdf.py"
 cat > "$lab_dir/inventories/lab.ini" <<'INVENTORY'
 # Local lab inventory read by Semaphore at every run. Add one line per target
 # under the matching group, for example:

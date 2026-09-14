@@ -3,8 +3,8 @@
 
 Runs on the controller as root after the installer. It logs in with the
 locally generated admin password, creates one project and its dependent
-objects through the HTTP API on loopback, and prints only names and numeric
-identifiers. It refuses to run twice.
+objects through the HTTP API on loopback, including the vendor STIG lessons,
+and prints only names and numeric identifiers. It refuses to run twice.
 """
 
 import argparse
@@ -19,16 +19,28 @@ import urllib.request
 API = "http://127.0.0.1:3000/api"
 MARKER = Path("/etc/semaphore/.practice-project-seeded")
 
+RECOVERY_PROMPT = [{
+    "name": "recovery_snapshot_ack",
+    "title": "Selected target recovery point",
+    "description": "Snapshot or back up this exact target first. Vendor STIG remediation changes SSH, sudo, kernel and login policy.",
+    "type": "enum",
+    "required": True,
+    "values": [{"name": "SNAPSHOT READY - apply the vendor STIG fixes to this target", "value": "SNAPSHOT READY"}],
+}]
+
 LESSONS = [
-    # name, playbook, extra arguments, variable group
-    ("Ping", "playbooks/ping.yml", [], "Practice defaults"),
-    ("Baseline preview", "playbooks/baseline.yml", ["--check", "--diff"], "Practice defaults"),
-    ("Baseline apply", "playbooks/baseline.yml", ["--diff"], "Practice defaults"),
-    ("Users", "playbooks/users.yml", [], "Practice defaults"),
-    ("Webserver", "playbooks/webserver.yml", [], "Practice defaults"),
-    ("Patch preview", "playbooks/patch.yml", ["--check", "--diff"], "Practice defaults"),
-    ("Patch, no reboot", "playbooks/patch.yml", [], "Practice defaults"),
-    ("Patch, allow required reboot", "playbooks/patch.yml", [], "Allow required reboot"),
+    # name, playbook, extra arguments, variable group, run prompt
+    ("Ping", "playbooks/ping.yml", [], "Practice defaults", []),
+    ("Baseline preview", "playbooks/baseline.yml", ["--check", "--diff"], "Practice defaults", []),
+    ("Baseline apply", "playbooks/baseline.yml", ["--diff"], "Practice defaults", []),
+    ("Users", "playbooks/users.yml", [], "Practice defaults", []),
+    ("Webserver", "playbooks/webserver.yml", [], "Practice defaults", []),
+    ("Patch preview", "playbooks/patch.yml", ["--check", "--diff"], "Practice defaults", []),
+    ("Patch, no reboot", "playbooks/patch.yml", [], "Practice defaults", []),
+    ("Patch, allow required reboot", "playbooks/patch.yml", [], "Allow required reboot", []),
+    ("STIG audit (vendor scan only)", "playbooks/stig-audit.yml", [], "Practice defaults", []),
+    ("STIG apply (vendor fixes, approval required)", "playbooks/stig-apply.yml", [], "Practice defaults", RECOVERY_PROMPT),
+    ("STIG apply, allow required reboot", "playbooks/stig-apply.yml", [], "Allow required reboot", RECOVERY_PROMPT),
 ]
 
 VARIABLE_GROUPS = {
@@ -46,7 +58,7 @@ def lab_dir_path(value):
 
 
 def template_payload(project_id, ids, lesson):
-    name, playbook, extra_args, group = lesson
+    name, playbook, extra_args, group, prompt = lesson
     return {
         "project_id": project_id,
         "name": name,
@@ -63,6 +75,7 @@ def template_payload(project_id, ids, lesson):
         "description": "Seeded by the guide; runs from the local lab folder.",
         "allow_override_args_in_task": False,
         "suppress_success_alerts": False,
+        "survey_vars": prompt,
     }
 
 

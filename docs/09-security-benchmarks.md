@@ -12,6 +12,12 @@ tools baseline between experiments. Leave the Ansible/Semaphore controller
 available as a recovery and execution platform. The five starter lessons do
 not apply CIS or STIG hardening.
 
+The seeded Enterprise Linux controller ships the same vendor assessments as
+two playbooks, [`stig-audit.yml`](../playbooks/stig-audit.yml) and
+[`stig-apply.yml`](../playbooks/stig-apply.yml); see
+[their description](03-controller-el9.md#do-the-vendor-stig-lessons). Read this
+chapter first so you know what those commands do.
+
 ## Choose the question you are testing
 
 | Choice | What it means |
