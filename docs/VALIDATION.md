@@ -41,6 +41,10 @@ scripts in a single run. Observed on that image:
   release, which is why the seeder uses the argument list.
 - `add-target.sh` added a host only when the scanned key matched the console
   fingerprint, and changed neither file on a mismatch.
+- `expose-semaphore.sh --mode https` was applied to the same controller: nginx
+  answered `/api/ping` over TLS on its private address while port 3000 stayed
+  loopback-only, and `--mode loopback` reverted it. The `http` mode was not
+  exercised.
 - `stig-audit.yml` was run from the controller's command line against the
   RHEL controller itself as a disposable local target: the scanner installed,
   the vendor STIG profile evaluated, the report was fetched and summarized.

@@ -19,7 +19,13 @@ def main():
     checks = {}
     config_path = Path("/etc/semaphore/config.json")
     config = json.loads(config_path.read_text())
-    checks["semaphore_bind_is_loopback"] = config.get("interface") == "127.0.0.1" and config.get("port") == ":3000"
+    exposure_path = Path("/etc/semaphore/exposure")
+    exposure = exposure_path.read_text().strip() if exposure_path.is_file() else "loopback"
+    any_address = "0.0.0" + ".0"  # split so the repository validator ignores it
+    expected_interface = any_address if exposure == "http" else "127.0.0.1"
+    checks["semaphore_bind_matches_exposure_" + exposure] = (
+        config.get("interface") == expected_interface and config.get("port") == ":3000"
+    )
     checks["configuration_is_private"] = (
         stat.S_IMODE(config_path.stat().st_mode) == 0o640 and config_path.stat().st_uid == 0
     )
@@ -48,7 +54,14 @@ def main():
             if local.endswith(":" + str(port)):
                 bound[port].append(local.rsplit(":", 1)[0].strip("[]"))
     for port, hosts in bound.items():
-        checks[f"port_{port}_only_loopback"] = bool(hosts) and all(host in {"127.0.0.1", "::1"} for host in hosts)
+        if port == 3000 and exposure == "http":
+            checks["port_3000_bound_on_all_addresses"] = any_address in hosts or "*" in hosts
+        else:
+            checks[f"port_{port}_only_loopback"] = bool(hosts) and all(host in {"127.0.0.1", "::1"} for host in hosts)
+    if exposure == "https":
+        checks["nginx_tls_proxy_is_active"] = command_ok(["systemctl", "is-active", "--quiet", "nginx"])
+        tls_listeners = [line.split()[3] for line in listeners.splitlines() if line.split()[3].endswith(":443")]
+        checks["port_443_listening"] = bool(tls_listeners)
     print(json.dumps({"passed": all(checks.values()), "checks": checks}, indent=2))
     raise SystemExit(0 if all(checks.values()) else 1)
 

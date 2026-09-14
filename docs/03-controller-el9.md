@@ -83,6 +83,32 @@ Browse to `http://127.0.0.1:8088/`, log in as `admin` with the password from
 **Check:** the **Ansible Practice** project is present with the objects listed
 above. The Key Store shows the SSH key by name only.
 
+## Do: reach the UI on the VM's address instead of a tunnel
+
+The default keeps Semaphore on loopback for SSH tunnels. When the VM sits on
+its own, with no VPN or jump host, publish the UI on its address:
+
+```bash
+sudo bash scripts/expose-semaphore.sh --mode https
+```
+
+Or pass `--expose https` to the installer to do it in the same run. This
+installs nginx with a locally generated self-signed certificate on port 443,
+proxies to the still loopback-only Semaphore, opens 443 in the host firewall
+and prints the certificate's SHA-256 fingerprint. Compare that fingerprint
+with the browser's warning the first time, then continue to
+`https://VM_ADDRESS/`. `--mode http` instead binds Semaphore itself to every
+address on port 3000 in plain text; use it only on a network you fully
+control. `--mode loopback` reverts either choice.
+
+**Check:** from another machine, `curl -k https://VM_ADDRESS/api/ping` prints
+`pong`, while `curl http://VM_ADDRESS:3000/` is refused. `check-controller.py`
+reports the exposure it found.
+
+**Concept:** the script changes the host, not the cloud. Allow port 443 in the
+VM's network security group or equivalent only from your own address; an
+admin login page open to the internet is the mistake this design avoids.
+
 ## Do: add a target without leaving the terminal
 
 The inventory Semaphore reads is a file: `/opt/ansible-lab/inventories/lab.ini`.

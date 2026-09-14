@@ -6,7 +6,7 @@ umask 077
 
 usage() {
   cat <<'USAGE'
-Usage: sudo bash scripts/install-controller-el9.sh [--plan | --apply [--editor USER] [--lab-dir DIR]]
+Usage: sudo bash scripts/install-controller-el9.sh [--plan | --apply [--editor USER] [--lab-dir DIR] [--expose https|http]]
 
 Creates a native Semaphore 2.19.12 / PostgreSQL 16 / Ansible 2.20.8 controller
 on a fresh Enterprise Linux 9 x86_64 VM, then seeds Semaphore with a project
@@ -15,6 +15,9 @@ create VMs or targets.
 
   --editor USER   Owner of the local lab folder (default: the sudo caller).
   --lab-dir DIR   Absolute path of the local lab folder (default: /opt/ansible-lab).
+  --expose MODE   Also make the UI reachable on this VM's address: https (nginx TLS on
+                  port 443, recommended) or http (plain text on port 3000). Default: the UI
+                  stays loopback-only for SSH tunnels; scripts/expose-semaphore.sh can change it later.
 
 The default is a read-only plan. --apply requires root and refuses existing
 Semaphore, PostgreSQL, lab-folder or /opt/ansible-venv state. It installs
@@ -28,12 +31,14 @@ USAGE
 mode=--plan
 editor="${SUDO_USER:-}"
 lab_dir=/opt/ansible-lab
+expose=
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --help|-h) usage; exit 0 ;;
     --plan|--apply) mode="$1" ;;
     --editor) [[ $# -ge 2 ]] || { usage; exit 2; }; editor="$2"; shift ;;
     --lab-dir) [[ $# -ge 2 ]] || { usage; exit 2; }; lab_dir="$2"; shift ;;
+    --expose) [[ $# -ge 2 && ( "$2" == https || "$2" == http ) ]] || { usage; exit 2; }; expose="$2"; shift ;;
     *) usage; exit 2 ;;
   esac
   shift
@@ -58,6 +63,7 @@ Plan:
      summarizer into the local lab folder with an empty inventory.
  12. Seed Semaphore through its API: project, keys, local folder repository,
      file inventory, variable groups and eleven scoped task templates.
+ 13. With --expose, publish the UI on this VM's address (TLS proxy or plain HTTP).
 PLAN
   exit 0
 fi
@@ -92,7 +98,7 @@ fi
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo_dir=$(cd -- "$script_dir/.." && pwd)
-for path in controller_config.py create-database.py create-admin.py check-controller.py seed-semaphore.py; do
+for path in controller_config.py create-database.py create-admin.py check-controller.py seed-semaphore.py expose-semaphore.sh; do
   [[ -f "$script_dir/$path" ]] || { echo "Missing helper: $path"; exit 1; }
 done
 [[ -f "$repo_dir/templates/semaphore-el9.service" ]] || { echo 'Missing service template.'; exit 1; }
@@ -212,6 +218,12 @@ restorecon -RF "$lab_dir"
 # 12. Seed Semaphore through its API
 python3.12 "$script_dir/seed-semaphore.py" --lab-dir "$lab_dir" \
   --key-file /etc/semaphore/svc_ansible --known-hosts /etc/semaphore/known_hosts
+
+# 13. Optional network exposure
+if [[ -n "$expose" ]]; then
+  bash "$script_dir/expose-semaphore.sh" --mode "$expose"
+  python3.12 "$script_dir/check-controller.py"
+fi
 
 printf '\nController installed and seeded. Next: authorize the automation key on each target\n'
 printf 'and add each target with its verified host key (scripts/add-target.sh).\n'
