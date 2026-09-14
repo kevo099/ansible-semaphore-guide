@@ -38,6 +38,7 @@ it does not replace the playbooks.
 | 1 | [Design and prerequisites](docs/01-design.md) | Choose resources, networks and account boundaries. |
 | 2 | [Create the VMs](docs/02-create-vms.md) | Build a controller and two fresh targets. |
 | 3 | [Install the controller](docs/03-controller.md) | Install natively, manually or with the reviewed installer. |
+| 3b | [Enterprise Linux 9 seeded controller](docs/03-controller-el9.md) | Alternative: one run installs and seeds a local-folder practice project on RHEL, Alma or Rocky 9. |
 | 4 | [SSH, sudo and target bootstrap](docs/04-access.md) | Establish verified, key-based automation access. |
 | 5 | [Command-line Ansible lessons](docs/05-cli-lessons.md) | Preview, apply, repeat and inspect five playbooks. |
 | 6 | [Configure Semaphore](docs/06-semaphore.md) | Run the same lessons from named task templates. |
@@ -63,6 +64,9 @@ before proceeding to the next layer.
 | [`playbooks/webserver.yml`](playbooks/webserver.yml) | Deploys a templated nginx page on target loopback port 8080. |
 | [`playbooks/patch.yml`](playbooks/patch.yml) | Updates one target at a time; reboot defaults to disabled. |
 | [`scripts/install-controller.sh`](scripts/install-controller.sh) | Shows a plan by default; `--apply` bootstraps a fresh Ubuntu controller. |
+| [`scripts/install-controller-el9.sh`](scripts/install-controller-el9.sh) | Same contract for RHEL, AlmaLinux or Rocky 9; also seeds a local-folder practice project through the API. |
+| [`scripts/seed-semaphore.py`](scripts/seed-semaphore.py) | Creates the practice project, keys, local repository, file inventory and templates on loopback; prints names and ids only. |
+| [`scripts/add-target.sh`](scripts/add-target.sh) | Adds a host to the local inventory only when its scanned host key matches the fingerprint you read from its console. |
 | [`scripts/check-controller.py`](scripts/check-controller.py) | Checks controller services, permissions and loopback listeners without printing credentials. |
 | [`scripts/validate.py`](scripts/validate.py) | Checks repository links, examples and publication boundaries locally. |
 
@@ -75,11 +79,11 @@ accounts. Read each playbook before running it.
 
 | Component | Guide baseline |
 | --- | --- |
-| Native controller | Ubuntu Server 24.04 LTS, amd64 |
+| Native controller | Ubuntu Server 24.04 LTS, amd64; alternative Enterprise Linux 9 x86_64 path |
 | Controller Python | 3.12 in the operating system; separate Ansible virtual environment |
 | Ansible Core | 2.20.8 |
 | Semaphore UI | Community 2.19.12, checksum-verified native binary |
-| Database | PostgreSQL 16 from Ubuntu repositories |
+| Database | PostgreSQL 16 from Ubuntu repositories or the EL9 `postgresql:16` module stream |
 | Main practice targets | Ubuntu 24.04 and AlmaLinux 9 |
 | Optional vendor target | Registered RHEL 9 |
 

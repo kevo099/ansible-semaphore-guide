@@ -25,7 +25,10 @@ def main():
     )
     checks["semaphore_is_active"] = command_ok(["systemctl", "is-active", "--quiet", "semaphore"])
     checks["semaphore_is_enabled"] = command_ok(["systemctl", "is-enabled", "--quiet", "semaphore"])
-    checks["postgresql_is_active"] = command_ok(["systemctl", "is-active", "--quiet", "postgresql@16-main"])
+    # Ubuntu names the cluster unit postgresql@16-main; Enterprise Linux uses postgresql.
+    checks["postgresql_is_active"] = any(
+        command_ok(["systemctl", "is-active", "--quiet", unit]) for unit in ("postgresql@16-main", "postgresql")
+    )
     checks["ansible_is_available"] = command_ok(["/opt/ansible-venv/bin/ansible", "--version"])
     checks["strict_target_host_verification"] = (
         config.get("env_vars", {}).get("ANSIBLE_HOST_KEY_CHECKING") == "True"

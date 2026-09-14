@@ -12,6 +12,10 @@ application access and locally generated credentials.
 
 ## Choose one installation path
 
+On RHEL, AlmaLinux or Rocky Linux 9, use the
+[Enterprise Linux installer](03-controller-el9.md) instead; it also seeds a
+local-folder practice project.
+
 - **Manual path:** follow the numbered sections below to see what each layer does.
 - **Installer path:** read the script, view its plan, then apply it on the fresh VM.
 

@@ -21,6 +21,32 @@ results. Optional Azure, high-availability and independently stored backup
 designs require their own qualification. Vendor hardening results depend on
 the exact image, packages, profile, tailoring and external prerequisites.
 
+## Enterprise Linux 9 installer: what was exercised
+
+The `install-controller-el9.sh` path was applied to a fresh RHEL 9.8 x86_64
+cloud VM with vendor repositories available, twice: once while the seeding
+helper was being corrected, then once more from a new image with the final
+scripts in a single run. Observed on that image:
+
+- The installer completed the runtime, database, application, service account,
+  key pair, lab folder and API seeding without manual steps; the readiness
+  check reported every item true, both listeners loopback-only and SELinux
+  enforcing.
+- A task started from the seeded **Ping** template ran from the local lab
+  folder, read the file inventory, passed the playbooks' scope guard because
+  the seeded templates pass `--limit lab` as a CLI argument, accepted the
+  target's host key under strict checking, and stopped at the target with
+  `Permission denied (publickey)` until the automation key was authorized
+  there. The template `limit` field alone did not produce `--limit` on this
+  release, which is why the seeder uses the argument list.
+- `add-target.sh` added a host only when the scanned key matched the console
+  fingerprint, and changed neither file on a mismatch.
+
+Not established by this: AlmaLinux and Rocky images, RHEL without working
+repositories, a controller restore onto this path, or images newer than the
+one tested. Vendor cloud images may also carry pending updates; the installer
+does not reboot.
+
 ## Repeat the offline checks
 
 **Where: your development working copy.** These checks parse source and run
@@ -44,8 +70,10 @@ local links and selected publication boundaries. It reports rule names and file
 locations without echoing a detected credential. It is deliberately conservative
 about real addresses, account identifiers and private runtime files.
 
-The eight unit tests cover unique locally generated secrets, refusing file
-overwrite/symlinks, and XCCDF assessments containing repeated rules, multiple
+The unit tests cover unique locally generated secrets, refusing file
+overwrite/symlinks, the Semaphore seeding plan (local repository, file
+inventory, scoped templates, preview-only arguments, no key material), and
+XCCDF assessments containing repeated rules, multiple
 results, missing results or scanner errors. A parsed assessment can contain
 failed controls; the parser never turns successful parsing into a compliance
 claim.
