@@ -36,7 +36,11 @@ if grep -qE "^[[:space:]]*$name([[:space:]]|$)" "$inventory"; then
   echo "Inventory already contains $name; edit it by hand instead."; exit 1
 fi
 if ssh-keygen -F "$address" -f "$known_hosts" >/dev/null; then
-  echo "Known-hosts already contains $address; verify and remove the old entry before re-adding."; exit 1
+  echo "Known-hosts already contains $address. After verifying why its key changed, remove the old"
+  echo "entry and give the rewritten file back to the service before re-adding:"
+  echo "  sudo ssh-keygen -R $address -f $known_hosts"
+  echo "  sudo chown root:semaphore $known_hosts && sudo chmod 0640 $known_hosts"
+  exit 1
 fi
 
 scan=$(mktemp)

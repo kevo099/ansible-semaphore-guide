@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Read-only readiness checks. Reports booleans and versions, never credentials."""
 
+import grp
 import json
 import os
 from pathlib import Path
@@ -28,6 +29,12 @@ def main():
     )
     checks["configuration_is_private"] = (
         stat.S_IMODE(config_path.stat().st_mode) == 0o640 and config_path.stat().st_uid == 0
+    )
+    # Tools that rewrite this file, such as ssh-keygen -R, can leave it root:root,
+    # after which every job fails host verification.
+    known_hosts = Path("/etc/semaphore/known_hosts").stat()
+    checks["service_can_read_known_hosts"] = (
+        known_hosts.st_gid == grp.getgrnam("semaphore").gr_gid and bool(known_hosts.st_mode & stat.S_IRGRP)
     )
     checks["semaphore_is_active"] = command_ok(["systemctl", "is-active", "--quiet", "semaphore"])
     checks["semaphore_is_enabled"] = command_ok(["systemctl", "is-enabled", "--quiet", "semaphore"])

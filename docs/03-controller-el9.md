@@ -145,7 +145,23 @@ scanned fingerprints so you can investigate.
 
 Authorize the automation key on the target for `svc_ansible` as described in
 [the access chapter](04-access.md), using `/etc/semaphore/svc_ansible.pub`
-instead of a key generated in your home directory.
+instead of a key generated in your home directory. Reinstalling the controller
+creates a new key pair, so authorize the new public key again.
+
+A rebuilt or restored target at the same address presents new host keys, and
+the helper refuses an address it already trusts. After confirming why the key
+changed, remove the old entry and the inventory line, then add the host again:
+
+```bash
+sudo ssh-keygen -R alma.example.test -f /etc/semaphore/known_hosts
+sudo chown root:semaphore /etc/semaphore/known_hosts
+sudo chmod 0640 /etc/semaphore/known_hosts
+sed -i '/^lab-alma /d' /opt/ansible-lab/inventories/lab.ini
+```
+
+`ssh-keygen -R` rewrites the file as `root:root`; without the `chown`, the
+service can no longer read it and every job fails host verification.
+`check-controller.py` reports this as `service_can_read_known_hosts`.
 
 **Check:** run the **Ping** template. The task log shows no clone step, its
 paths are under `/opt/ansible-lab`, and each host answers with its
