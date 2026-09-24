@@ -250,7 +250,7 @@ home of the service or of your account, depending on where you ran it.
 **Concept:** vendor remediation is not gentle. It commonly removes
 passwordless sudo, tightens SSH and changes kernel parameters, and a first
 pass often leaves failing rules that need a reboot or a manual decision. On
-AlmaLinux 9 it sets the `FIPS:STIG` crypto policy: the target then offers only
+AlmaLinux 9 and RHEL 9 it sets the `FIPS:STIG` crypto policy: the target then offers only
 RSA and ECDSA host keys and refuses Ed25519 user keys, including an
 administrator's everyday Ed25519 key. The guide's RSA host-key pin and RSA 4096
 automation key keep working. The policy alone does not enable FIPS mode; see
