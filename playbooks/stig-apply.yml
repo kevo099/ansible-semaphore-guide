@@ -17,6 +17,20 @@
     stig_remote_dir: "/var/log/stig-practice/{{ stig_stamp }}"
     stig_fetch_dir: "{{ lookup('env', 'HOME') }}/stig-reports/{{ stig_stamp }}"
   pre_tasks:
+    # The recovery prompt names one exact target, so the run must select exactly one.
+    # This check runs on the controller before any connection is made.
+    - name: Change exactly one approved target per run
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+        fail_msg: >-
+          STIG remediation changes one approved target at a time. This run selects
+          {{ ansible_play_hosts_all | length }} hosts
+          ({{ ansible_play_hosts_all | join(', ') }}). Limit it to a single host,
+          for example --limit lab-alma, or enter that host in the Semaphore Limit prompt.
+        quiet: true
+      tags: always
+
     - name: Check scope and supported operating system
       ansible.builtin.import_tasks: tasks/preflight.yml
       tags: always

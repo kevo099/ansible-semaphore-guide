@@ -63,8 +63,8 @@ before proceeding to the next layer.
 | [`playbooks/users.yml`](playbooks/users.yml) | Creates reserved, ordinary practice accounts. |
 | [`playbooks/webserver.yml`](playbooks/webserver.yml) | Deploys a templated nginx page on target loopback port 8080. |
 | [`playbooks/patch.yml`](playbooks/patch.yml) | Updates one target at a time; reboot defaults to disabled. |
-| [`playbooks/stig-audit.yml`](playbooks/stig-audit.yml) | Scans one target with the OS vendor's STIG content (SCAP Security Guide or Ubuntu Security Guide) and fetches the report; changes no policy. |
-| [`playbooks/stig-apply.yml`](playbooks/stig-apply.yml) | Applies the vendor's own STIG remediation after an explicit recovery-point approval, with before and after scans. |
+| [`playbooks/stig-audit.yml`](playbooks/stig-audit.yml) | Scans each selected target with the OS vendor's STIG content (SCAP Security Guide or Ubuntu Security Guide) and fetches the report; changes no policy. |
+| [`playbooks/stig-apply.yml`](playbooks/stig-apply.yml) | Applies the vendor's own STIG remediation to exactly one target per run after an explicit recovery-point approval, with before and after scans. |
 | [`scripts/install-controller.sh`](scripts/install-controller.sh) | Shows a plan by default; `--apply` bootstraps a fresh Ubuntu controller. |
 | [`scripts/install-controller-el9.sh`](scripts/install-controller-el9.sh) | Same contract for RHEL, AlmaLinux or Rocky 9; also seeds a local-folder practice project through the API. |
 | [`scripts/seed-semaphore.py`](scripts/seed-semaphore.py) | Creates the practice project, keys, local repository, file inventory and templates on loopback; prints names and ids only. |

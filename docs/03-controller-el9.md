@@ -24,10 +24,11 @@ one reviewed run, and understand what the installer decided for you.
 | Lab folder | `/opt/ansible-lab` owned by you, readable by the service: `ansible.cfg`, the seven playbooks, the report summarizer, an empty `inventories/lab.ini`, a local Git history |
 | Semaphore objects | Project **Ansible Practice**; keys **None** and **Practice target SSH**; repository **Local lab folder**; inventory **Lab inventory file**; variable groups **Practice defaults** and **Allow required reboot**; eleven templates: Ping, Baseline preview, Baseline apply, Users, Webserver, Patch preview, Patch no reboot, Patch allow required reboot, STIG audit, STIG apply, STIG apply allow reboot |
 
-Every template passes `--limit lab` in its CLI arguments, because the
-playbooks' preflight requires an explicit limit and this release does not turn
-the template's separate limit field into one. The two preview templates add
-`--check --diff`. Only the last patch template receives `allow_reboot: true`.
+Every lesson template sets its **Ansible options → Limit** to `lab`, the
+explicit limit the playbooks' preflight requires. The two STIG apply templates
+have no default limit: their Run dialog asks for exactly one host. The two
+preview templates add `--check --diff` as CLI arguments. Only the templates
+whose names end in “allow required reboot” receive `allow_reboot: true`.
 
 ## Do: plan, read, apply
 
@@ -136,13 +137,62 @@ Authorize the automation key on the target for `svc_ansible` as described in
 [the access chapter](04-access.md), using `/etc/semaphore/svc_ansible.pub`
 instead of a key generated in your home directory.
 
-**Check:** run the **Ping** template. The task log shows no clone step, the
-inventory file path, and one host answering with its distribution.
+**Check:** run the **Ping** template. The task log shows no clone step, its
+paths are under `/opt/ansible-lab`, and each host answers with its
+distribution.
 
 **Concept:** a file inventory tied to a local repository is read at run time.
 There is nothing to sync and nothing cached; the file is the truth. The trade
 is that a half-edited file is also the truth, which is the reason the Git
 chapter exists.
+
+## Do: give the templates the targets' sudo password
+
+The access chapter gives `svc_ansible` password-backed sudo. The seeded
+inventory has no sudo credential, so until you add one, every template that
+uses `become` (all but Ping) stops with `Missing sudo password`. Choose one of
+these two ways.
+
+**One sudo password for the practice targets.** Give `svc_ansible` the same
+sudo password on every target in this seeded project. In **Key Store → New
+Key**, create **Lab sudo** of type **Login with password**, leave **Username**
+empty and enter that password. Then open **Inventory → Lab inventory file** and
+select **Lab sudo** as **Sudo Credentials**. Leave the Username empty: Semaphore
+passes it to Ansible as `--become-user`, so `svc_ansible` there would make every
+privileged task run as `svc_ansible` instead of root. One inventory holds one
+sudo credential, which is why this option needs the shared password.
+
+**A different sudo password per target.** Keep the access chapter's unique
+passwords and store each one as an encrypted host variable in the lab folder:
+
+```bash
+cd /opt/ansible-lab
+mkdir -p inventories/host_vars
+/opt/ansible-venv/bin/ansible-vault create inventories/host_vars/lab-ubuntu.yml
+/opt/ansible-venv/bin/ansible-vault create inventories/host_vars/lab-alma.yml
+sudo chgrp semaphore inventories/host_vars/*.yml
+chmod 0640 inventories/host_vars/*.yml
+```
+
+Use the same Vault password for both files. Inside each editor, enter one line,
+`ansible_become_password: "..."`, with that target's sudo password. Then
+create a Key Store entry **Lab vault password** of type **Login with password**,
+Username empty, containing the Vault password, and add it to every template
+under **Ansible options → Vaults**, Ping included, because Ansible reads all
+host variables. Encrypted files are still secrets: keep this folder's Git
+history on the controller or in your own private repository.
+
+**Check:** `find /opt/ansible-lab ! -group semaphore` prints nothing, then
+**Baseline apply** changes both targets and an immediate repeat reports
+`changed=0`.
+
+**Concept:** the service reads the lab folder through the `semaphore` group,
+which your account is deliberately not a member of, because that group can
+also read the controller's secrets. New files and folders inherit the group
+from the setgid folders, so create folders with plain `mkdir` rather than
+`mkdir -m` or `install -d -m`, which can drop the setgid bit. Tools that write
+private files, such as `ansible-vault create`, need the `chgrp` and `chmod`
+shown above before Semaphore can read them.
 
 ## Do: the vendor STIG lessons
 
@@ -156,12 +206,16 @@ guide adds no rules of its own.
   the assessment, keeps the XML and HTML on the target under
   `/var/log/stig-practice/`, fetches them to the controller and prints outcome
   counts. It changes no policy. Ubuntu needs `usg` already installed through
-  your own Ubuntu Pro attachment; the playbook explains and stops otherwise.
+  your own Ubuntu Pro attachment. Without it, that host fails with an
+  explanation while the other hosts' scans still complete, so the task is
+  marked failed but the AlmaLinux or RHEL results are in the same log.
 - **STIG apply (vendor fixes, approval required)** scans, applies the vendor
   remediation with `oscap --remediate` or `usg fix`, optionally reboots, and
-  scans again. Its Run dialog asks you to confirm that a recovery point for
-  that exact target exists. From the CLI the same gate is
-  `-e '{"stig_confirm": true}'`.
+  scans again. It changes exactly one target per run: its Run dialog asks for
+  that host in **Limit**, for example `lab-alma`, and for confirmation that a
+  recovery point for it exists. A run selecting more than one host is refused
+  before any connection. From the CLI the same gates are `--limit lab-alma`
+  and `-e '{"stig_confirm": true}'`.
 
 **Check:** after an audit, the task log ends with a JSON summary of pass,
 fail, not-applicable and not-checked counts, and a path under the controller

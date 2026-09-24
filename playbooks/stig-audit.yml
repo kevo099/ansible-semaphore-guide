@@ -1,10 +1,10 @@
 ---
-- name: Assess one lab machine against its vendor STIG profile (scan only)
+# Read-only, so each host's result stands on its own: a host that is missing its
+# vendor scanner fails with an explanation without stopping the other hosts' scans.
+- name: Assess lab machines against their vendor STIG profile (scan only)
   hosts: lab
   become: true
   gather_facts: false
-  serial: 1
-  any_errors_fatal: true
   vars:
     stig_phase: audit
     stig_profile_el: xccdf_org.ssgproject.content_profile_stig

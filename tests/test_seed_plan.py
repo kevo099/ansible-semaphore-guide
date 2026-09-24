@@ -46,10 +46,20 @@ class SeedPlanTests(unittest.TestCase):
         self.assertEqual(len(plan["templates"]), len(seed.LESSONS))
         for template in plan["templates"]:
             arguments = json.loads(template["arguments"])
-            self.assertEqual(arguments[:2], ["--limit", "lab"])
+            # The limit lives in the template's Ansible options, never duplicated as an argument.
+            self.assertNotIn("--limit", " ".join(arguments))
+            if template["playbook"].endswith("stig-apply.yml"):
+                self.assertEqual(template["task_params"], {"limit": [], "allow_override_limit": True})
+            else:
+                self.assertEqual(template["task_params"], {"limit": ["lab"]})
             self.assertEqual(template["app"], "ansible")
             self.assertIn(Path(template["playbook"]).name, playbooks)
             self.assertIn(template["environment_id"], IDS["environments"].values())
+
+    def test_templates_do_not_share_mutable_options(self):
+        plan = self.plan()
+        plan["templates"][0]["task_params"]["limit"].append("changed")
+        self.assertEqual(self.plan()["templates"][0]["task_params"], {"limit": ["lab"]})
 
     def test_preview_templates_never_change_targets(self):
         for template in self.plan()["templates"]:

@@ -8,6 +8,7 @@ and prints only names and numeric identifiers. It refuses to run twice.
 """
 
 import argparse
+import copy
 import http.cookiejar
 import json
 from pathlib import Path
@@ -28,19 +29,27 @@ RECOVERY_PROMPT = [{
     "values": [{"name": "SNAPSHOT READY - apply the vendor STIG fixes to this target", "value": "SNAPSHOT READY"}],
 }]
 
+# Ansible options for each template. The playbooks' preflight requires an explicit
+# limit; this release passes the template's Limit option to ansible-playbook as --limit.
+ALL_LAB_TARGETS = {"limit": ["lab"]}
+# STIG apply changes one approved target per run, so its Run dialog asks for the host.
+ONE_TARGET_PER_RUN = {"limit": [], "allow_override_limit": True}
+
 LESSONS = [
-    # name, playbook, extra arguments, variable group, run prompt
-    ("Ping", "playbooks/ping.yml", [], "Practice defaults", []),
-    ("Baseline preview", "playbooks/baseline.yml", ["--check", "--diff"], "Practice defaults", []),
-    ("Baseline apply", "playbooks/baseline.yml", ["--diff"], "Practice defaults", []),
-    ("Users", "playbooks/users.yml", [], "Practice defaults", []),
-    ("Webserver", "playbooks/webserver.yml", [], "Practice defaults", []),
-    ("Patch preview", "playbooks/patch.yml", ["--check", "--diff"], "Practice defaults", []),
-    ("Patch, no reboot", "playbooks/patch.yml", [], "Practice defaults", []),
-    ("Patch, allow required reboot", "playbooks/patch.yml", [], "Allow required reboot", []),
-    ("STIG audit (vendor scan only)", "playbooks/stig-audit.yml", [], "Practice defaults", []),
-    ("STIG apply (vendor fixes, approval required)", "playbooks/stig-apply.yml", [], "Practice defaults", RECOVERY_PROMPT),
-    ("STIG apply, allow required reboot", "playbooks/stig-apply.yml", [], "Allow required reboot", RECOVERY_PROMPT),
+    # name, playbook, extra arguments, variable group, run prompt, Ansible options
+    ("Ping", "playbooks/ping.yml", [], "Practice defaults", [], ALL_LAB_TARGETS),
+    ("Baseline preview", "playbooks/baseline.yml", ["--check", "--diff"], "Practice defaults", [], ALL_LAB_TARGETS),
+    ("Baseline apply", "playbooks/baseline.yml", ["--diff"], "Practice defaults", [], ALL_LAB_TARGETS),
+    ("Users", "playbooks/users.yml", [], "Practice defaults", [], ALL_LAB_TARGETS),
+    ("Webserver", "playbooks/webserver.yml", [], "Practice defaults", [], ALL_LAB_TARGETS),
+    ("Patch preview", "playbooks/patch.yml", ["--check", "--diff"], "Practice defaults", [], ALL_LAB_TARGETS),
+    ("Patch, no reboot", "playbooks/patch.yml", [], "Practice defaults", [], ALL_LAB_TARGETS),
+    ("Patch, allow required reboot", "playbooks/patch.yml", [], "Allow required reboot", [], ALL_LAB_TARGETS),
+    ("STIG audit (vendor scan only)", "playbooks/stig-audit.yml", [], "Practice defaults", [], ALL_LAB_TARGETS),
+    ("STIG apply (vendor fixes, approval required)", "playbooks/stig-apply.yml", [], "Practice defaults",
+     RECOVERY_PROMPT, ONE_TARGET_PER_RUN),
+    ("STIG apply, allow required reboot", "playbooks/stig-apply.yml", [], "Allow required reboot",
+     RECOVERY_PROMPT, ONE_TARGET_PER_RUN),
 ]
 
 VARIABLE_GROUPS = {
@@ -58,7 +67,8 @@ def lab_dir_path(value):
 
 
 def template_payload(project_id, ids, lesson):
-    name, playbook, extra_args, group, prompt = lesson
+    name, playbook, extra_args, group, prompt, options = lesson
+    one_target = options.get("allow_override_limit", False)
     return {
         "project_id": project_id,
         "name": name,
@@ -67,12 +77,11 @@ def template_payload(project_id, ids, lesson):
         "inventory_id": ids["inventory"],
         "repository_id": ids["repository"],
         "environment_id": ids["environments"][group],
-        # The playbooks' preflight requires an explicit --limit; pass it as a CLI
-        # argument, which this release applies, rather than the template limit field.
-        "arguments": json.dumps(["--limit", "lab", *extra_args]),
-        "limit": "",
-        "type": "",
-        "description": "Seeded by the guide; runs from the local lab folder.",
+        "arguments": json.dumps(extra_args),
+        "task_params": copy.deepcopy(options),
+        "description": ("Seeded by the guide; runs from the local lab folder. "
+                        + ("Enter exactly one host in the Limit prompt." if one_target
+                           else "Limit: every host in the lab group.")),
         "allow_override_args_in_task": False,
         "suppress_success_alerts": False,
         "survey_vars": prompt,
