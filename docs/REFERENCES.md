@@ -2,10 +2,13 @@
 
 [Back to the guide](../README.md)
 
-Use the documentation for the version you install. Links that use `latest`
-can describe newer behavior than the guide's pinned baseline. Commands and
-explanations in this repository are learning examples, not vendor support or
-redistributed benchmark content.
+Use the documentation for the version you install. Links that use `latest`,
+and the unversioned semaphoreui.com pages, can describe newer behavior than the
+guide's pinned baseline. The Semaphore documentation pinned by the 2.19.12
+release is
+[semaphore-docs at dc61d7c](https://github.com/semaphoreui/semaphore-docs/tree/dc61d7c1c58ddf3941088ab56a834c01fe6d84fc/docs).
+Commands and explanations in this repository are learning examples, not vendor
+support or redistributed benchmark content.
 
 ## Ansible
 
@@ -26,7 +29,15 @@ redistributed benchmark content.
 - [Key Store](https://semaphoreui.com/docs/user-guide/key-store)
 - [Inventories](https://semaphoreui.com/docs/user-guide/inventory)
 - [Ansible tasks](https://semaphoreui.com/docs/user-guide/apps/ansible)
-- [Upgrade procedure](https://semaphoreui.com/docs/admin-guide/upgrading)
+- [Upgrade download commands](https://semaphoreui.com/docs/admin-guide/upgrading):
+  not a full procedure. Its examples hard-code one release, older than this
+  guide's pin when checked in September 2026, and use the unprefixed
+  `semaphore_<version>_...` packages and archives, which are the Pro build.
+  This guide installs the Community build: take a
+  [private application capture](10-recovery.md#a-private-application-capture)
+  first, then download `semaphore_community_<version>_linux_amd64.tar.gz` for
+  the release you choose and verify it against that release's
+  `semaphore_community_<version>_checksums.txt`.
 
 ## Operating systems and benchmarks
 

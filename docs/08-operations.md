@@ -132,6 +132,9 @@ sudo du -sh /var/lib/semaphore /var/lib/postgresql
 sudo journalctl -u semaphore --since today --no-pager
 ```
 
+On an Enterprise Linux controller, PostgreSQL's data is under `/var/lib/pgsql`
+instead of `/var/lib/postgresql`.
+
 Job logs and reports can contain operational data or accidentally echoed
 secrets. Keep them private, define retention, and review them before sharing.
 Use the application and database's supported retention procedures. Deleting

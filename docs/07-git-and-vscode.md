@@ -13,7 +13,15 @@ Fork this repository or copy it into a repository you own. Use a private
 repository for exercises that describe actual hosts, organizational settings
 or encrypted lab data. Configure Git's author identity with your own values.
 
+If this copy came from `git clone` of the public guide in chapter 3, its
+`origin` is the guide's repository, which you cannot push to. Point `origin` at
+your own repository first. If your copy has no `origin` yet, use
+`git remote add origin YOUR_REPOSITORY_URL` instead. If your repository is new
+and empty, also run `git push -u origin main` once, so the exercise branch has
+a base to compare against.
+
 ```bash
+git remote set-url origin YOUR_REPOSITORY_URL
 git switch -c exercise/change-web-message
 git status --short
 ```
@@ -102,21 +110,21 @@ for example `ansible-playbook playbooks/baseline.yml --limit lab --private-key
 ~/.ssh/ansible_lab --ask-vault-pass`, which uses each host's own sudo password
 in one run.
 
-Semaphore can unlock the same files when it reads them from a repository or
-folder: create a Key Store entry of type **Login with password** with an empty
-Username and the Vault password, then add it to each template under **Ansible
-options → Vaults**. Every template that reads those hosts needs it, including
-Ping, because Ansible loads all host variables. `ansible-vault create` writes
-new files readable only by you, so the files must also be made readable by the
-service before a task can open them.
+These files are for CLI runs from your working copy. Ansible reads
+`host_vars` only beside the inventory file it was given or beside the playbook,
+and chapter 6's setup offers neither: its inventories are **Static**, which
+Semaphore writes to a temporary file outside the repository, and this
+repository's `.gitignore` excludes `inventories/*` and every `host_vars/`
+directory, so the files never reach a Git or bare-repository clone. Keep
+chapter 6's per-inventory sudo credentials for Semaphore on that path. On the
+Enterprise Linux controller, whose lab folder Semaphore reads in place through
+a file inventory, follow
+[its per-target sudo option](03-controller-el9.md#do-give-the-templates-the-targets-sudo-password)
+instead; it adds the Vault key to each template and makes the files readable
+by the service.
 
-This public repository ignores local inventory files and directories. Keep
-Vault content and its unlocking credential separate. An encrypted file is
+Keep Vault content and its unlocking credential separate. An encrypted file is
 still operational secret material and is not needed in the public guide.
-
-The guide's first Semaphore path instead uses separate single-target
-inventories with separate Key Store sudo credentials. Learn that simpler path
-before combining per-host secrets and Vault.
 
 ## Optional: a reviewed local repository on the controller
 
@@ -127,7 +135,27 @@ push there can run.
 
 **Where: controller, as your administrator, from your working copy.** Your
 account owns and writes the repository; the service reads it through the
-`semaphore` group, which new files inherit from the directory's setgid bit:
+`semaphore` group, which new files inherit from the directory's setgid bit.
+
+Git can also refuse to let the service read a repository that another account
+owns, as Ubuntu 24.04's Git does, unless `/etc/semaphore/gitconfig` lists it.
+Newer Git releases allow this read; the entry does no harm there. The Ubuntu
+installer and chapter 3's manual steps list `/opt/ansible-guide.git` there.
+The Enterprise Linux installer lists only its lab folder, and a manual install
+from v1.1.0 of this guide or earlier has an empty file. Append the entry unless
+`sudo cat /etc/semaphore/gitconfig` already shows it. Append rather than
+replace: on Enterprise Linux the lab folder's entry must stay, and appending
+keeps the file's `root:semaphore` ownership and mode. Do not use
+`safe.directory=*`.
+
+```bash
+sudo tee -a /etc/semaphore/gitconfig >/dev/null <<'EOF'
+[safe]
+    directory = /opt/ansible-guide.git
+EOF
+```
+
+Then create the repository, push to it and read it as the service:
 
 ```bash
 sudo install -d -o "$USER" -g semaphore -m 2750 /opt/ansible-guide.git
@@ -138,7 +166,8 @@ git push /opt/ansible-guide.git main --tags
 ```
 
 The last command reads the repository as the service, from a directory it may
-enter. It should list `main` and your tags. Promote a reviewed branch later with
+enter. It should list `main` and your tags. If Git reports dubious ownership
+instead, the entry above is missing. Promote a reviewed branch later with
 `git push /opt/ansible-guide.git BRANCH`, and check that nothing has left the
 service's group:
 
@@ -156,20 +185,11 @@ The command should print nothing. Two tempting shortcuts break this:
   controller's configuration, including the database password and the Key Store
   encryption key.
 
-The Ubuntu installer already trusts exactly this path in
-`/etc/semaphore/gitconfig`. The Enterprise Linux installer trusts its lab folder
-there instead; add a second `directory =` line for this path:
-
-```gitconfig
-[safe]
-    directory = /opt/ansible-guide.git
-```
-
-Do not use `safe.directory=*`. In Semaphore, add a repository with URL
-`file:///opt/ansible-guide.git`, the **None** access key and the branch you
-promoted, then run a template that uses it and verify the result on the target.
-The service's writable task clones belong under `/var/lib/semaphore`; they are
-not the canonical source to edit or back up as your only Git copy.
+In Semaphore, add a repository with URL `file:///opt/ansible-guide.git`, the
+**None** access key and the branch you promoted, then run a template that uses
+it and verify the result on the target. The service's writable task clones
+belong under `/var/lib/semaphore`; they are not the canonical source to edit or
+back up as your only Git copy.
 
 ## Check
 

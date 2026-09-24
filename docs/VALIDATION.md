@@ -4,26 +4,41 @@
 
 ## Fresh-VM verification
 
-In September 2026 every chapter's commands were run on newly created,
+In September 2026 the commands of chapters 3 to 8 and 10, chapter 2's guest
+checks and chapter 9's AlmaLinux content inspection were run on newly created,
 disposable Proxmox VMs imported from official cloud images, after checking the
 publishers' checksums and signatures: Ubuntu 24.04.5 and AlmaLinux 9.8. Three
 controllers were built: the Ubuntu installer path, the Ubuntu manual path with
 each documented block run as written, and the Enterprise Linux 9 seeded
 installer on AlmaLinux. Two fresh targets, Ubuntu 24.04.5 and AlmaLinux 9.8,
-were managed from them. Tested versions: Semaphore Community 2.19.12,
-ansible-core 2.20.8 and PostgreSQL 16.
+were managed from them.
+
+The last two rows below record later runs. Chapter 9's RHEL and Ubuntu
+Security Guide commands ran on two existing registered guests, which were
+restored to their pre-test checkpoints afterwards; a seeded controller was
+also installed on the RHEL guest. New VMs then tested Rocky Linux 9.8, from
+Rocky's signed cloud image: a seeded Rocky controller managing a Rocky target
+and an AlmaLinux 9.8 target.
+
+Tested versions: Semaphore Community 2.19.12, PostgreSQL 16, and ansible-core
+2.20.8 with every Python dependency pinned in
+[`requirements-controller.txt`](../requirements-controller.txt). The runs
+installed ansible-core by version only; every controller install resolved
+exactly the set that file now pins. The runs covered the guide up to tag
+`v1.1.0`. Later changes passed the
+[offline checks](#repeat-the-offline-checks) but were not repeated on VMs.
 
 | Area | Result |
 | --- | --- |
-| Controller installation | All three builds passed every readiness check, with the application and database on loopback only and SELinux enforcing on AlmaLinux. A controller reboot kept its configuration and jobs. |
+| Controller installation | All three fresh-VM builds passed every readiness check, with the application and database on loopback only and SELinux enforcing on AlmaLinux. The later seeded controllers on RHEL and Rocky Linux also reported ready. The Ubuntu installer's controller kept its configuration and jobs across a reboot. |
 | Access (chapter 4) | Host keys were accepted only after comparing fingerprints. `sudo -n` was refused, `sudo -v` accepted and Ansible `-b -K` returned uid 0 on both targets. |
 | CLI lessons (chapter 5) | All five lessons on both OSes: previews, applies, `changed=0` repeats, drift repair, a page change without a handler, and refusals of a missing limit, invalid user names and a string reboot flag. The default patch left a required reboot pending; JSON `true` rebooted. |
 | Semaphore (chapter 6) | The project, inventory, repository, variable groups and a template were created and run in the UI. All 16 templates then succeeded on clean targets for both OSes, including drift repair and the reboot policy. |
-| Git and Vault (chapter 7) | An exercise branch in a reviewed local repository reached the target, and the normal ref restored it. One CLI run used each host's own Vault-encrypted sudo password, and Semaphore used them through a Vault key. |
-| Recovery (chapter 10) | The capture's checksums matched after copying it off the controller. An isolated replacement controller restored all 46 tables with matching row counts. While isolated, a job failed at the network layer. With one target allowed, Ping and a check-mode Baseline decrypted the restored SSH and sudo credentials. |
+| Git and Vault (chapter 7) | An exercise branch in a reviewed local repository reached the target, and the normal ref restored it. One CLI run used each host's own Vault-encrypted sudo password. Semaphore used such files through a Vault key only from the Enterprise Linux controller's lab folder (chapter 3b); a template reading them from a Git repository or with a Static inventory was not run. |
+| Recovery (chapter 10) | The capture's checksums matched after copying it off the controller. An Ubuntu controller's capture, restored onto an isolated Ubuntu replacement, recovered all 46 tables with matching row counts. While isolated, a job failed at the network layer. With one target allowed, Ping and a check-mode Baseline decrypted the restored SSH and sudo credentials. |
 | Seeded EL9 path (chapter 3b) | `add-target.sh` refused a mismatched fingerprint and a duplicate host. The lessons succeeded with both sudo-credential options. Each exposure mode opened only its intended port. On AlmaLinux the vendor `stig` profile went from 273 to 24 failing rules after one remediation pass without a reboot, with no scanner errors. Automation access and sudo still worked afterwards. |
-| Registered vendor guests (chapters 3b, 5 and 9) | On a registered RHEL 9.8 guest and an Ubuntu 24.04.5 guest attached to Ubuntu Pro, chapter 9's RHEL and USG commands ran as written, including the CIS preparation, before-scan and fix-script generation. All five lessons converged on RHEL. STIG audit assessed both hosts in one run; the Ubuntu Security Guide path also ran through Semaphore on a seeded controller installed on that RHEL guest. STIG apply with the approved reboot took Ubuntu from 64 to 10 failing rules and RHEL from 266 to 13, with no scanner errors, and automation access and sudo worked afterwards. Both guests were then restored to their pre-test checkpoints. |
-| Rocky Linux 9.8 (chapters 3b, 5 and 9) | The seeded installer ran on a Rocky controller, and its templates managed an AlmaLinux and a Rocky target. On Rocky, every lesson converged, STIG audit used Rocky's own `ssg-rl9-ds.xml`, and STIG apply with the approved reboot took failing rules from 262 to 26 with no scanner errors; access and sudo worked afterwards. With a VirtIO RNG device the STIG-enabled `rngd` stayed healthy. |
+| Registered vendor guests (chapters 3b, 5 and 9) | On a registered RHEL 9.8 guest and an Ubuntu 24.04.5 guest attached to Ubuntu Pro, chapter 9's RHEL and USG inspection and CIS assessment commands ran as written: package and profile listing, the CIS preparation and before-scan, and USG fix-script generation. The manual CIS remediation was not applied. From the command line, all five lessons ran on RHEL: Baseline, Users and Webserver reported `changed=0` on repeat, and Patch left its required reboot to the operator. STIG audit assessed both hosts in one run; the Ubuntu Security Guide path also ran through Semaphore on a seeded controller installed on that RHEL guest. STIG apply with the approved reboot took Ubuntu from 64 to 10 failing rules and RHEL from 266 to 13, with no scanner errors, and automation access and sudo worked afterwards. Both guests were then restored to their pre-test checkpoints. |
+| Rocky Linux 9.8 (chapters 3b, 4 and 9) | The seeded installer ran on a Rocky controller. Chapter 4's target steps, with the seeded key, prepared an AlmaLinux and a Rocky target, and the seeded templates managed both, including an approved-reboot patch on AlmaLinux. On Rocky, Baseline, Users and Webserver reported `changed=0` on repeat and Patch left its required reboot to the operator; STIG audit used Rocky's own `ssg-rl9-ds.xml`, and STIG apply with the approved reboot took failing rules from 262 to 26 with no scanner errors. Access and sudo worked afterwards. With a VirtIO RNG device, `rngd`, which the Rocky image enables by default, stayed healthy after STIG apply. A template cloning this repository at tag `v1.1.0` ran Baseline on Rocky; at `v1.0.0`, which predates Rocky support, the preflight refused the host. |
 
 ### Fixed during the verification
 
@@ -38,8 +53,8 @@ ansible-core 2.20.8 and PostgreSQL 16.
   note here said otherwise. The seeder now uses it.
 - `--mode https` on Enterprise Linux also opened nginx's default plain-HTTP site
   on port 80, and leaving https left nginx running.
-- The EL9 path pinned the Ed25519 host key, which the target stops offering
-  after vendor STIG remediation.
+- The EL9 path pinned the Ed25519 host key, which an AlmaLinux target stopped
+  offering after vendor STIG remediation.
 - Rewriting the service's known-hosts file with `ssh-keygen -R`, creating a bare
   repository with shared-repository settings, and creating Vault files could
   each leave files the service cannot read. The readiness check and chapters 3b
@@ -47,14 +62,25 @@ ansible-core 2.20.8 and PostgreSQL 16.
 
 ### Not established
 
-- FIPS mode. On RHEL, AlmaLinux and Rocky Linux the vendor STIG sets the `FIPS:STIG` crypto
-  policy, but `fips-mode-setup --check` then reports that FIPS mode is not
-  enabled; Ubuntu was not switched to FIPS kernels.
+- FIPS mode. On RHEL, AlmaLinux and Rocky Linux the vendor STIG sets the
+  `FIPS:STIG` crypto policy. On RHEL and AlmaLinux `fips-mode-setup --check`
+  then reported that FIPS mode is not enabled; Rocky Linux's FIPS mode and
+  host-key offer were not checked. Ubuntu was not switched to FIPS kernels.
+- Chapter 9's manual CIS remediation (the packaged RHEL playbook and `usg fix`
+  with a CIS profile), its reboot and after-scan. Vendor STIG remediation was
+  applied only through `stig-apply.yml`.
 - Repeated remediation until no further rule changes.
+- Chapter 10's capture and restore on an Enterprise Linux controller.
+- Enterprise Linux releases other than 9.8, as controller or target. The EL9
+  installer's 9.4 minimum is where `python3.12` and the `postgresql:16` stream
+  first appear, not a tested release.
 - More than one parallel Semaphore task, schedules, integrations, offsite
   backup copies and high availability.
 - Clicking every UI form: the remaining templates and keys were created through
   the same API after their forms were checked in the browser.
+- The optional Azure chapter, chapter 2's manual ISO installation, editing
+  through VS Code Remote SSH in chapter 7, and the troubleshooting chapter's
+  diagnostics as a separate exercise.
 
 ## Earlier checks
 
@@ -82,27 +108,40 @@ for playbook in playbooks/*.yml; do
   .venv/bin/ansible-playbook -i inventories/lab.ini.example --syntax-check "$playbook"
 done
 .venv/bin/ansible-lint --offline playbooks/
-bash scripts/install-controller.sh --plan
-bash scripts/install-controller-el9.sh --plan
-git diff --check
+for installer in scripts/install-controller.sh scripts/install-controller-el9.sh; do
+  bash "$installer" | grep '^Plan:'
+  bash "$installer" --plan >/dev/null
+done
+git diff --check "$(git hash-object -t tree /dev/null)"
 ```
 
+The installer loop confirms that an installer run with no arguments prints its
+plan. The last command compares every tracked file, including uncommitted
+edits, with an empty tree, so it rejects whitespace errors and leftover
+conflict markers anywhere in the repository.
+
 The validator checks Python/Bash/YAML syntax, shell/data examples in Markdown,
-local links and selected publication boundaries. It reports rule names and file
-locations without echoing a detected credential. It is deliberately conservative
-about real addresses, account identifiers and private runtime files.
+local links and their heading anchors, and selected publication boundaries. It
+reports rule names and file locations without echoing a detected credential. It
+is deliberately conservative about real addresses, account identifiers and
+private runtime files.
 
 The unit tests cover unique locally generated secrets, refusing file
 overwrite/symlinks, the Semaphore seeding plan (local repository, file
-inventory, scoped templates, preview-only arguments, no key material), and
-XCCDF assessments containing repeated rules, multiple
-results, missing results or scanner errors. A parsed assessment can contain
-failed controls; the parser never turns successful parsing into a compliance
-claim.
+inventory, scoped templates, preview-only arguments, no key material), the
+publication-boundary rules of `scripts/validate.py`, the readiness parsers in
+`scripts/check-controller.py`, and the contracts between the lesson playbooks
+and the seeder: the accepted distributions and their STIG data streams, the
+approval phrase, and the helper scripts the playbooks call. They also cover
+XCCDF assessments containing repeated rules, multiple results, missing results
+or scanner errors. A parsed assessment can contain failed controls; the parser
+never turns successful parsing into a compliance claim.
 
 GitHub Actions runs the same offline checks with read-only repository
-permissions, pinned action revisions and no lab/cloud credentials. It does
-not run the installer, provision VMs or deploy playbooks.
+permissions, pinned action revisions and no lab/cloud credentials. It
+additionally resolves the pinned controller runtime from PyPI, without
+installing it. It does not apply the installers, provision VMs or deploy
+playbooks.
 
 ## Secret review before publishing
 

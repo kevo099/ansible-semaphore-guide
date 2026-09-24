@@ -22,6 +22,11 @@ ansible-inventory --graph
 ansible-playbook playbooks/ping.yml --limit lab-ubuntu --list-hosts
 ```
 
+On the [seeded Enterprise Linux controller](03-controller-el9.md), run
+`cd /opt/ansible-lab` (or your `--lab-dir`) instead of the first command. Its
+`ansible.cfg` reads the inventory Semaphore uses, with the host names you gave
+`add-target.sh`.
+
 Expect exactly the host you intend. The configured target login is
 `svc_ansible`; your controller administrator is the person running Ansible.
 `--private-key` selects the target key. `-K` asks for the become/sudo password,

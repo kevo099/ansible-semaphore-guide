@@ -18,10 +18,13 @@ Use official sources:
 - [Red Hat Enterprise Linux downloads](https://developers.redhat.com/products/rhel/download)
 
 Select Ubuntu 24.04 LTS for the controller and Ubuntu target, plus AlmaLinux 9
-or Rocky Linux 9 for the second target. Choose amd64/x86_64 to match the pinned controller
-binary. Verify the image against the publisher's checksum and signature
-instructions before import; a checksum copied from the same untrusted source
-as the image does not authenticate the publisher.
+or Rocky Linux 9 for the second target. To use the seeded installer in
+[chapter 3b](03-controller-el9.md) instead, build the controller from RHEL,
+AlmaLinux or Rocky Linux 9.4 or later, and register a RHEL controller with its
+BaseOS and AppStream repositories enabled. Choose amd64/x86_64 to match the
+pinned controller binary. Verify the image against the publisher's checksum
+and signature instructions before import; a checksum copied from the same
+untrusted source as the image does not authenticate the publisher.
 
 ## Do: a manual Proxmox build
 
@@ -36,6 +39,8 @@ node or an existing cluster; they do not create or reconfigure a cluster.
 4. Use a disk controller and NIC supported by the guest. VirtIO networking and
    VirtIO SCSI are common Linux choices. Use the platform's supported firmware
    defaults consistently; changing BIOS/UEFI later can affect bootability.
+   Give Enterprise Linux guests a VirtIO RNG device as well; the checks below
+   explain why.
 5. Install the operating system. Create your own administrator and enable
    OpenSSH server. Record the guest's actual address after installation.
 6. Install the guest agent if your platform supports it, enable the corresponding
@@ -61,12 +66,6 @@ sudo systemctl enable --now sshd
 sudo systemctl start qemu-guest-agent
 ```
 
-Give Enterprise Linux guests a random number generator device: in Proxmox,
-**Hardware → Add → VirtIO RNG**, or `qm set VMID --rng0 source=/dev/urandom`
-for a stopped VM. Rocky Linux enables `rngd` by default, and vendor STIG
-remediation enabled it on RHEL and Rocky Linux in the verification run. Without
-a hardware entropy source the service fails and the guest reports a failed unit.
-
 Guest-agent availability depends on the virtual hardware and the distribution's
 policy. Some images allow IP discovery but disable command execution. Use the
 guest console for bootstrap and trusted host-key inspection when necessary;
@@ -78,7 +77,8 @@ A cloud image can shorten repeat builds once you understand the manual path:
 
 1. Authenticate the image and confirm its actual disk format.
 2. Import it into a newly allocated VM and attach your platform's cloud-init
-   configuration drive.
+   configuration drive. Give Enterprise Linux guests a VirtIO RNG device as
+   well; the checks below explain why.
 3. Supply a unique administrator, an SSH public key, network configuration and
    a unique hostname using your own platform's supported interface.
 4. Boot it and wait for cloud-init to finish before configuration work.
@@ -112,6 +112,17 @@ timedatectl status
 systemctl --failed
 python3 --version
 ```
+
+On Enterprise Linux, if `systemctl --failed` lists `rngd.service` and
+`journalctl -u rngd` shows that it found no entropy source, the VM has no
+hardware random number device. The Rocky Linux image enables `rngd` by
+default, and vendor STIG remediation enabled it on RHEL in the verification
+run, so give every Enterprise Linux guest the device, whether you installed
+from an ISO or a cloud image. In Proxmox, use **Hardware → Add → VirtIO RNG**
+in the VM's settings, or run `qm set VMID --rng0 source=/dev/urandom` in the
+Proxmox node's shell, not in the guest. The device appears only after the VM
+is stopped and started from the hypervisor, not after a reboot inside the
+guest. Then run `systemctl --failed` again.
 
 Confirm that each guest has the intended unique hostname, its own address,
 working package repositories and a usable administrator login. Reboot each

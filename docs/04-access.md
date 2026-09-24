@@ -1,6 +1,20 @@
 # 4. Bootstrap SSH, Python and sudo
 
-[Previous: controller](03-controller.md) · [Next: command-line lessons](05-cli-lessons.md)
+[Previous: controller](03-controller.md) or [Enterprise Linux controller](03-controller-el9.md) · [Next: command-line lessons](05-cli-lessons.md)
+
+**Coming from the seeded Enterprise Linux controller (3b)?** Semaphore already
+has its own key pair, and `add-target.sh` pinned each target's host key in
+`/etc/semaphore/known_hosts`. Do steps 2 to 4 on each target, but in step 3
+copy the service's public key, which `sudo cat /etc/semaphore/svc_ansible.pub`
+prints, instead of `~/.ssh/ansible_lab.pub`, as
+[3b shows](03-controller-el9.md#do-add-a-target-without-leaving-the-terminal).
+Skip step 6: it replaces `/etc/semaphore/known_hosts` rather than adding to
+it, so any host that only `add-target.sh` pinned would lose its pin. Steps 1
+and 5 are only for running chapter 5 from the terminal as well. If you do,
+append your own public key to `authorized_keys` as 3b shows instead of
+replacing the file, and run the Ansible commands of step 5 and chapter 5 from
+`/opt/ansible-lab` (or your `--lab-dir`), whose `ansible.cfg` reads the
+inventory Semaphore uses, instead of copying `lab.ini.example`.
 
 ## Goal
 
@@ -51,6 +65,9 @@ ssh -o HostKeyAlgorithms=rsa-sha2-512,rsa-sha2-256 \
 Compare the fingerprint in the SSH prompt to the trusted-console value before
 accepting it. Repeat for `alma.example.test`. `ssh-keyscan` can collect a key,
 but does not authenticate its owner; scanning alone is not the trust check.
+If the target accepts only your workstation's key, the login then fails with
+`Permission denied (publickey)`. SSH saved the accepted host key before it
+tried to log in, which is all this step needs; step 3 deals with the login.
 
 **Check, back on the controller:**
 
@@ -65,7 +82,15 @@ requires independent verification. Do not turn off host checking to bypass it.
 ## Step 3: prepare a dedicated target account
 
 First copy the public key from the controller to each target administrator's
-home directory:
+home directory. This `scp`, like step 2's first connection, logs in to the
+target as your administrator. A cloud-image build usually accepts only the
+public key you supplied from your workstation, so the copy fails with
+`Permission denied (publickey)`. For this copy only, check that `ssh-add -l`
+on your workstation lists that key, then reconnect to your own controller with
+`ssh -A YOUR_ADMIN@controller.example.test` so the workstation's agent answers.
+Close that session afterwards: while it is open, root on the controller can
+use the agent. Alternatively, paste the public key's single line into
+`~/ansible_lab.pub` through each target's console. On the controller:
 
 ```bash
 scp ~/.ssh/ansible_lab.pub YOUR_ADMIN@ubuntu.example.test:ansible_lab.pub
@@ -107,8 +132,8 @@ sudo restorecon -RF /home/svc_ansible/.ssh
 ```
 
 RHEL package installation needs working subscription repositories. Registration
-is performed with your own account outside the playbooks. AlmaLinux uses its
-own repositories and does not need a Red Hat subscription.
+is performed with your own account outside the playbooks. AlmaLinux and Rocky
+Linux use their own repositories and do not need a Red Hat subscription.
 
 ## Step 4: configure sudo and the account's SSH policy
 
@@ -209,7 +234,9 @@ in the public inventory; see [Git and Vault](07-git-and-vscode.md).
 
 ## Step 6: install target trust for Semaphore
 
-The service uses a separate known-hosts file. On the controller, copy only the
+The service uses a separate known-hosts file. Skip this step on the seeded
+Enterprise Linux controller: `add-target.sh` already maintains that file, and
+the block below replaces it. Otherwise, on the controller, copy only the
 already verified entries for the addresses your inventory uses:
 
 ```bash

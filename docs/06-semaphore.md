@@ -12,6 +12,16 @@ target bootstrap. Labels below are the ones Semaphore Community 2.19.12 shows;
 older releases call variable groups “environments.” Do not assume a feature in
 newer online documentation exists in the pinned release.
 
+If you installed the [seeded Enterprise Linux controller](03-controller-el9.md),
+the **Ansible Practice** project, its SSH key, inventory, repository, variable
+groups and eleven templates already exist. Do not create a second project with
+the same name. Read steps 1-6 to understand those objects, and add the sudo
+credential as
+[3b describes](03-controller-el9.md#do-give-the-templates-the-targets-sudo-password).
+Then qualify the seeded lesson templates with step 7's sequence. Their names
+have no `Ubuntu —` prefix, and their limit is the whole `lab` group, so one run
+covers every target you added; read each host's recap.
+
 ## Open your private browser connection
 
 **Where: workstation.** Keep this SSH session open:
@@ -101,7 +111,7 @@ Use **Repositories → New Repository** to add **Guide examples**:
 | Field | Value |
 | --- | --- |
 | URL or path | `https://github.com/kevo099/ansible-semaphore-guide.git` |
-| Branch / Tag | `v1.1.0`, the reviewed examples |
+| Branch / Tag | `v1.2.0`, the reviewed examples |
 | Access Key | `No repository credential` (or the built-in **None**) |
 
 The release tag gives the job a deliberate version of the examples. A tag
@@ -110,7 +120,12 @@ each run; that is expected and needs access to the Git host when the task
 starts. For your own exercises, fork/copy the project, create a private working
 repository and select your reviewed branch or tag. A private Git repository
 needs its own appropriately scoped read credential; it does not need your
-target SSH key.
+target SSH key. Use the repository's HTTPS URL and a read-only access token,
+stored as a **Login with password** key: the user name your Git host expects
+for tokens in **Username** and the token in **Password**. Avoid an SSH URL with
+an SSH key: Semaphore 2.19.12 clones over SSH with host-key checking turned off
+(`StrictHostKeyChecking=no`, `UserKnownHostsFile=/dev/null`), so it would not
+verify the Git host.
 
 The controller service must be able to reach the repository and trust its TLS
 certificate. Do not disable certificate verification to make a clone work.
@@ -172,13 +187,19 @@ and literal `all` or `*` values before SSH.
 
 The current [Semaphore Ansible documentation](https://semaphoreui.com/docs/user-guide/apps/ansible)
 describes repository-relative paths, task arguments and credential selection.
+That site follows Semaphore's development branch: its **Working directory**
+field and Galaxy role and collection install arguments are not in 2.19.12. The
+[copy of that page pinned by the 2.19.12 release](https://github.com/semaphoreui/semaphore-docs/blob/dc61d7c1c58ddf3941088ab56a834c01fe6d84fc/docs/user-guide/apps/ansible.md)
+does not list those fields.
 
 ## Step 7: qualify a complete job
 
 Launch a template with its run (▶) button, then **Run** in the dialog. The
 dialog's **Dry Run** (`--check`) and **Diff** (`--diff`) switches apply to that
 one run only; the preview templates keep those arguments fixed so a preview is
-repeatable.
+repeatable. Templates for the STIG playbooks, such as the three that
+[3b seeds](03-controller-el9.md#do-the-vendor-stig-lessons), refuse Dry Run
+because the scanner does not run in check mode.
 
 1. Run **Ubuntu — Ping**. Verify target identity, `changed=0`, and no failures.
 2. Run **Baseline preview**. Read all predicted changes and skipped tasks.
