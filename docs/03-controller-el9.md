@@ -98,13 +98,18 @@ installs nginx with a locally generated self-signed certificate on port 443,
 proxies to the still loopback-only Semaphore, opens 443 in the host firewall
 and prints the certificate's SHA-256 fingerprint. Compare that fingerprint
 with the browser's warning the first time, then continue to
-`https://VM_ADDRESS/`. `--mode http` instead binds Semaphore itself to every
-address on port 3000 in plain text; use it only on a network you fully
-control. `--mode loopback` reverts either choice.
+`https://VM_ADDRESS/`. The package's own `nginx.conf` also serves a test page
+on port 80, so on Enterprise Linux the script keeps it as
+`/etc/nginx/nginx.conf.before-semaphore` and installs a main file without that
+server. `--mode http` instead binds Semaphore itself to every address on port
+3000 in plain text; use it only on a network you fully control. `--mode
+loopback` reverts either choice. Leaving https stops and disables nginx when it
+serves nothing else.
 
 **Check:** from another machine, `curl -k https://VM_ADDRESS/api/ping` prints
-`pong`, while `curl http://VM_ADDRESS:3000/` is refused. `check-controller.py`
-reports the exposure it found.
+`pong`, while `curl http://VM_ADDRESS:3000/` and `curl http://VM_ADDRESS/`
+cannot connect. `check-controller.py` reports the exposure it found and fails
+if nginx listens anywhere other than 443.
 
 **Concept:** the script changes the host, not the cloud. Allow port 443 in the
 VM's network security group or equivalent only from your own address; an
@@ -114,12 +119,17 @@ admin login page open to the internet is the mistake this design avoids.
 
 The inventory Semaphore reads is a file: `/opt/ansible-lab/inventories/lab.ini`.
 Editing it changes the next run's targets. The helper below adds a host and
-its **verified** host key in one step. First read the fingerprint from the
-target's trusted console:
+its **verified** host key in one step. First read the RSA host key's
+fingerprint from the target's trusted console:
 
 ```bash
-sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+sudo ssh-keygen -lf /etc/ssh/ssh_host_rsa_key.pub
 ```
+
+Use the RSA key, as the access chapter does. Vendor STIG remediation switches
+Enterprise Linux to a FIPS-based crypto policy under which the target stops
+offering its Ed25519 host key; a controller that pinned only that key then
+refuses to connect.
 
 Then on the controller:
 
@@ -223,9 +233,13 @@ home of the service or of your account, depending on where you ran it.
 
 **Concept:** vendor remediation is not gentle. It commonly removes
 passwordless sudo, tightens SSH and changes kernel parameters, and a first
-pass often leaves failing rules that need a reboot or a manual decision. Run
-it only against a disposable target with console access, and add a sudo
-password credential to the inventory afterwards.
+pass often leaves failing rules that need a reboot or a manual decision. On
+AlmaLinux 9 it sets the `FIPS:STIG` crypto policy: the target then offers only
+RSA and ECDSA host keys and refuses Ed25519 user keys, including an
+administrator's everyday Ed25519 key. The guide's RSA host-key pin and RSA 4096
+automation key keep working. The policy alone does not enable FIPS mode; see
+[chapter 9](09-security-benchmarks.md) before treating a host as FIPS. Run it
+only against a disposable target with console access and a recovery point.
 
 ## Do: move to a real repository later
 

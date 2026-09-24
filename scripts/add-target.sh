@@ -3,8 +3,9 @@
 # Usage: sudo bash scripts/add-target.sh --name NAME --address ADDRESS --group ubuntu|enterprise_linux \
 #            --fingerprint SHA256:... [--lab-dir /opt/ansible-lab] [--known-hosts /etc/semaphore/known_hosts]
 #
-# The fingerprint comes from the target's trusted console:
-#   sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub   (or ssh_host_rsa_key.pub)
+# The fingerprint comes from the target's trusted console. Prefer the RSA key: STIG
+# and FIPS crypto policies can stop a target from offering its Ed25519 host key.
+#   sudo ssh-keygen -lf /etc/ssh/ssh_host_rsa_key.pub
 # The script scans the target, compares every scanned key against that fingerprint, and
 # records only the matching key. Without a matching fingerprint it changes nothing.
 set -euo pipefail
