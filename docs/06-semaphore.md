@@ -8,9 +8,9 @@ Run the same reviewed playbooks through Semaphore and understand the connection
 between a project, repository, inventory, credential and task template.
 
 Complete the CLI SSH/Python/sudo checks first. A UI cannot repair an incorrect
-target bootstrap. Labels below follow the Community workflow; some releases
-call variable groups “environments.” Do not assume a feature in newer online
-documentation exists in the pinned release.
+target bootstrap. Labels below are the ones Semaphore Community 2.19.12 shows;
+older releases call variable groups “environments.” Do not assume a feature in
+newer online documentation exists in the pinned release.
 
 ## Open your private browser connection
 
@@ -36,14 +36,23 @@ not create a new Ansible runtime or an isolated virtual machine by itself.
 
 ## Step 2: add credentials in Key Store
 
-Create the following entries using credentials generated in your own lab:
+Use **Key Store → New Key** to create the following entries with credentials
+generated in your own lab:
 
 | Entry name | Type | Contents |
 | --- | --- | --- |
-| `Practice target SSH` | SSH | Login `svc_ansible`; the dedicated automation private key; its passphrase if required. |
-| `Ubuntu sudo` | Login with password | Login `svc_ansible`; the Ubuntu target's sudo password. |
-| `Alma sudo` | Login with password | Login `svc_ansible`; the Alma target's sudo password. |
-| `No repository credential` | None | Used for the public HTTPS example repository. |
+| `Practice target SSH` | SSH Key | Username `svc_ansible`; the dedicated automation private key; its passphrase if required. |
+| `Ubuntu sudo` | Login with password | Username **left empty**; Password: the Ubuntu target's sudo password for `svc_ansible`. |
+| `Alma sudo` | Login with password | Username **left empty**; Password: the Alma target's sudo password for `svc_ansible`. |
+| `No repository credential` | None | Used for the public HTTPS example repository. A new project already contains an entry named **None** of this type; you can use it instead. |
+
+Leave the Username of the two sudo entries empty. Semaphore passes a sudo
+credential's username to Ansible as `--become-user`, the account to *become*,
+not the account that logs in. `svc_ansible` there would make every privileged
+task run as `svc_ansible` instead of root. Runs that change nothing still look
+green, and the first real change fails with an error such as
+`Destination /etc not writable`. The login account comes from the inventory's
+**User Credentials** entry.
 
 Enter these through the private browser session. Do not paste a secret into an
 inventory, variable group, task argument, commit message or screenshot. A
@@ -59,15 +68,17 @@ set accordingly. See [Semaphore's Key Store documentation](https://semaphoreui.c
 Create one inventory per target for the first lessons. This lets you use a
 different sudo password on each host without placing it in inventory text.
 
-For **Ubuntu practice**, choose a static INI inventory and enter:
+Use **Inventory → New Inventory → Ansible Inventory**. For **Ubuntu practice**,
+set **Type** to **Static** and enter:
 
 ```ini
 [lab]
 lab-ubuntu ansible_host=ubuntu.example.test ansible_user=svc_ansible ansible_python_interpreter=/usr/bin/python3
 ```
 
-Replace the example address. Select **Practice target SSH** for its SSH/user
-credential and **Ubuntu sudo** for its sudo credential.
+Replace the example address. Select **Practice target SSH** as **User
+Credentials** and **Ubuntu sudo** as **Sudo Credentials**. The sudo list only
+offers “Login with password” entries.
 
 For **Alma practice**, use:
 
@@ -85,18 +96,21 @@ one intended target. See [inventory types and credentials](https://semaphoreui.c
 
 ## Step 4: add the repository
 
-Add a repository named **Guide examples**:
+Use **Repositories → New Repository** to add **Guide examples**:
 
 | Field | Value |
 | --- | --- |
-| URL | `https://github.com/kevo099/ansible-semaphore-guide.git` |
-| Branch/ref | `v1.0.0` for the initial reviewed examples |
-| Credential | `No repository credential` |
+| URL or path | `https://github.com/kevo099/ansible-semaphore-guide.git` |
+| Branch / Tag | `v1.0.0` for the initial reviewed examples |
+| Access Key | `No repository credential` (or the built-in **None**) |
 
-The release tag gives the job a deliberate version of the examples. For your
-own exercises, fork/copy the project, create a private working repository and
-select your reviewed branch or tag. A private Git repository needs its own
-appropriately scoped read credential; it does not need your target SSH key.
+The release tag gives the job a deliberate version of the examples. A tag
+cannot be fast-forwarded, so Semaphore clones a tag-pinned repository again for
+each run; that is expected and needs access to the Git host when the task
+starts. For your own exercises, fork/copy the project, create a private working
+repository and select your reviewed branch or tag. A private Git repository
+needs its own appropriately scoped read credential; it does not need your
+target SSH key.
 
 The controller service must be able to reach the repository and trust its TLS
 certificate. Do not disable certificate verification to make a clone work.
@@ -106,53 +120,65 @@ them separate allows the same playbook to run against different approved labs.
 
 ## Step 5: create variable groups
 
-Create **Practice defaults** with empty Ansible variables:
+Use **Variable Groups → New Group**. Create **Practice defaults** with empty
+extra variables:
 
 ```json
 {}
 ```
 
-Create **Allow required reboot** with:
+Create **Allow required reboot**, switch **Extra variables** from **Table** to
+**JSON**, replace the editor's default `{}` and enter:
 
 ```json
 {"allow_reboot": true}
 ```
 
 The second group is only for the separately selected patch/reboot template.
-Use a JSON boolean, not the string `"true"`. Do not add passwords here.
+Use a JSON boolean, not the string `"true"`. Do not add passwords here; the
+group's **Secrets** tab is not needed for these lessons.
 
 ## Step 6: create task templates
 
-Select **Ansible Playbook** as the template type. Set the repository to **Guide
-examples**, the appropriate inventory, and **Practice defaults**, except for
-the explicitly named reboot template. Playbook paths are relative to the
-repository root.
+Use **Task Templates → New template → Ansible Playbook**. Fill in **Name**,
+**Repository** (**Guide examples**), **Path to playbook file** (relative to the
+repository root), **Inventory** and **Variable Groups** (**Practice defaults**,
+except for the explicitly named reboot template). Under **Ansible options**,
+use **Limit → Add limit** for the target. Under **CLI args**, add each extra
+argument as its own entry.
 
-| Template | Playbook | Extra CLI arguments, as a JSON array |
-| --- | --- | --- |
-| Ubuntu — Ping | `playbooks/ping.yml` | `["--limit", "lab-ubuntu"]` |
-| Ubuntu — Baseline preview | `playbooks/baseline.yml` | `["--limit", "lab-ubuntu", "--check", "--diff"]` |
-| Ubuntu — Baseline apply | `playbooks/baseline.yml` | `["--limit", "lab-ubuntu", "--diff"]` |
-| Ubuntu — Users | `playbooks/users.yml` | `["--limit", "lab-ubuntu"]` |
-| Ubuntu — Webserver | `playbooks/webserver.yml` | `["--limit", "lab-ubuntu"]` |
-| Ubuntu — Patch preview | `playbooks/patch.yml` | `["--limit", "lab-ubuntu", "--check", "--diff"]` |
-| Ubuntu — Patch, no reboot | `playbooks/patch.yml` | `["--limit", "lab-ubuntu"]` |
-| Ubuntu — Patch, allow required reboot | `playbooks/patch.yml` | `["--limit", "lab-ubuntu"]` plus the reboot variable group |
+| Template | Path to playbook file | Limit | CLI args |
+| --- | --- | --- | --- |
+| Ubuntu — Ping | `playbooks/ping.yml` | `lab-ubuntu` | none |
+| Ubuntu — Baseline preview | `playbooks/baseline.yml` | `lab-ubuntu` | `--check`, `--diff` |
+| Ubuntu — Baseline apply | `playbooks/baseline.yml` | `lab-ubuntu` | `--diff` |
+| Ubuntu — Users | `playbooks/users.yml` | `lab-ubuntu` | none |
+| Ubuntu — Webserver | `playbooks/webserver.yml` | `lab-ubuntu` | none |
+| Ubuntu — Patch preview | `playbooks/patch.yml` | `lab-ubuntu` | `--check`, `--diff` |
+| Ubuntu — Patch, no reboot | `playbooks/patch.yml` | `lab-ubuntu` | none |
+| Ubuntu — Patch, allow required reboot | `playbooks/patch.yml` | `lab-ubuntu` | none; select the **Allow required reboot** variable group |
 
-Make equivalent Alma templates using **Alma practice** and `lab-alma`. Keep
-interactive argument overrides and schedules disabled while you learn the
-fixed templates. Do not add `-K` to a noninteractive UI job: the selected sudo
-credential supplies that authentication. Do not put a password in CLI arguments.
+Make equivalent Alma templates using **Alma practice** and `lab-alma`. Leave the
+**Prompts** and **Ansible prompts** check boxes and schedules off while you learn
+the fixed templates. Do not add `-K` to a noninteractive UI job: the selected
+sudo credential supplies that authentication. Do not put a password in CLI
+arguments.
 
-If your UI provides a dedicated limit field, use it consistently and avoid
-duplicating conflicting limits in extra arguments. Confirm the effective
-command and target recap in the task log. The included preflight rejects a
-missing limit and literal `all` or `*` values before SSH.
+This release passes the Limit option to Ansible as `--limit`. Putting
+`--limit lab-ubuntu` in CLI args instead also works, but do not set both: two
+limits in one template make the effective target hard to read. Confirm the
+target recap in the task log. The included preflight rejects a missing limit
+and literal `all` or `*` values before SSH.
 
 The current [Semaphore Ansible documentation](https://semaphoreui.com/docs/user-guide/apps/ansible)
 describes repository-relative paths, task arguments and credential selection.
 
 ## Step 7: qualify a complete job
+
+Launch a template with its run (▶) button, then **Run** in the dialog. The
+dialog's **Dry Run** (`--check`) and **Diff** (`--diff`) switches apply to that
+one run only; the preview templates keep those arguments fixed so a preview is
+repeatable.
 
 1. Run **Ubuntu — Ping**. Verify target identity, `changed=0`, and no failures.
 2. Run **Baseline preview**. Read all predicted changes and skipped tasks.
@@ -177,6 +203,12 @@ connections have a different identity-selection path.
 
 Keep strict host verification. Correct the service's actual known-hosts file,
 permissions, inventory or credentials rather than bypassing authentication.
+
+Privilege escalation is also configured differently. The terminal's `-K`
+password is used to become root; a Semaphore sudo credential with a Username
+becomes that user instead (see step 2). If Baseline apply works from the
+terminal but fails in Semaphore only when something needs changing, check that
+the sudo credential's Username is empty.
 
 ## Concept
 
