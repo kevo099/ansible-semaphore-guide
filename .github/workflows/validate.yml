@@ -20,7 +20,7 @@ jobs:
         run: python -m pip install -r requirements-dev.txt
       - name: Validate documentation and source boundaries
         run: python scripts/validate.py
-      - name: Test secret generation and assessment interpretation
+      - name: Run the offline unit tests
         run: python -m unittest discover -s tests -v
       - name: Check all lesson playbooks
         run: |
@@ -30,5 +30,12 @@ jobs:
           ansible-lint --offline playbooks/
       - name: Confirm the installers default to a plan
         run: |
-          bash scripts/install-controller.sh --plan
-          bash scripts/install-controller-el9.sh --plan
+          for installer in scripts/install-controller.sh scripts/install-controller-el9.sh; do
+            plan=$(bash "$installer")
+            grep -q '^Plan:' <<<"$plan"
+            bash "$installer" --plan >/dev/null
+          done
+      - name: Resolve the pinned controller runtime
+        run: python -m pip install --dry-run --ignore-installed --requirement requirements-controller.txt
+      - name: Reject whitespace errors and conflict markers in tracked files
+        run: git diff --check "$(git hash-object -t tree /dev/null)"
