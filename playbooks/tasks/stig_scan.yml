@@ -31,11 +31,12 @@
     quiet: true
   when: ansible_facts['os_family'] == 'Debian'
 
+# Each distribution packages its own data stream; never point one at another's content.
 - name: Choose the vendor STIG data stream for this Enterprise Linux release
   ansible.builtin.set_fact:
     stig_datastream: >-
-      /usr/share/xml/scap/ssg/content/ssg-{{ 'rhel9' if ansible_facts['distribution'] == 'RedHat'
-      else 'almalinux9' }}-ds.xml
+      /usr/share/xml/scap/ssg/content/ssg-{{ {'RedHat': 'rhel9', 'AlmaLinux': 'almalinux9',
+      'Rocky': 'rl9'}[ansible_facts['distribution']] }}-ds.xml
   when: ansible_facts['os_family'] == 'RedHat'
 
 - name: Create the evidence directory on the target

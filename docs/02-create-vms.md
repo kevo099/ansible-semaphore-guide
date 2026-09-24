@@ -14,10 +14,11 @@ Use official sources:
 - [Ubuntu Server downloads](https://ubuntu.com/download/server)
 - [Ubuntu cloud images](https://cloud-images.ubuntu.com/)
 - [AlmaLinux downloads](https://almalinux.org/get-almalinux/)
+- [Rocky Linux downloads](https://rockylinux.org/download)
 - [Red Hat Enterprise Linux downloads](https://developers.redhat.com/products/rhel/download)
 
 Select Ubuntu 24.04 LTS for the controller and Ubuntu target, plus AlmaLinux 9
-for the second target. Choose amd64/x86_64 to match the pinned controller
+or Rocky Linux 9 for the second target. Choose amd64/x86_64 to match the pinned controller
 binary. Verify the image against the publisher's checksum and signature
 instructions before import; a checksum copied from the same untrusted source
 as the image does not authenticate the publisher.
@@ -52,13 +53,19 @@ sudo systemctl enable --now ssh
 sudo systemctl start qemu-guest-agent
 ```
 
-On AlmaLinux 9:
+On AlmaLinux or Rocky Linux 9:
 
 ```bash
 sudo dnf install -y openssh-server sudo python3 python3-dnf python3-libselinux qemu-guest-agent
 sudo systemctl enable --now sshd
 sudo systemctl start qemu-guest-agent
 ```
+
+Give Enterprise Linux guests a random number generator device: in Proxmox,
+**Hardware → Add → VirtIO RNG**, or `qm set VMID --rng0 source=/dev/urandom`
+for a stopped VM. Rocky Linux enables `rngd` by default, and vendor STIG
+remediation enabled it on RHEL and Rocky Linux in the verification run. Without
+a hardware entropy source the service fails and the guest reports a failed unit.
 
 Guest-agent availability depends on the virtual hardware and the distribution's
 policy. Some images allow IP discovery but disable command execution. Use the

@@ -101,7 +101,7 @@ Use **Repositories → New Repository** to add **Guide examples**:
 | Field | Value |
 | --- | --- |
 | URL or path | `https://github.com/kevo099/ansible-semaphore-guide.git` |
-| Branch / Tag | `v1.0.0` for the initial reviewed examples |
+| Branch / Tag | `v1.1.0`, the reviewed examples |
 | Access Key | `No repository credential` (or the built-in **None**) |
 
 The release tag gives the job a deliberate version of the examples. A tag

@@ -37,7 +37,7 @@ ansible-playbook playbooks/patch.yml --limit lab-ubuntu \
 ```
 
 The lesson performs normal repository upgrades. On Ubuntu, it refuses an
-upgrade transaction requiring automatic removal. On Alma/RHEL, it checks DNF's
+upgrade transaction requiring automatic removal. On Enterprise Linux, it checks DNF's
 reboot-advice result and treats unexpected errors as errors. It is not labelled
 “security-only”: that claim would require the repository metadata and package
 manager's supported security-selection behavior.
@@ -76,7 +76,7 @@ systemctl is-active chrony
 curl --fail http://127.0.0.1:8080/
 ```
 
-Use `chronyd` on Alma/RHEL and run the HTTP check only if the web lesson is
+Use `chronyd` on Enterprise Linux and run the HTTP check only if the web lesson is
 installed. Check direct SSH, sudo and the managed service as appropriate.
 Ansible reconnecting proves SSH returned; it does not prove an application is
 ready for users.
