@@ -2,58 +2,69 @@
 
 [Back to the guide](../README.md)
 
-## What was exercised
+## Fresh-VM verification
 
-The underlying lab workflow was exercised with an Ubuntu 24.04 controller and
-Ubuntu 24.04/AlmaLinux 9 targets: native Semaphore with PostgreSQL, authenticated
-CLI/UI jobs, SSH trust, password-backed sudo, configuration apply/repeat, drift
-repair and controlled patch/reboot checks. Separate RHEL and Ubuntu vendor
-benchmark experiments informed the troubleshooting and assessment guidance.
+In September 2026 every chapter's commands were run on newly created,
+disposable Proxmox VMs imported from official cloud images, after checking the
+publishers' checksums and signatures: Ubuntu 24.04.5 and AlmaLinux 9.8. Three
+controllers were built: the Ubuntu installer path, the Ubuntu manual path with
+each documented block run as written, and the Enterprise Linux 9 seeded
+installer on AlmaLinux. Two fresh targets, Ubuntu 24.04.5 and AlmaLinux 9.8,
+were managed from them. Tested versions: Semaphore Community 2.19.12,
+ansible-core 2.20.8 and PostgreSQL 16.
 
-This public edition generalizes those patterns. It contains no private test
-inventories, credentials, machine identities or recovery artifacts. **The new
-generalized installer has not been applied to a fresh VM as part of this
-publication.** Its static checks do not establish end-to-end installation,
-fresh-controller restore, or compatibility with every image/package revision.
+| Area | Result |
+| --- | --- |
+| Controller installation | All three builds passed every readiness check, with the application and database on loopback only and SELinux enforcing on AlmaLinux. A controller reboot kept its configuration and jobs. |
+| Access (chapter 4) | Host keys were accepted only after comparing fingerprints. `sudo -n` was refused, `sudo -v` accepted and Ansible `-b -K` returned uid 0 on both targets. |
+| CLI lessons (chapter 5) | All five lessons on both OSes: previews, applies, `changed=0` repeats, drift repair, a page change without a handler, and refusals of a missing limit, invalid user names and a string reboot flag. The default patch left a required reboot pending; JSON `true` rebooted. |
+| Semaphore (chapter 6) | The project, inventory, repository, variable groups and a template were created and run in the UI. All 16 templates then succeeded on clean targets for both OSes, including drift repair and the reboot policy. |
+| Git and Vault (chapter 7) | An exercise branch in a reviewed local repository reached the target, and the normal ref restored it. One CLI run used each host's own Vault-encrypted sudo password, and Semaphore used them through a Vault key. |
+| Recovery (chapter 10) | The capture's checksums matched after copying it off the controller. An isolated replacement controller restored all 46 tables with matching row counts. While isolated, a job failed at the network layer. With one target allowed, Ping and a check-mode Baseline decrypted the restored SSH and sudo credentials. |
+| Seeded EL9 path (chapter 3b) | `add-target.sh` refused a mismatched fingerprint and a duplicate host. The lessons succeeded with both sudo-credential options. Each exposure mode opened only its intended port. On AlmaLinux the vendor `stig` profile went from 273 to 24 failing rules after one remediation pass without a reboot, with no scanner errors. Automation access and sudo still worked afterwards. |
 
-Before relying on it, perform the guide on disposable VMs and record your own
-results. Optional Azure, high-availability and independently stored backup
-designs require their own qualification. Vendor hardening results depend on
-the exact image, packages, profile, tailoring and external prerequisites.
+### Fixed during the verification
 
-## Enterprise Linux 9 installer: what was exercised
+- A Semaphore sudo credential's **Username** becomes `--become-user`. The
+  earlier instruction to enter `svc_ansible` there made privileged tasks fail
+  as soon as a change was needed.
+- The seeded project had no sudo credential, so its become templates failed
+  with `Missing sudo password`.
+- STIG audit stopped at an Ubuntu host without `usg` before any Enterprise
+  Linux host was assessed, and STIG apply could select every host at once.
+- The template **Limit** option does pass `--limit` in this release; an earlier
+  note here said otherwise. The seeder now uses it.
+- `--mode https` on Enterprise Linux also opened nginx's default plain-HTTP site
+  on port 80, and leaving https left nginx running.
+- The EL9 path pinned the Ed25519 host key, which the target stops offering
+  after vendor STIG remediation.
+- Rewriting the service's known-hosts file with `ssh-keygen -R`, creating a bare
+  repository with shared-repository settings, and creating Vault files could
+  each leave files the service cannot read. The readiness check and chapters 3b
+  and 7 now cover them.
 
-The `install-controller-el9.sh` path was applied to a fresh RHEL 9.8 x86_64
-cloud VM with vendor repositories available, twice: once while the seeding
-helper was being corrected, then once more from a new image with the final
-scripts in a single run. Observed on that image:
+### Not established
 
-- The installer completed the runtime, database, application, service account,
-  key pair, lab folder and API seeding without manual steps; the readiness
-  check reported every item true, both listeners loopback-only and SELinux
-  enforcing.
-- A task started from the seeded **Ping** template ran from the local lab
-  folder, read the file inventory, passed the playbooks' scope guard because
-  the seeded templates pass `--limit lab` as a CLI argument, accepted the
-  target's host key under strict checking, and stopped at the target with
-  `Permission denied (publickey)` until the automation key was authorized
-  there. The template `limit` field alone did not produce `--limit` on this
-  release, which is why the seeder uses the argument list.
-- `add-target.sh` added a host only when the scanned key matched the console
-  fingerprint, and changed neither file on a mismatch.
-- `expose-semaphore.sh --mode https` was applied to the same controller: nginx
-  answered `/api/ping` over TLS on its private address while port 3000 stayed
-  loopback-only, and `--mode loopback` reverted it. The `http` mode was not
-  exercised.
-- `stig-audit.yml` was run from the controller's command line against the
-  RHEL controller itself as a disposable local target: the scanner installed,
-  the vendor STIG profile evaluated, the report was fetched and summarized.
-  The Ubuntu path and `stig-apply.yml` were syntax-checked and linted only.
+- Registered RHEL 9 or Rocky Linux 9 in this run (the first EL9 run below used
+  RHEL 9.8), and the Ubuntu Security Guide, which needs your own Ubuntu Pro
+  attachment; only its prerequisite message was checked.
+- The STIG apply variant that reboots, FIPS mode, and repeated remediation.
+- More than one parallel Semaphore task, schedules, integrations, offsite
+  backup copies and high availability.
+- Clicking every UI form: the remaining templates and keys were created through
+  the same API after their forms were checked in the browser.
 
-Not established by this: AlmaLinux and Rocky images, RHEL without working
-repositories, a controller restore onto this path, or images newer than the
-one tested. Vendor cloud images may also carry pending updates; the installer
-does not reboot.
+## Earlier checks
+
+The first publication was checked offline only: syntax, lint, unit tests, the
+repository validator and a secret scan. Its patterns came from a separately
+exercised private lab.
+
+The Enterprise Linux 9 installer was first applied to a fresh RHEL 9.8 x86_64
+cloud VM with vendor repositories. The installer, seeding, `add-target.sh`,
+`--mode https` and a STIG audit of that controller completed there. That run
+concluded that the template Limit field did not produce `--limit`; the seeder
+had sent a field this release ignores, and the Limit option itself works.
 
 ## Repeat the offline checks
 
@@ -70,6 +81,7 @@ for playbook in playbooks/*.yml; do
 done
 .venv/bin/ansible-lint --offline playbooks/
 bash scripts/install-controller.sh --plan
+bash scripts/install-controller-el9.sh --plan
 git diff --check
 ```
 
