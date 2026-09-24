@@ -113,11 +113,27 @@
   delegate_to: localhost
   become: false
 
+# The summarizer prints its JSON and exits 0, or exits 2 after printing it when
+# error or unknown outcomes exist. Python also exits 2 with no output when the
+# script is missing, so the output must start like JSON before it is parsed.
 - name: Report the scan outcome counts for phase {{ stig_phase }}
   ansible.builtin.debug:
     msg: >-
-      {{ (stig_summary.stdout | from_json) if stig_summary.rc == 0
-         else 'Summary unavailable; read the HTML report. ' ~ stig_summary.stderr }}
+      {{ (stig_summary.stdout | from_json)
+         if (stig_summary.rc in [0, 2] and stig_summary.stdout.startswith('{'))
+         else 'Summary unavailable; read the HTML report. '
+              ~ (stig_summary.stderr or stig_summary.msg | default('')) }}
+
+- name: Warn about scanner errors or unknown outcomes for phase {{ stig_phase }}
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}: the {{ stig_phase }} results contain error or
+      unknown outcomes, so this scan is incomplete. Read those rules in the
+      HTML report before comparing counts.
+  when:
+    - stig_summary.rc in [0, 2]
+    - stig_summary.stdout.startswith('{')
+    - (stig_summary.stdout | from_json)['has_scanner_errors_or_unknowns']
 
 - name: Say where the evidence is for phase {{ stig_phase }}
   ansible.builtin.debug:
