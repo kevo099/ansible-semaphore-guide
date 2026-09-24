@@ -17,6 +17,8 @@ or loosen security controls without understanding what failed.
 | CLI works, Semaphore fails | Service-user known-hosts, agent key, inventory and sudo credential | Reproduce in the service context; do not disable host checking. |
 | Ansible cannot import `apt`/`dnf` | Target `/usr/bin/python3` and OS package bindings | Install the required target package through bootstrap; verify interpreter selection. |
 | Missing sudo password | Inventory's sudo credential or CLI `-K` | Supply the intended credential, and verify `sudo -v` independently. |
+| Semaphore task fails with `Destination /etc not writable` or similar only when something must change | The sudo credential's Username | Leave it empty. Semaphore passes a username there as `--become-user`, so tasks become that user instead of root. |
+| Semaphore cannot read a file (`Permission denied`) in a folder or bare repository it reads through the `semaphore` group | The file's group and mode, for example `find DIR ! -group semaphore` | Hand the file to the group with `sudo chgrp semaphore` and make it group-readable; do not add your account to that group or loosen the folder. |
 | `requiretty` or sudo/PTY issue | Scoped sudoers settings and pipelining | Validate the intended service account's rule with `visudo`; preserve password-backed sudo. |
 | No hosts matched | Working directory, inventory path, `lab` group and `--limit` | Run `ansible-inventory --graph` and `--list-hosts` before applying anything. |
 | Explicit limit rejected | Missing limit or literal `all`/`*` | Name one approved target or the intended lab group. |

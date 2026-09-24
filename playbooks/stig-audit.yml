@@ -1,0 +1,22 @@
+---
+# Read-only, so each host's result stands on its own: a host that is missing its
+# vendor scanner fails with an explanation without stopping the other hosts' scans.
+- name: Assess lab machines against their vendor STIG profile (scan only)
+  hosts: lab
+  become: true
+  gather_facts: false
+  vars:
+    stig_phase: audit
+    stig_profile_el: xccdf_org.ssgproject.content_profile_stig
+    stig_usg_profile: disa_stig
+    stig_fetch_remote_resources: false
+    stig_stamp: "{{ ansible_facts['date_time']['iso8601_basic_short'] }}"
+    stig_remote_dir: "/var/log/stig-practice/{{ stig_stamp }}"
+    stig_fetch_dir: "{{ lookup('env', 'HOME') }}/stig-reports/{{ stig_stamp }}"
+  pre_tasks:
+    - name: Check scope and supported operating system
+      ansible.builtin.import_tasks: tasks/preflight.yml
+      tags: always
+  tasks:
+    - name: Scan with the vendor tooling and collect the evidence
+      ansible.builtin.import_tasks: tasks/stig_scan.yml

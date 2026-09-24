@@ -151,6 +151,39 @@ as soon as the application starts.
 8. Point one test inventory at a disposable recovery target and run a real
    authenticated, non-changing job. Check sudo separately if it is required.
 
+### Restore the configuration files
+
+After step 2, with the verified recovery set staged privately, extract the
+configuration archive into its own staging directory and install each file by
+account name with its documented mode. Review the PostgreSQL files first; they
+belong only on a replacement with the same PostgreSQL major version:
+
+```bash
+umask 077
+install -d -m 0700 ~/private-staging/config
+tar -C ~/private-staging/config -xzf /PRIVATE/STAGING/controller-config.tar.gz
+c=~/private-staging/config/etc
+for f in config.json known_hosts gitconfig; do
+  sudo install -o root -g semaphore -m 0640 "$c/semaphore/$f" "/etc/semaphore/$f"
+done
+sudo install -o root -g root -m 0600 "$c/semaphore/initial-admin-password" \
+  /etc/semaphore/initial-admin-password
+sudo install -o root -g root -m 0600 "$c/semaphore/.initial-admin-created" \
+  /etc/semaphore/.initial-admin-created
+sudo install -o root -g root -m 0644 "$c/systemd/system/semaphore.service" \
+  /etc/systemd/system/semaphore.service
+sudo install -o postgres -g postgres -m 0644 \
+  "$c/postgresql/16/main/conf.d/ansible-guide.conf" \
+  /etc/postgresql/16/main/conf.d/ansible-guide.conf
+sudo install -o postgres -g postgres -m 0640 "$c/postgresql/16/main/pg_hba.conf" \
+  /etc/postgresql/16/main/pg_hba.conf
+sudo systemctl restart postgresql@16-main
+```
+
+The `.initial-admin-created` marker stops the admin helper from creating a
+second first administrator; the restored database already contains the
+accounts.
+
 ### Recreate the database role
 
 If your configuration still uses the guide's generated 48-character hex

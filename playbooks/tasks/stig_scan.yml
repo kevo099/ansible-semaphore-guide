@@ -1,0 +1,127 @@
+---
+# Shared by stig-audit.yml and stig-apply.yml. Uses only the operating-system
+# vendor's scanner and STIG content; the guide adds no rules of its own.
+# Expects: stig_phase, stig_profile_el, stig_usg_profile,
+# stig_fetch_remote_resources, stig_remote_dir, stig_fetch_dir.
+- name: Install the vendor SCAP scanner and content on Enterprise Linux
+  ansible.builtin.dnf:
+    name:
+      - openscap-scanner
+      - scap-security-guide
+    state: present
+    lock_timeout: 120
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: Look for the Ubuntu Security Guide command
+  ansible.builtin.command:
+    argv: [which, usg]
+  register: stig_usg_present
+  changed_when: false
+  failed_when: false
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: Explain the Ubuntu prerequisite instead of attaching a subscription
+  ansible.builtin.assert:
+    that:
+      - stig_usg_present.rc == 0
+    fail_msg: >-
+      usg is not installed on {{ inventory_hostname }}. Attach Ubuntu Pro with
+      your own account, then run: sudo pro enable usg && sudo apt-get install -y usg.
+      This lesson never handles subscription tokens.
+    quiet: true
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: Choose the vendor STIG data stream for this Enterprise Linux release
+  ansible.builtin.set_fact:
+    stig_datastream: >-
+      /usr/share/xml/scap/ssg/content/ssg-{{ 'rhel9' if ansible_facts['distribution'] == 'RedHat'
+      else 'almalinux9' }}-ds.xml
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: Create the evidence directory on the target
+  ansible.builtin.file:
+    path: "{{ stig_remote_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+# oscap returns 2 when at least one rule failed; only 1 is a scanner error.
+- name: Scan Enterprise Linux against the vendor STIG profile
+  ansible.builtin.command:
+    argv: >-
+      {{ ['oscap', 'xccdf', 'eval']
+         + (['--fetch-remote-resources'] if stig_fetch_remote_resources else [])
+         + ['--profile', stig_profile_el,
+            '--results', stig_remote_dir ~ '/' ~ stig_phase ~ '.xml',
+            '--report', stig_remote_dir ~ '/' ~ stig_phase ~ '.html',
+            stig_datastream] }}
+  register: stig_scan_el
+  changed_when: false
+  failed_when: stig_scan_el.rc not in [0, 2]
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: Scan Ubuntu with the Ubuntu Security Guide STIG profile
+  ansible.builtin.command:
+    argv:
+      - usg
+      - audit
+      - "{{ stig_usg_profile }}"
+      - --results-file
+      - "{{ stig_remote_dir }}/{{ stig_phase }}.xml"
+      - --html-file
+      - "{{ stig_remote_dir }}/{{ stig_phase }}.html"
+  register: stig_scan_usg
+  changed_when: false
+  failed_when: false
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: Confirm the scanner wrote its XCCDF results
+  ansible.builtin.stat:
+    path: "{{ stig_remote_dir }}/{{ stig_phase }}.xml"
+  register: stig_results_file
+
+- name: Stop when no results were produced
+  ansible.builtin.assert:
+    that:
+      - stig_results_file.stat.exists
+      - stig_results_file.stat.size > 0
+    fail_msg: >-
+      The vendor scanner produced no results on {{ inventory_hostname }}.
+      Inspect the task output above for the scanner's own error.
+    quiet: true
+
+- name: Fetch the results and report to the controller for phase {{ stig_phase }}
+  ansible.builtin.fetch:
+    src: "{{ stig_remote_dir }}/{{ stig_phase }}.{{ item }}"
+    dest: "{{ stig_fetch_dir }}/{{ inventory_hostname }}/{{ stig_phase }}.{{ item }}"
+    flat: true
+  loop:
+    - xml
+    - html
+
+- name: Summarize the fetched XCCDF result on the controller
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - "{{ playbook_dir }}/../scripts/summarize_xccdf.py"
+      - "{{ stig_fetch_dir }}/{{ inventory_hostname }}/{{ stig_phase }}.xml"
+  register: stig_summary
+  changed_when: false
+  failed_when: false
+  delegate_to: localhost
+  become: false
+
+- name: Report the scan outcome counts for phase {{ stig_phase }}
+  ansible.builtin.debug:
+    msg: >-
+      {{ (stig_summary.stdout | from_json) if stig_summary.rc == 0
+         else 'Summary unavailable; read the HTML report. ' ~ stig_summary.stderr }}
+
+- name: Say where the evidence is for phase {{ stig_phase }}
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}: {{ stig_phase }} report kept on the target under
+      {{ stig_remote_dir }} and fetched to {{ stig_fetch_dir }}/{{ inventory_hostname }}.
+      A completed scan is evidence, not compliance; failed, manual and
+      not-applicable rules still need a reader.

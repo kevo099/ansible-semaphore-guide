@@ -28,5 +28,7 @@ jobs:
             ansible-playbook -i inventories/lab.ini.example --syntax-check "$playbook"
           done
           ansible-lint --offline playbooks/
-      - name: Confirm the installer defaults to a plan
-        run: bash scripts/install-controller.sh --plan
+      - name: Confirm the installers default to a plan
+        run: |
+          bash scripts/install-controller.sh --plan
+          bash scripts/install-controller-el9.sh --plan

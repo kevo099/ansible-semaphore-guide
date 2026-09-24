@@ -130,7 +130,7 @@ systemctl daemon-reload
 systemctl enable --now semaphore
 
 for attempt in {1..30}; do
-  if curl -fsS -o /dev/null http://127.0.0.1:3000/api/ping; then break; fi
+  if curl -fs -o /dev/null http://127.0.0.1:3000/api/ping; then break; fi
   sleep 1
 done
 python3.12 "$script_dir/check-controller.py"

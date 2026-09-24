@@ -98,7 +98,17 @@ mkdir -p inventories/host_vars
 Enter `ansible_become_password` and the target's actual password **inside the
 Vault editor**, never as a command-line value. Create the matching encrypted
 file for `lab-alma`. Unlock them with `--ask-vault-pass` when running Ansible,
-or configure a protected Vault credential in your own Semaphore project.
+for example `ansible-playbook playbooks/baseline.yml --limit lab --private-key
+~/.ssh/ansible_lab --ask-vault-pass`, which uses each host's own sudo password
+in one run.
+
+Semaphore can unlock the same files when it reads them from a repository or
+folder: create a Key Store entry of type **Login with password** with an empty
+Username and the Vault password, then add it to each template under **Ansible
+options → Vaults**. Every template that reads those hosts needs it, including
+Ping, because Ansible loads all host variables. `ansible-vault create` writes
+new files readable only by you, so the files must also be made readable by the
+service before a task can open them.
 
 This public repository ignores local inventory files and directories. Keep
 Vault content and its unlocking credential separate. An encrypted file is
@@ -110,23 +120,56 @@ before combining per-host secrets and Vault.
 
 ## Optional: a reviewed local repository on the controller
 
-Some operators prefer Semaphore to read a root-owned bare repository through
-`file:///opt/ansible-guide.git`. This decouples the runner from remote branch
-updates, but introduces a deliberate code-promotion step.
+Some operators prefer Semaphore to read a bare repository on the controller
+through `file:///opt/ansible-guide.git`. This decouples the runner from remote
+branch updates, but introduces a deliberate code-promotion step: only what you
+push there can run.
 
-Create that bare repository from a reviewed commit using your administrator's
-deployment process. Grant the service read access, keep write access with the
-owner, and add only that exact path to `/etc/semaphore/gitconfig`:
+**Where: controller, as your administrator, from your working copy.** Your
+account owns and writes the repository; the service reads it through the
+`semaphore` group, which new files inherit from the directory's setgid bit:
+
+```bash
+sudo install -d -o "$USER" -g semaphore -m 2750 /opt/ansible-guide.git
+git init --bare /opt/ansible-guide.git
+git push /opt/ansible-guide.git main --tags
+(cd / && sudo -u semaphore env GIT_CONFIG_GLOBAL=/etc/semaphore/gitconfig \
+  git ls-remote /opt/ansible-guide.git)
+```
+
+The last command reads the repository as the service, from a directory it may
+enter. It should list `main` and your tags. Promote a reviewed branch later with
+`git push /opt/ansible-guide.git BRANCH`, and check that nothing has left the
+service's group:
+
+```bash
+find /opt/ansible-guide.git ! -group semaphore
+```
+
+The command should print nothing. Two tempting shortcuts break this:
+
+- Do not add `--shared` or `core.sharedRepository`. Git then resets modes on
+  the directories it creates. Because your account is deliberately not a member
+  of the `semaphore` group, the kernel clears the setgid bit on each reset, and
+  later pushes land in your own group where the service cannot read them.
+- Do not add yourself to the `semaphore` group. That group can read the
+  controller's configuration, including the database password and the Key Store
+  encryption key.
+
+The Ubuntu installer already trusts exactly this path in
+`/etc/semaphore/gitconfig`. The Enterprise Linux installer trusts its lab folder
+there instead; add a second `directory =` line for this path:
 
 ```gitconfig
 [safe]
     directory = /opt/ansible-guide.git
 ```
 
-Do not use `safe.directory=*`. Test the service's read access and the selected
-ref after promotion. The service's writable task clones belong under
-`/var/lib/semaphore`; they are not the canonical source to edit or back up as
-your only Git copy.
+Do not use `safe.directory=*`. In Semaphore, add a repository with URL
+`file:///opt/ansible-guide.git`, the **None** access key and the branch you
+promoted, then run a template that uses it and verify the result on the target.
+The service's writable task clones belong under `/var/lib/semaphore`; they are
+not the canonical source to edit or back up as your only Git copy.
 
 ## Check
 
