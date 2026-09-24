@@ -57,18 +57,23 @@ def publication_boundary(path, text):
         fail(path, "private/runtime file cannot be published")
     # Keep the patterns split so this validator does not match its own examples.
     patterns = {
-        "private key material": r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE" + r" KEY-----",
+        # Any PEM private key header: RSA, EC, OPENSSH, PKCS#8 and ENCRYPTED alike.
+        "private key material": r"-----BEGIN [A-Z0-9 ]*PRIVATE" + r" KEY",
         "GitHub credential": r"\bgh[pousr]_" + r"[A-Za-z0-9]{30,}",
         "GitHub fine-grained credential": r"github_pat_" + r"[A-Za-z0-9_]{30,}",
         "cloud credential identifier": r"\b(?:AKIA|ASIA)" + r"[A-Z0-9]{16}\b",
-        "machine/account identifier": r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
-        "personal workspace path": r"/home/" + r"(?!svc_ansible/)[A-Za-z0-9_.-]+/",
+        # SMBIOS, Windows and Azure tools print the same identifiers in upper case.
+        "machine/account identifier": r"(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
+        # Any account's home except the lab service account, with or without a trailing slash.
+        # The service account's home may still end a sentence.
+        "personal workspace path": r"/home/" + r"(?!svc_ansible(?![\w-]|\.\w))[A-Za-z0-9_.-]+",
         "credentials embedded in URL": r"https?://[^\s/:]+:[^\s/@]+@",
     }
     for label, pattern in patterns.items():
         if re.search(pattern, text):
             fail(path, label)
-    for match in re.findall(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?![\w.])", text):
+    # A sentence may end with an address; only a further dotted digit group makes it a version.
+    for match in re.findall(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?!\w|\.\d)", text):
         try:
             address = ipaddress.ip_address(match)
         except ValueError:
@@ -76,10 +81,12 @@ def publication_boundary(path, text):
         if not address.is_loopback:
             fail(path, "literal non-loopback address; use documentation hostnames")
             break
-    for url in re.findall(r"https://github\.com/[^\s)\]>'\"`]+", text):
-        parts = urlsplit(url).path.strip("/").split("/")
-        if parts[0] == "kevo099" and len(parts) > 1 and parts[1].removesuffix(".git") != "ansible-semaphore-guide":
+    # Owner names are case-insensitive, and clone and raw-file URLs are links too.
+    owner_repository = r"(?i)(?:github\.com[/:]|githubusercontent\.com/)" + r"kevo099/([\w.-]+)"
+    for repository in re.findall(owner_repository, text):
+        if repository.lower().rstrip(".").removesuffix(".git") != "ansible-semaphore-guide":
             fail(path, "unreviewed owner repository link")
+            break
 
 
 def markdown(path, content):
