@@ -81,7 +81,7 @@ systemctl is-enabled chrony
 exit
 ```
 
-On Alma/RHEL the service name is `chronyd`.
+On Enterprise Linux the service name is `chronyd`.
 
 **Concept:** idempotence means that applying the same desired state again does
 not keep rewriting it. A later package-cache refresh can report a change

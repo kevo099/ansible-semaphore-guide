@@ -25,7 +25,7 @@
         policy_rc_d: 101
       when: ansible_facts['os_family'] == 'Debian'
 
-    - name: Install nginx on AlmaLinux or RHEL
+    - name: Install nginx on Enterprise Linux
       ansible.builtin.dnf:
         name: nginx
         state: present

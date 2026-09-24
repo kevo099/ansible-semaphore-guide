@@ -60,7 +60,7 @@ systemctl --failed
 sudo journalctl -u ssh --since today --no-pager
 ```
 
-Use `sshd` as the journal unit on Alma/RHEL. If access is broken, perform these
+Use `sshd` as the journal unit on Enterprise Linux. If access is broken, perform these
 checks through the guest console. Compare the result with the pre-hardening
 record, including crypto policy and which host keys are currently offered.
 

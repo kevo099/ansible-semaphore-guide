@@ -98,7 +98,7 @@ sudo apt-get install -y python3 python3-apt sudo openssh-server
 /usr/bin/python3 -c 'import apt'
 ```
 
-For AlmaLinux or registered RHEL 9:
+For AlmaLinux, Rocky Linux or registered RHEL 9:
 
 ```bash
 sudo dnf install -y python3 python3-dnf python3-libselinux sudo openssh-server
@@ -160,7 +160,7 @@ sudo /usr/sbin/sshd -T -C user=svc_ansible,host=controller.example.test,addr=CON
 
 Look for `authenticationmethods publickey`, `passwordauthentication no` and
 `kbdinteractiveauthentication no`. Resolve configuration conflicts before
-reloading. On Ubuntu use `sudo systemctl reload ssh`; on Alma/RHEL use
+reloading. On Ubuntu use `sudo systemctl reload ssh`; on Enterprise Linux use
 `sudo systemctl reload sshd`. This reload is a deliberate access-policy change.
 
 ## Step 5: test all three layers
@@ -184,7 +184,7 @@ sudo id -u
 
 The noninteractive `sudo -n true` should fail because a password is required.
 `sudo -v` should accept the account's password; `sudo id -u` should then print
-`0`. Repeat on the Alma/RHEL target with its own password.
+`0`. Repeat on the Enterprise Linux target with its own password.
 
 Next, create the controller's private inventory from the repository root:
 

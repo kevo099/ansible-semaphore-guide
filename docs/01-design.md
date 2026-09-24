@@ -22,8 +22,8 @@ Start with one Semaphore task at a time. Larger inventories, report retention,
 package upgrades and security scanners can need more resources. Recheck actual
 available memory and disk before allocating VMs.
 
-RHEL 9 can replace the AlmaLinux target if you have appropriate repository
-access. AlmaLinux is useful for general Enterprise Linux administration; it
+Rocky Linux 9 can replace the AlmaLinux target directly. RHEL 9 can replace it
+if you have appropriate repository access. AlmaLinux is useful for general Enterprise Linux administration; it
 does not turn an AlmaLinux benchmark into Red Hat's RHEL benchmark.
 
 The `.example.test` names are documentation examples. Use your own DNS or put

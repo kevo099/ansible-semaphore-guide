@@ -87,7 +87,7 @@ accounts. Read each playbook before running it.
 | Ansible Core | 2.20.8 |
 | Semaphore UI | Community 2.19.12, checksum-verified native binary |
 | Database | PostgreSQL 16 from Ubuntu repositories or the EL9 `postgresql:16` module stream |
-| Main practice targets | Ubuntu 24.04 and AlmaLinux 9 |
+| Main practice targets | Ubuntu 24.04 and AlmaLinux 9; Rocky Linux 9 also works |
 | Optional vendor target | Registered RHEL 9 |
 
 These are reproducibility pins, not a claim that they are the newest releases.

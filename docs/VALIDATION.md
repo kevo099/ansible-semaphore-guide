@@ -23,6 +23,7 @@ ansible-core 2.20.8 and PostgreSQL 16.
 | Recovery (chapter 10) | The capture's checksums matched after copying it off the controller. An isolated replacement controller restored all 46 tables with matching row counts. While isolated, a job failed at the network layer. With one target allowed, Ping and a check-mode Baseline decrypted the restored SSH and sudo credentials. |
 | Seeded EL9 path (chapter 3b) | `add-target.sh` refused a mismatched fingerprint and a duplicate host. The lessons succeeded with both sudo-credential options. Each exposure mode opened only its intended port. On AlmaLinux the vendor `stig` profile went from 273 to 24 failing rules after one remediation pass without a reboot, with no scanner errors. Automation access and sudo still worked afterwards. |
 | Registered vendor guests (chapters 3b, 5 and 9) | On a registered RHEL 9.8 guest and an Ubuntu 24.04.5 guest attached to Ubuntu Pro, chapter 9's RHEL and USG commands ran as written, including the CIS preparation, before-scan and fix-script generation. All five lessons converged on RHEL. STIG audit assessed both hosts in one run; the Ubuntu Security Guide path also ran through Semaphore on a seeded controller installed on that RHEL guest. STIG apply with the approved reboot took Ubuntu from 64 to 10 failing rules and RHEL from 266 to 13, with no scanner errors, and automation access and sudo worked afterwards. Both guests were then restored to their pre-test checkpoints. |
+| Rocky Linux 9.8 (chapters 3b, 5 and 9) | The seeded installer ran on a Rocky controller, and its templates managed an AlmaLinux and a Rocky target. On Rocky, every lesson converged, STIG audit used Rocky's own `ssg-rl9-ds.xml`, and STIG apply with the approved reboot took failing rules from 262 to 26 with no scanner errors; access and sudo worked afterwards. With a VirtIO RNG device the STIG-enabled `rngd` stayed healthy. |
 
 ### Fixed during the verification
 
@@ -46,8 +47,7 @@ ansible-core 2.20.8 and PostgreSQL 16.
 
 ### Not established
 
-- Rocky Linux 9.
-- FIPS mode. On RHEL and AlmaLinux the vendor STIG sets the `FIPS:STIG` crypto
+- FIPS mode. On RHEL, AlmaLinux and Rocky Linux the vendor STIG sets the `FIPS:STIG` crypto
   policy, but `fips-mode-setup --check` then reports that FIPS mode is not
   enabled; Ubuntu was not switched to FIPS kernels.
 - Repeated remediation until no further rule changes.

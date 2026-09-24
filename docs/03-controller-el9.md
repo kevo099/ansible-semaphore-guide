@@ -224,8 +224,8 @@ shown above before Semaphore can read them.
 
 Two of the seeded templates wrap the operating-system vendor's own STIG
 tooling, the same commands [chapter 9](09-security-benchmarks.md) walks through
-by hand: the packaged SCAP Security Guide `stig` profile on RHEL and
-AlmaLinux, and the Ubuntu Security Guide `disa_stig` profile on Ubuntu. The
+by hand: the packaged SCAP Security Guide `stig` profile on RHEL, AlmaLinux
+and Rocky Linux, and the Ubuntu Security Guide `disa_stig` profile on Ubuntu. The
 guide adds no rules of its own.
 
 - **STIG audit (vendor scan only)** installs the scanner where missing, runs
@@ -234,7 +234,7 @@ guide adds no rules of its own.
   counts. It changes no policy. Ubuntu needs `usg` already installed through
   your own Ubuntu Pro attachment. Without it, that host fails with an
   explanation while the other hosts' scans still complete, so the task is
-  marked failed but the AlmaLinux or RHEL results are in the same log.
+  marked failed but the Enterprise Linux results are in the same log.
 - **STIG apply (vendor fixes, approval required)** scans, applies the vendor
   remediation with `oscap --remediate` or `usg fix`, optionally reboots, and
   scans again. It changes exactly one target per run: its Run dialog asks for
@@ -250,7 +250,8 @@ home of the service or of your account, depending on where you ran it.
 **Concept:** vendor remediation is not gentle. It commonly removes
 passwordless sudo, tightens SSH and changes kernel parameters, and a first
 pass often leaves failing rules that need a reboot or a manual decision. On
-AlmaLinux 9 and RHEL 9 it sets the `FIPS:STIG` crypto policy: the target then offers only
+AlmaLinux, Rocky Linux and RHEL 9 it sets the `FIPS:STIG` crypto policy: the
+target then offers only
 RSA and ECDSA host keys and refuses Ed25519 user keys, including an
 administrator's everyday Ed25519 key. The guide's RSA host-key pin and RSA 4096
 automation key keep working. The policy alone does not enable FIPS mode; see

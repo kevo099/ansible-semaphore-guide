@@ -182,10 +182,10 @@ file, then pass it explicitly to the audit/fix commands. Record exclusions and
 who owns their decision. [Canonical's tailoring guide](https://documentation.ubuntu.com/security/compliance/usg/disa-customize/)
 describes the mechanism; editing a tailoring file does not itself approve risk.
 
-## AlmaLinux: inspect its native content
+## AlmaLinux and Rocky Linux: inspect their native content
 
-AlmaLinux may package content that differs from the upstream archive or from
-RHEL's package, even when a release label looks similar:
+AlmaLinux and Rocky Linux may package content that differs from the upstream
+archive or from RHEL's package, even when a release label looks similar:
 
 ```bash
 sudo dnf install -y openscap-scanner scap-security-guide
@@ -193,8 +193,12 @@ rpm -q openscap-scanner scap-security-guide
 oscap info /usr/share/xml/scap/ssg/content/ssg-almalinux9-ds.xml
 ```
 
-Start with an assessment of an available Alma profile. Do not point an Alma
-guest at RHEL's datastream to obtain a preferred label. If a generated vendor
+On Rocky Linux the data stream is `ssg-rl9-ds.xml`. Its `stig` profile is
+titled for RHEL 9: it is the DISA RHEL 9 STIG as Rocky packages it, not a
+separate Rocky STIG.
+
+Start with an assessment of an available profile. Do not point an Alma or
+Rocky guest at RHEL's datastream to obtain a preferred label. If a generated vendor
 fix behaves unexpectedly, preserve the evidence and investigate that exact
 content. Do not mask reboot commands, disable SELinux or suppress a finding
 simply to get a green task.
@@ -227,7 +231,9 @@ report. No compliance percentage is calculated.
 After remediation, check `systemctl --failed` and the crypto policy before
 trusting the host again. In the verification run, one vendor STIG pass with a
 reboot left `sssd.service` failed on Ubuntu 24.04, because no SSSD domain was
-configured, and `rngd.service` failed on RHEL 9.8. RHEL and AlmaLinux switched
+configured. The STIG enables `rngd.service`, which failed on a RHEL 9.8 VM with
+no hardware entropy source and ran normally on Rocky Linux with a VirtIO RNG
+device ([chapter 2](02-create-vms.md)). RHEL, AlmaLinux and Rocky Linux switched
 to the `FIPS:STIG` crypto policy, stopped offering Ed25519 host keys and kept
 FIPS mode disabled. Ubuntu's USG accepted the `disa_stig` profile alias used by
 the seeded STIG lessons, although `benchmarks.json` lists `stig-v1r1`.

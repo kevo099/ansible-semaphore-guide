@@ -21,12 +21,12 @@
       - >-
         (ansible_facts['distribution'] == 'Ubuntu' and
          ansible_facts['distribution_version'] == '24.04') or
-        (ansible_facts['distribution'] in ['AlmaLinux', 'RedHat'] and
+        (ansible_facts['distribution'] in ['AlmaLinux', 'Rocky', 'RedHat'] and
          ansible_facts['distribution_major_version'] == '9')
       - ansible_facts['service_mgr'] == 'systemd'
     fail_msg: >-
-      This lesson supports Ubuntu 24.04 and AlmaLinux/RHEL 9 with
-      systemd. Found {{ ansible_facts['distribution'] }}
+      This lesson supports Ubuntu 24.04 and AlmaLinux, Rocky Linux or RHEL 9
+      with systemd. Found {{ ansible_facts['distribution'] }}
       {{ ansible_facts['distribution_version'] }} using
       {{ ansible_facts['service_mgr'] }}. Review the OS mapping before extending it.
     quiet: true
