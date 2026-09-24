@@ -224,6 +224,14 @@ Its exit code 0 means the selected XML parsed without error/unknown outcomes,
 indicates invalid input or ambiguous selection. Read the counts and original
 report. No compliance percentage is calculated.
 
+After remediation, check `systemctl --failed` and the crypto policy before
+trusting the host again. In the verification run, one vendor STIG pass with a
+reboot left `sssd.service` failed on Ubuntu 24.04, because no SSSD domain was
+configured, and `rngd.service` failed on RHEL 9.8. RHEL and AlmaLinux switched
+to the `FIPS:STIG` crypto policy, stopped offering Ed25519 host keys and kept
+FIPS mode disabled. Ubuntu's USG accepted the `disa_stig` profile alias used by
+the seeded STIG lessons, although `benchmarks.json` lists `stig-v1r1`.
+
 A first remediation can install packages that make additional checks
 applicable. A second scan can therefore expose failures that were previously
 not applicable. Investigate the transition instead of assuming the host became
