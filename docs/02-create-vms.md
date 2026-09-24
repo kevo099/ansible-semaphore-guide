@@ -78,6 +78,12 @@ A cloud image can shorten repeat builds once you understand the manual path:
 5. Verify the address and SSH host-key fingerprint through the trusted console
    or authenticated provider control plane.
 
+Enterprise Linux cloud images can ignore a short `hostname:` value in
+cloud-init user data and keep the static hostname `localhost`, because their
+cloud-init prefers a fully qualified name. Supply `fqdn:` as well, or set the
+name afterwards with `sudo hostnamectl set-hostname NAME`, and confirm it with
+the checks below.
+
 Do not infer a disk format from its filename. A `.img` download can contain
 qcow2 bytes; inspect it with `qemu-img info` on the system performing the import.
 Do not clone a running controller's database and credentials as a generic
