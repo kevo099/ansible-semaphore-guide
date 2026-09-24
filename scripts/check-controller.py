@@ -58,6 +58,13 @@ def main():
             checks["port_3000_bound_on_all_addresses"] = any_address in hosts or "*" in hosts
         else:
             checks[f"port_{port}_only_loopback"] = bool(hosts) and all(host in {"127.0.0.1", "::1"} for host in hosts)
+    # nginx may listen beyond loopback only on 443, and only for the https exposure.
+    nginx_ports = set()
+    for line in subprocess.check_output(["ss", "-H", "-lntp"], text=True).splitlines():
+        host, _, port = line.split()[3].rpartition(":")
+        if '"nginx"' in line and host.strip("[]") not in {"127.0.0.1", "::1"}:
+            nginx_ports.add(port)
+    checks["nginx_listens_only_where_expected"] = nginx_ports <= ({"443"} if exposure == "https" else set())
     if exposure == "https":
         checks["nginx_tls_proxy_is_active"] = command_ok(["systemctl", "is-active", "--quiet", "nginx"])
         tls_listeners = [line.split()[3] for line in listeners.splitlines() if line.split()[3].endswith(":443")]
