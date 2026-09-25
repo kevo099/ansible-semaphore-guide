@@ -17,13 +17,13 @@ hostnames with your own addresses and generate credentials locally.
 
 ```mermaid
 flowchart LR
-    W[Your workstation] -->|SSH administration and local browser tunnel| C[Controller VM: Ubuntu 24.04]
+    W[Your workstation] -->|SSH administration and local browser tunnel| C[Controller VM: Ubuntu 24.04, or RHEL, AlmaLinux or Rocky Linux 9.4 or later]
     C --> S[Semaphore UI: loopback port 3000]
     S --> P[(PostgreSQL 16: loopback port 5432)]
     S --> A[Ansible in a Python virtual environment]
     G[Reviewed Git repository] -->|Fetch when a task runs| S
     A -->|SSH and sudo| U[Ubuntu 24.04 target]
-    A -->|SSH and sudo| E[AlmaLinux 9 or RHEL 9 target]
+    A -->|SSH and sudo| E[AlmaLinux, Rocky Linux or RHEL 9 target]
 ```
 
 The controller runs on a dedicated VM. Ansible connects to the targets over
@@ -38,7 +38,7 @@ it does not replace the playbooks.
 | 1 | [Design and prerequisites](docs/01-design.md) | Choose resources, networks and account boundaries. |
 | 2 | [Create the VMs](docs/02-create-vms.md) | Build a controller and two fresh targets. |
 | 3 | [Install the controller](docs/03-controller.md) | Install natively, manually or with the reviewed installer. |
-| 3b | [Enterprise Linux 9 seeded controller](docs/03-controller-el9.md) | Alternative: one run installs and seeds a local-folder practice project on RHEL, Alma or Rocky 9. |
+| 3b | [Enterprise Linux 9 seeded controller](docs/03-controller-el9.md) | Alternative: one run installs and seeds a local-folder practice project on RHEL, AlmaLinux or Rocky Linux 9.4 or later. |
 | 4 | [SSH, sudo and target bootstrap](docs/04-access.md) | Establish verified, key-based automation access. |
 | 5 | [Command-line Ansible lessons](docs/05-cli-lessons.md) | Preview, apply, repeat and inspect five playbooks. |
 | 6 | [Configure Semaphore](docs/06-semaphore.md) | Run the same lessons from named task templates. |
@@ -66,7 +66,7 @@ before proceeding to the next layer.
 | [`playbooks/stig-audit.yml`](playbooks/stig-audit.yml) | Scans each selected target with the OS vendor's STIG content (SCAP Security Guide or Ubuntu Security Guide) and fetches the report; changes no policy. |
 | [`playbooks/stig-apply.yml`](playbooks/stig-apply.yml) | Applies the vendor's own STIG remediation to exactly one target per run after an explicit recovery-point approval, with before and after scans. |
 | [`scripts/install-controller.sh`](scripts/install-controller.sh) | Shows a plan by default; `--apply` bootstraps a fresh Ubuntu controller. |
-| [`scripts/install-controller-el9.sh`](scripts/install-controller-el9.sh) | Same contract for RHEL, AlmaLinux or Rocky 9; also seeds a local-folder practice project through the API. |
+| [`scripts/install-controller-el9.sh`](scripts/install-controller-el9.sh) | Same contract for RHEL, AlmaLinux or Rocky Linux 9.4 or later; also seeds a local-folder practice project through the API. |
 | [`scripts/seed-semaphore.py`](scripts/seed-semaphore.py) | Creates the practice project, keys, local repository, file inventory and templates on loopback; prints names and ids only. |
 | [`scripts/expose-semaphore.sh`](scripts/expose-semaphore.sh) | Publishes the UI on the VM's address behind an nginx TLS proxy, or in plain HTTP, or reverts to loopback. |
 | [`scripts/add-target.sh`](scripts/add-target.sh) | Adds a host to the local inventory only when its scanned host key matches the fingerprint you read from its console. |
@@ -82,21 +82,26 @@ accounts. Read each playbook before running it.
 
 | Component | Guide baseline |
 | --- | --- |
-| Native controller | Ubuntu Server 24.04 LTS, amd64; alternative Enterprise Linux 9 x86_64 path |
+| Native controller | Ubuntu Server 24.04 LTS, amd64; alternative seeded path on RHEL, AlmaLinux or Rocky Linux 9.4 or later, x86_64 (RHEL registered, with BaseOS and AppStream enabled) |
 | Controller Python | 3.12 in the operating system; separate Ansible virtual environment |
-| Ansible Core | 2.20.8 |
+| Ansible Core | 2.20.8, with every Python dependency pinned in [`requirements-controller.txt`](requirements-controller.txt) |
 | Semaphore UI | Community 2.19.12, checksum-verified native binary |
 | Database | PostgreSQL 16 from Ubuntu repositories or the EL9 `postgresql:16` module stream |
 | Main practice targets | Ubuntu 24.04 and AlmaLinux 9; Rocky Linux 9 also works |
-| Optional vendor target | Registered RHEL 9 |
+| Optional vendor targets | Registered RHEL 9; Ubuntu 24.04 attached to Ubuntu Pro for the Ubuntu Security Guide |
 
-These are reproducibility pins, not a claim that they are the newest releases.
-Review release notes and rerun validation before upgrading. No container
-runtime, Kubernetes cluster, domain controller or paid Semaphore feature is
-required for the main walkthrough.
+These are the tested versions, not a claim that they are the newest releases.
+Semaphore is pinned by version and checksum, and the Ansible environment by
+`requirements-controller.txt`. Python 3.12, PostgreSQL 16 and the other
+operating-system packages follow the distribution's updates within the release
+series shown. Review release notes and rerun validation before upgrading. No
+container runtime, Kubernetes cluster, domain controller or paid Semaphore
+feature is required for the main walkthrough.
 
-See [validation and limitations](docs/VALIDATION.md) for the distinction between
-the previously exercised workflows and this generalized publication's checks.
+See [validation and limitations](docs/VALIDATION.md) for what the September
+2026 runs on fresh VMs, registered RHEL and Ubuntu Pro guests and Rocky Linux
+verified, the versions tested, what they did not establish, and how to repeat
+the offline checks.
 This is a learning setup, not a high-availability production design or a claim
 of compliance with a security standard.
 

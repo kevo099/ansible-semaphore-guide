@@ -1,3 +1,15 @@
-# Install in a controller venv with Python 3.12, 3.13, or 3.14.
-# This release supports the Python 3.9 supplied by EL9 targets.
+# Controller runtime for /opt/ansible-venv. Both installers and the manual path
+# in docs/03-controller.md install exactly this set with Python 3.12, the set
+# pip resolved in every verification install in September 2026.
+# ansible-core declares open ranges for its dependencies, so each one is pinned
+# here too. Change them together, then repeat docs/VALIDATION.md before publishing.
+# This ansible-core release supports the Python 3.9 supplied by EL9 targets.
 ansible-core==2.20.8
+cffi==2.1.1
+cryptography==50.0.1
+Jinja2==3.1.6
+MarkupSafe==3.0.3
+packaging==26.3
+pycparser==3.0
+PyYAML==6.0.3
+resolvelib==1.2.1

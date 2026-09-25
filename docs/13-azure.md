@@ -50,7 +50,8 @@ them for your pinned collection version.
 
 ## Example cloud-init content
 
-The example below is a template. It contains no working key or password:
+The example below is a template for an Ubuntu 24.04 image. It contains no
+working key or password:
 
 ```yaml
 #cloud-config
@@ -67,15 +68,36 @@ packages:
   - python3-apt
 ```
 
+For an AlmaLinux, Rocky Linux or RHEL 9 image, keep the same `users:` section
+but replace the package list with the Enterprise Linux prerequisites from
+[the access guide](04-access.md#step-3-prepare-a-dedicated-target-account):
+
+```yaml
+packages:
+  - python3
+  - python3-dnf
+  - python3-libselinux
+```
+
+`python3-apt` does not exist in Enterprise Linux 9 repositories. One unknown
+name makes `dnf` reject the whole list, and `cloud-init status` then reports an
+error. RHEL also needs working repositories at first boot.
+
 Render the automation **public** key from a controller-side public-key file.
 Keep the private key on the controller. Azure also needs the supported
 bootstrap administrator/SSH configuration in its VM definition; that is
 separate from this additional automation account.
 
-This example does not grant sudo to the new account. Establish its intended
-sudo policy and password through the trusted bootstrap administrator using
-[the access guide](04-access.md), or design a separate approved secret-delivery
-mechanism. Do not insert a reusable plaintext sudo password into custom data.
+This example does not grant sudo to the new account, and `lock_passwd: true`
+leaves it without a password. After the first boot, cloud-init has already
+created `svc_ansible` and installed its key, so skip the `scp`, `useradd` and
+key `install` commands in
+[the access guide's Step 3](04-access.md#step-3-prepare-a-dedicated-target-account).
+Through the trusted bootstrap administrator, run `sudo passwd svc_ansible` and
+that step's prerequisite checks, then complete
+[Step 4](04-access.md#step-4-configure-sudo-and-the-accounts-ssh-policy).
+Or design a separate approved secret-delivery mechanism. Do not insert a
+reusable plaintext sudo password into custom data.
 
 Use a supported cloud-init image and validate the rendered configuration before
 creation. After the first boot, check `cloud-init status --wait` and inspect its
@@ -90,7 +112,10 @@ tasks or a deliberately planned rebuild for later changes. See
   control plane.
 - Obtain the public SSH host key through a trusted console or authenticated
   control-plane mechanism before pinning it.
-- Confirm cloud-init completed, then test actual SSH, Python and sudo.
+- Confirm cloud-init completed. After the sudo step above, run
+  [the access guide's Step 5](04-access.md#step-5-test-all-three-layers) checks
+  against the new host. Before that step, sudo for `svc_ansible` is expected to
+  fail.
 - Manage a harmless configuration file, repeat the playbook and inspect which
   tasks still report changes.
 - Reboot deliberately and repeat guest/application checks.

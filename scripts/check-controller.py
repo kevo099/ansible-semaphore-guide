@@ -10,8 +10,36 @@ import subprocess
 import urllib.request
 
 
+LOOPBACK_HOSTS = {"127.0.0.1", "::1"}
+
+
 def command_ok(args):
     return subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+
+
+def listening_hosts(ss_output, port):
+    """Local addresses listening on TCP port in `ss -H -lnt[p]` output."""
+    hosts = []
+    for line in ss_output.splitlines():
+        host, _, local_port = line.split()[3].rpartition(":")
+        if local_port == str(port):
+            hosts.append(host.strip("[]"))
+    return hosts
+
+
+def public_nginx_ports(ss_output):
+    """Ports on which nginx listens beyond loopback in `ss -H -lntp` output."""
+    ports = set()
+    for line in ss_output.splitlines():
+        host, _, port = line.split()[3].rpartition(":")
+        if '"nginx"' in line and host.strip("[]") not in LOOPBACK_HOSTS:
+            ports.add(port)
+    return ports
+
+
+def group_can_read(file_stat, gid):
+    """True when the file belongs to gid and that group may read it."""
+    return file_stat.st_gid == gid and bool(file_stat.st_mode & stat.S_IRGRP)
 
 
 def main():
@@ -32,9 +60,8 @@ def main():
     )
     # Tools that rewrite this file, such as ssh-keygen -R, can leave it root:root,
     # after which every job fails host verification.
-    known_hosts = Path("/etc/semaphore/known_hosts").stat()
-    checks["service_can_read_known_hosts"] = (
-        known_hosts.st_gid == grp.getgrnam("semaphore").gr_gid and bool(known_hosts.st_mode & stat.S_IRGRP)
+    checks["service_can_read_known_hosts"] = group_can_read(
+        Path("/etc/semaphore/known_hosts").stat(), grp.getgrnam("semaphore").gr_gid
     )
     checks["semaphore_is_active"] = command_ok(["systemctl", "is-active", "--quiet", "semaphore"])
     checks["semaphore_is_enabled"] = command_ok(["systemctl", "is-enabled", "--quiet", "semaphore"])
@@ -54,28 +81,18 @@ def main():
     except (OSError, ValueError):
         checks["http_ping"] = False
     listeners = subprocess.check_output(["ss", "-H", "-lnt"], text=True)
-    bound = {port: [] for port in (3000, 5432)}
-    for line in listeners.splitlines():
-        local = line.split()[3]
-        for port in bound:
-            if local.endswith(":" + str(port)):
-                bound[port].append(local.rsplit(":", 1)[0].strip("[]"))
+    bound = {port: listening_hosts(listeners, port) for port in (3000, 5432)}
     for port, hosts in bound.items():
         if port == 3000 and exposure == "http":
             checks["port_3000_bound_on_all_addresses"] = any_address in hosts or "*" in hosts
         else:
-            checks[f"port_{port}_only_loopback"] = bool(hosts) and all(host in {"127.0.0.1", "::1"} for host in hosts)
+            checks[f"port_{port}_only_loopback"] = bool(hosts) and all(host in LOOPBACK_HOSTS for host in hosts)
     # nginx may listen beyond loopback only on 443, and only for the https exposure.
-    nginx_ports = set()
-    for line in subprocess.check_output(["ss", "-H", "-lntp"], text=True).splitlines():
-        host, _, port = line.split()[3].rpartition(":")
-        if '"nginx"' in line and host.strip("[]") not in {"127.0.0.1", "::1"}:
-            nginx_ports.add(port)
+    nginx_ports = public_nginx_ports(subprocess.check_output(["ss", "-H", "-lntp"], text=True))
     checks["nginx_listens_only_where_expected"] = nginx_ports <= ({"443"} if exposure == "https" else set())
     if exposure == "https":
         checks["nginx_tls_proxy_is_active"] = command_ok(["systemctl", "is-active", "--quiet", "nginx"])
-        tls_listeners = [line.split()[3] for line in listeners.splitlines() if line.split()[3].endswith(":443")]
-        checks["port_443_listening"] = bool(tls_listeners)
+        checks["port_443_listening"] = bool(listening_hosts(listeners, 443))
     print(json.dumps({"passed": all(checks.values()), "checks": checks}, indent=2))
     raise SystemExit(0 if all(checks.values()) else 1)
 

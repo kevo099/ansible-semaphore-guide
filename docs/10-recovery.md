@@ -35,6 +35,8 @@ For the guide's native controller, protect:
   you added; the relevant PostgreSQL configuration.
 - Exact application/Ansible versions and your playbook repository/ref.
 - Your own Git repository and any encrypted host variables ignored by it.
+- On the Enterprise Linux controller, its lab folder: the seeded project's
+  playbooks, inventory and any Vault files.
 - Your independent password-manager/recovery process for operator credentials.
 
 The database and access-key encryption configuration must be a matching set.
@@ -53,6 +55,13 @@ previous running/stopped state on exit.
 This base capture covers the paths shown. Add your separately documented
 inventories, Git, external secrets and optional proxy/SSH configuration to the
 private recovery set; do not assume they are all under these paths.
+
+The capture is written for both controllers, although only the Ubuntu one has
+been tested. On the [Enterprise Linux controller](03-controller-el9.md) it
+records PostgreSQL's `postgresql.conf` and `pg_hba.conf` from
+`/var/lib/pgsql/data` instead of `/etc/postgresql/16/main`, and the lab folder
+`/opt/ansible-lab`. If you installed with `--lab-dir`, add that path to the
+`for extra in` list.
 
 ```bash
 sudo bash <<'BASH'
@@ -75,14 +84,23 @@ finish_capture() {
 trap finish_capture EXIT
 systemctl stop semaphore
 runuser -u postgres -- pg_dump --format=custom semaphore > "$backup_dir/semaphore.dump"
-config_paths=(etc/semaphore etc/systemd/system/semaphore.service etc/postgresql/16/main)
-if [[ -d /etc/systemd/system/semaphore.service.d ]]; then
-  config_paths+=(etc/systemd/system/semaphore.service.d)
+config_paths=(etc/semaphore etc/systemd/system/semaphore.service)
+# Ubuntu keeps PostgreSQL's settings in /etc/postgresql; Enterprise Linux keeps
+# them in its data directory. A missing file stops tar and the capture.
+if [[ -d /etc/postgresql/16/main ]]; then
+  config_paths+=(etc/postgresql/16/main)
+else
+  config_paths+=(var/lib/pgsql/data/postgresql.conf var/lib/pgsql/data/pg_hba.conf)
 fi
+# Optional: service drop-ins and the Enterprise Linux lab folder.
+for extra in /etc/systemd/system/semaphore.service.d /opt/ansible-lab; do
+  if [[ -e "$extra" ]]; then config_paths+=("${extra#/}"); fi
+done
 tar -C / -czf "$backup_dir/controller-config.tar.gz" "${config_paths[@]}"
 {
   /usr/local/bin/semaphore version
   /opt/ansible-venv/bin/ansible --version
+  /opt/ansible-venv/bin/python -m pip freeze --all
   runuser -u postgres -- psql -X -Atc 'SHOW server_version;'
 } > "$backup_dir/runtime.txt"
 cd "$backup_dir"
@@ -133,6 +151,8 @@ as soon as the application starts.
    beginning of step 3, and step 5 for the binary. **Skip the configuration
    generator, empty-file creation and application initialization.** Do not
    generate replacement encryption keys, create a new admin or start Semaphore.
+   Compare `/opt/ansible-venv/bin/python -m pip freeze --all` with the package
+   list in the captured `runtime.txt`.
 3. Restore the backed-up `/etc/semaphore` files into the new controller. Reapply
    `root:semaphore` ownership and the documented private modes. Restore the
    service unit/drop-ins and review the PostgreSQL configuration for this VM.
@@ -151,6 +171,41 @@ as soon as the application starts.
 8. Point one test inventory at a disposable recovery target and run a real
    authenticated, non-changing job. Check sudo separately if it is required.
 
+These steps and the commands below restore an Ubuntu controller onto an
+Ubuntu replacement, which is the drill recorded in [validation](VALIDATION.md).
+For a capture from the [Enterprise Linux controller](03-controller-el9.md),
+use a replacement with the same Enterprise Linux release and change these
+parts. This variant has not been run:
+
+- Step 2 has no manual chapter. Do not run `install-controller-el9.sh`: it
+  generates new secrets, creates an administrator and seeds a new project.
+  Take the commands from its steps 2 and 3, the `useradd` and `install -d`
+  lines of steps 4–5, `postgresql-setup --initdb` from step 6, and the binary
+  with its `restorecon` from step 7.
+- The PostgreSQL unit is `postgresql`, not `postgresql@16-main`. Its settings
+  are `postgresql.conf` and `pg_hba.conf` in `/var/lib/pgsql/data`, found
+  under `var/lib/pgsql/data` in the archive. Install those two as
+  `postgres:postgres` with mode 0600 instead of the `conf.d` and `pg_hba.conf`
+  commands below, then run `sudo restorecon -F` on them.
+- `/etc/semaphore` also holds the `svc_ansible` key pair. Install both as
+  `root:root`: `svc_ansible` with mode 0600 and `svc_ansible.pub` with mode
+  0644.
+- Stage the dump under `/var/lib/pgsql` instead of `/var/lib/postgresql`.
+- Restore the lab folder to the same path, because the restored repository
+  and inventory point there. Give it your administrator account as owner and
+  the `semaphore` group, mode 2750 on its folders and 0640 on its files, as
+  the installer does, then run `sudo restorecon -RF` on it.
+
+On either system, `expose-semaphore.sh` keeps an `exposure` marker and a
+`tls/` folder in `/etc/semaphore`. The commands below do not restore them, so
+the replacement starts with the UI on loopback only. A capture taken in `http`
+mode also binds Semaphore to every address in its `config.json`; the block
+below sets it back to loopback in the staged copy before installing it.
+Without that, `check-controller.py` reports
+`semaphore_bind_matches_exposure_loopback: false`, and the restored Semaphore
+listens on the network during the isolated rehearsal. Once the replacement has
+passed its checks, run that script again with the mode you want.
+
 ### Restore the configuration files
 
 After step 2, with the verified recovery set staged privately, extract the
@@ -163,6 +218,15 @@ umask 077
 install -d -m 0700 ~/private-staging/config
 tar -C ~/private-staging/config -xzf /PRIVATE/STAGING/controller-config.tar.gz
 c=~/private-staging/config/etc
+# A capture taken in http mode binds every address; start on loopback.
+python3 - "$c/semaphore/config.json" <<'PY'
+import json, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+config = json.loads(path.read_text())
+config["interface"] = "127.0.0.1"
+path.write_text(json.dumps(config, indent=2) + "\n")
+PY
 for f in config.json known_hosts gitconfig; do
   sudo install -o root -g semaphore -m 0640 "$c/semaphore/$f" "/etc/semaphore/$f"
 done

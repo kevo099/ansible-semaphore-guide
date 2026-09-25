@@ -22,6 +22,16 @@ ansible-inventory --graph
 ansible-playbook playbooks/ping.yml --limit lab-ubuntu --list-hosts
 ```
 
+On the [seeded Enterprise Linux controller](03-controller-el9.md), run
+`cd /opt/ansible-lab` (or your `--lab-dir`) instead of the first command. Its
+`ansible.cfg` reads the inventory Semaphore uses, with the host names you gave
+`add-target.sh`. If you chose
+[3b's Vault option](03-controller-el9.md#do-give-the-templates-the-targets-sudo-password)
+for sudo passwords, Ansible decrypts those files for every play there, Ping
+included: add `--ask-vault-pass` to each `ansible` and `ansible-playbook`
+command and leave out `-K`, because each host's file supplies its own sudo
+password.
+
 Expect exactly the host you intend. The configured target login is
 `svc_ansible`; your controller administrator is the person running Ansible.
 `--private-key` selects the target key. `-K` asks for the become/sudo password,

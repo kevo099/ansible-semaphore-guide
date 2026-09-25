@@ -91,7 +91,8 @@ and [the command module](https://docs.ansible.com/projects/ansible/latest/collec
 
 ```bash
 sudo python3 scripts/check-controller.py
-sudo systemctl status semaphore postgresql@16-main --no-pager
+sudo systemctl status semaphore postgresql@16-main --no-pager  # Ubuntu
+sudo systemctl status semaphore postgresql --no-pager          # Enterprise Linux
 sudo journalctl -u semaphore -n 100 --no-pager
 sudo ss -lntp
 free -h
@@ -111,6 +112,14 @@ its error and inspect which stages completed. On a disposable fresh VM, a
 rebuild from the clean baseline may be simplest. If data or credentials now
 matter, use the manual stage/recovery procedure; do not remove the ownership
 files or database just to make the installer run again.
+
+Both installers download and check the Semaphore archive, and build
+`/opt/ansible-venv`, before they create any state they refuse on a rerun. A
+checksum mismatch deletes the download, and a failed `pip install` removes the
+new virtual environment; fix the cause and run `--apply` again. On Enterprise
+Linux, if the `semaphore` account cannot read the lab folder, the installer
+stops before seeding and prints the `seed-semaphore.py` command to run once the
+permissions are fixed.
 
 Do not change a release checksum to match an unexpected download. Verify the
 release, architecture and authenticated source first.

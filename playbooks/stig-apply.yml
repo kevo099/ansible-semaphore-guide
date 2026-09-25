@@ -31,6 +31,19 @@
         quiet: true
       tags: always
 
+    # Check mode skips the scanner and cannot predict the vendor's fixes, so
+    # this is also refused on the controller before any connection.
+    - name: Refuse check mode because vendor remediation cannot be predicted
+      ansible.builtin.assert:
+        that:
+          - not ansible_check_mode
+        fail_msg: >-
+          Check mode skips the vendor scanner and cannot predict vendor
+          remediation. For a read-only assessment, run stig-audit.yml without
+          --check or Dry Run.
+        quiet: true
+      tags: always
+
     - name: Check scope and supported operating system
       ansible.builtin.import_tasks: tasks/preflight.yml
       tags: always
@@ -47,14 +60,6 @@
           or pass -e '{"stig_confirm": true}' from the CLI. The key=value form
           produces a string and is rejected. Vendor STIG remediation changes
           SSH, sudo, kernel and login policy; keep console access ready.
-        quiet: true
-      tags: always
-
-    - name: Refuse check mode because vendor remediation cannot be predicted
-      ansible.builtin.assert:
-        that:
-          - not ansible_check_mode
-        fail_msg: Run stig-audit.yml for a read-only assessment instead of --check.
         quiet: true
       tags: always
   tasks:
@@ -106,6 +111,7 @@
         msg: >-
           {{ inventory_hostname }}: vendor remediation applied
           {{ 'and rebooted' if allow_reboot else 'without a reboot; many STIG rules only take effect after one' }}.
-          Check console login, SSH and sudo now: STIG commonly removes
-          passwordless sudo, so add a sudo password credential to the
-          inventory before the next run. Compare the before and after reports.
+          Check console login, SSH and sudo now: STIG commonly removes NOPASSWD
+          sudo rules, such as the one cloud-init gives an image's administrator,
+          so confirm each account you administer with can still sudo with a
+          password you know. Compare the before and after reports.

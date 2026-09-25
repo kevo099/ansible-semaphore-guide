@@ -13,7 +13,7 @@ The following is a planning example for a small lab, not a vendor minimum:
 
 | Role | Example name | OS | vCPU | RAM | Disk |
 | --- | --- | --- | ---: | ---: | ---: |
-| Controller | `controller.example.test` | Ubuntu 24.04 | 2 | 4 GiB | 32 GiB |
+| Controller | `controller.example.test` | Ubuntu 24.04, or RHEL, AlmaLinux or Rocky Linux 9.4 or later for the [seeded controller](03-controller-el9.md) | 2 | 4 GiB | 32 GiB |
 | Ubuntu target | `ubuntu.example.test` | Ubuntu 24.04 | 2 | 3 GiB | 40 GiB |
 | EL target | `alma.example.test` | AlmaLinux 9 | 2 | 3 GiB | 40 GiB |
 
@@ -23,8 +23,18 @@ package upgrades and security scanners can need more resources. Recheck actual
 available memory and disk before allocating VMs.
 
 Rocky Linux 9 can replace the AlmaLinux target directly. RHEL 9 can replace it
-if you have appropriate repository access. AlmaLinux is useful for general Enterprise Linux administration; it
-does not turn an AlmaLinux benchmark into Red Hat's RHEL benchmark.
+if you have appropriate repository access. AlmaLinux is useful for general
+Enterprise Linux administration; it does not turn an AlmaLinux benchmark into
+Red Hat's RHEL benchmark.
+
+Choose the controller's operating system before you create the VMs.
+[Chapter 3](03-controller.md) installs on Ubuntu 24.04. The
+[seeded controller](03-controller-el9.md) in chapter 3b needs RHEL, AlmaLinux
+or Rocky Linux 9.4 or later instead: its installer uses the `python3.12`
+package and the `postgresql:16` module stream, which first appear in release
+9.4. A RHEL controller must be registered with its BaseOS and AppStream
+repositories enabled. Each installer refuses the other's operating system, so
+changing your mind later means building a new controller VM.
 
 The `.example.test` names are documentation examples. Use your own DNS or put
 the actual guest IPs in your local inventory. DNS integration, Active Directory

@@ -7,12 +7,13 @@ account.** The controller is separate from the two managed targets.
 
 ## Goal
 
-Install Ansible, PostgreSQL and Semaphore with a reproducible runtime, private
-application access and locally generated credentials.
+Install Ansible, PostgreSQL and Semaphore with private application access and
+locally generated credentials. The Ansible environment and the Semaphore binary
+are pinned to the tested versions.
 
 ## Choose one installation path
 
-On RHEL, AlmaLinux or Rocky Linux 9, use the
+On RHEL, AlmaLinux or Rocky Linux 9.4 or later, use the
 [Enterprise Linux installer](03-controller-el9.md) instead; it also seeds a
 local-folder practice project.
 
@@ -71,18 +72,27 @@ installer should not silently take over an existing application.
 
 ## Manual step 2: install the runtime
 
+Run from the repository root:
+
 ```bash
 sudo apt-get update
 sudo apt-get install -y python3.12 python3.12-venv git curl tar \
   openssh-client postgresql-16 ca-certificates
 sudo python3.12 -m venv /opt/ansible-venv
-sudo /opt/ansible-venv/bin/pip install 'ansible-core==2.20.8'
+sudo /opt/ansible-venv/bin/pip install --requirement requirements-controller.txt
 sudo chmod -R go+rX /opt/ansible-venv
 /opt/ansible-venv/bin/ansible --version
 ```
 
-**Check:** the Ansible output reports core 2.20.8 and Python 3.12 from the virtual
-environment. The OS's default Python remains available for its own utilities.
+The virtual environment receives ansible-core 2.20.8 with every Python
+dependency pinned in
+[`requirements-controller.txt`](../requirements-controller.txt), the set that
+the September 2026 verification installed. Python 3.12 and PostgreSQL 16 come
+from Ubuntu's repositories and follow its updates.
+
+**Check:** the Ansible output reports core 2.20.8, jinja 3.1.6 and Python 3.12
+from the virtual environment. The OS's default Python remains available for its
+own utilities.
 
 **Concept:** the controller Python runs Ansible itself. A target's Python runs
 the transferred modules. Those are separate compatibility requirements.
@@ -102,6 +112,10 @@ sudo chown root:semaphore /etc/semaphore/config.json
 sudo chmod 0640 /etc/semaphore/config.json
 sudo install -o root -g semaphore -m 0640 /dev/null /etc/semaphore/known_hosts
 sudo install -o root -g semaphore -m 0640 /dev/null /etc/semaphore/gitconfig
+sudo tee -a /etc/semaphore/gitconfig >/dev/null <<'EOF'
+[safe]
+    directory = /opt/ansible-guide.git
+EOF
 ```
 
 The generator creates a unique database password, cookie keys, an access-key
@@ -109,16 +123,24 @@ encryption key and an initial administrator password. It refuses to overwrite
 existing files and prints no credential values. The access-key encryption key
 must be backed up with the database to recover Key Store credentials.
 
+Git refuses to let the service read a repository owned by another account
+unless the service's Git configuration lists it. The entry above, the same one
+the installer writes, lists only the optional local repository in
+[chapter 7](07-git-and-vscode.md#optional-a-reviewed-local-repository-on-the-controller).
+Appending with `tee -a` keeps the file's `root:semaphore` ownership.
+
 **Check permissions without displaying configuration contents:**
 
 ```bash
 sudo stat -c '%a %U:%G %n' /etc/semaphore /etc/semaphore/config.json \
-  /etc/semaphore/initial-admin-password /etc/semaphore/known_hosts
+  /etc/semaphore/initial-admin-password /etc/semaphore/known_hosts \
+  /etc/semaphore/gitconfig
 ```
 
 Expected: directory `750 root:semaphore`, configuration `640 root:semaphore`,
-initial password `600 root:root`, known-hosts file `640 root:semaphore`.
-The known-hosts file is initially empty, so target jobs are not ready yet.
+initial password `600 root:root`, known-hosts and Git configuration files
+`640 root:semaphore`. The known-hosts file is initially empty, so target jobs
+are not ready yet.
 
 **Concept:** the web application needs its own configuration and database
 credential. It does not need your hypervisor, cloud administrator or everyday
@@ -244,6 +266,18 @@ choose it, configure nginx on a dedicated controller, disable its default
 public listener, validate with `nginx -t`, and forward to loopback port 8080.
 Use the [official reverse-proxy guide](https://semaphoreui.com/docs/admin-guide/reverse-proxy/nginx)
 for a separately designed HTTPS deployment.
+
+To reach the UI on the controller's own address instead of through a tunnel,
+run `sudo bash scripts/expose-semaphore.sh --mode https` from the repository
+root after either installation path; the script supports Ubuntu as well as
+Enterprise Linux. It installs nginx, removes the package's default site,
+proxies port 443 to the still loopback-only Semaphore, opens 443 in `ufw` when
+`ufw` is active and prints the self-signed certificate's SHA-256 fingerprint to
+compare in the browser. `--mode loopback` takes the UI off the network again.
+The Ubuntu installer has no `--expose` option. See
+[chapter 3b](03-controller-el9.md#do-reach-the-ui-on-the-vms-address-instead-of-a-tunnel)
+for the modes, what `--mode loopback` leaves in place, the checks and the
+cloud-firewall caution.
 
 ## Concept
 

@@ -14,6 +14,19 @@
     stig_remote_dir: "/var/log/stig-practice/{{ stig_stamp }}"
     stig_fetch_dir: "{{ lookup('env', 'HOME') }}/stig-reports/{{ stig_stamp }}"
   pre_tasks:
+    # Check mode skips the scanner commands, so a preview could only report
+    # missing results. Refuse it on the controller before any connection.
+    - name: Refuse check mode because the vendor scanner does not run in it
+      ansible.builtin.assert:
+        that:
+          - not ansible_check_mode
+        fail_msg: >-
+          Check mode skips the vendor scanner, so there would be no results to
+          read. The audit changes no security policy; run it without --check
+          or Dry Run.
+        quiet: true
+      tags: always
+
     - name: Check scope and supported operating system
       ansible.builtin.import_tasks: tasks/preflight.yml
       tags: always

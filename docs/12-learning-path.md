@@ -29,7 +29,10 @@ Use the examples as scaffolding:
 2. Change only the web page text. Explain why nginx need not restart.
 3. Change a valid nginx configuration setting. Observe the handler.
 4. Add an assertion that the generated page contains your exact message.
-5. Create separate variables for Ubuntu and Alma service names.
+5. Trace how `playbooks/vars/Debian.yml` and `playbooks/vars/RedHat.yml`
+   supply `lab_time_service` to the baseline, then add one OS-family variable
+   of your own, such as the SSH unit (`ssh.service` on Ubuntu, `sshd.service`
+   on Enterprise Linux), and use it in a task.
 6. Make one target unavailable, observe the failure, restore it and retry.
 
 Before every apply, name the files or resources you expect to change. After
