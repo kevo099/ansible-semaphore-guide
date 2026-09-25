@@ -138,11 +138,13 @@ account owns and writes the repository; the service reads it through the
 `semaphore` group, which new files inherit from the directory's setgid bit.
 
 Git can also refuse to let the service read a repository that another account
-owns, as Ubuntu 24.04's Git does, unless `/etc/semaphore/gitconfig` lists it.
-Newer Git releases allow this read; the entry does no harm there. The Ubuntu
-installer and chapter 3's manual steps list `/opt/ansible-guide.git` there.
-The Enterprise Linux installer lists only its lab folder, and a manual install
-from v1.1.0 of this guide or earlier has an empty file. Append the entry unless
+owns unless `/etc/semaphore/gitconfig` lists it. Whether it refuses depends on
+the Git version and the distribution's patches: Ubuntu 24.04's Git 2.43 refuses
+with "detected dubious ownership", while RHEL 9.8's Git 2.52 allowed the read.
+Where Git allows it, the entry is harmless. The Ubuntu installer and chapter
+3's manual steps list `/opt/ansible-guide.git` there. The Enterprise Linux
+installer lists only its lab folder, and a manual install from v1.1.0 of this
+guide or earlier has an empty file. Append the entry unless
 `sudo cat /etc/semaphore/gitconfig` already shows it. Append rather than
 replace: on Enterprise Linux the lab folder's entry must stay, and appending
 keeps the file's `root:semaphore` ownership and mode. Do not use

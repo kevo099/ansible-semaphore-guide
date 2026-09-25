@@ -14,7 +14,9 @@ and 5 are only for running chapter 5 from the terminal as well. If you do,
 append your own public key to `authorized_keys` as 3b shows instead of
 replacing the file, and run the Ansible commands of step 5 and chapter 5 from
 `/opt/ansible-lab` (or your `--lab-dir`), whose `ansible.cfg` reads the
-inventory Semaphore uses, instead of copying `lab.ini.example`.
+inventory Semaphore uses, instead of copying `lab.ini.example`. If you chose
+3b's Vault option for sudo passwords, add `--ask-vault-pass` to those commands
+and leave out `-K`.
 
 ## Goal
 

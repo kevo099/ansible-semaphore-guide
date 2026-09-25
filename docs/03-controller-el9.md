@@ -237,8 +237,11 @@ distribution.
 
 **Concept:** a file inventory tied to a local repository is read at run time.
 There is nothing to sync and nothing cached; the file is the truth. The trade
-is that a half-edited file is also the truth, which is the reason the Git
-chapter exists.
+is that a half-edited file is also the truth. The folder's `.gitignore` keeps
+`inventories/` out of Git, so Git cannot show or undo an inventory edit: copy
+`lab.ini` aside before editing it by hand, and rely on
+[chapter 10](10-recovery.md)'s capture of the lab folder for recovery. The
+[Git chapter](07-git-and-vscode.md) covers the playbooks.
 
 ## Do: give the templates the targets' sudo password
 
@@ -320,7 +323,8 @@ packaged Ansible playbook that chapter 9 applies on RHEL.
   in **Limit**, for example `lab-alma`, and for confirmation that a recovery
   point for it exists. A run selecting more than one host is refused before
   any connection. From the CLI the same gates are `--limit lab-alma` and
-  `-e '{"stig_confirm": true}'`.
+  `-e '{"stig_confirm": true}'`, plus `--ask-vault-pass` if you chose the
+  Vault option for sudo passwords.
 
 The STIG templates refuse Dry Run because the scanner does not run in check
 mode.
@@ -337,10 +341,11 @@ comparing counts.
 **Concept:** vendor remediation is not gentle. It commonly removes
 passwordless sudo, tightens SSH and changes kernel parameters, and a first
 pass often leaves failing rules that need a reboot or a manual decision. On
-AlmaLinux, Rocky Linux and RHEL 9 it sets the `FIPS:STIG` crypto policy: the
-target then offers only
-RSA and ECDSA host keys and refuses Ed25519 user keys, including an
-administrator's everyday Ed25519 key. The guide's RSA host-key pin and RSA 4096
+AlmaLinux, Rocky Linux and RHEL 9 it sets the `FIPS:STIG` crypto policy. In the
+verification run an AlmaLinux target then offered only RSA and ECDSA host keys
+and refused Ed25519 user keys, including an administrator's everyday Ed25519
+key; expect the same on RHEL 9 and Rocky Linux, which apply the same policy,
+although the run did not check their host-key offer. The guide's RSA host-key pin and RSA 4096
 automation key keep working. The policy alone does not enable FIPS mode; see
 [chapter 9](09-security-benchmarks.md) before treating a host as FIPS. Run it
 only against a disposable target with console access and a recovery point.
@@ -373,16 +378,35 @@ Then review what a push would publish:
 cd /opt/ansible-lab
 git status --short
 git ls-files
+git log --name-only --format= | sort -u
 git log --oneline -- inventories/
 ```
 
 Commit your playbook changes by name, as in
 [the Git chapter](07-git-and-vscode.md#do-create-your-own-working-copy);
-`.gitignore` is not a secret detector. `git ls-files` lists every file the
-push publishes. The last command must print nothing, or only the installer's
-first commit and the commit above. Any other commit touched the inventory and
-can hold real target addresses or Vault data; keep that history on the
-controller instead of pushing it. Push only to a **private** repository:
+`.gitignore` is not a secret detector. `git ls-files` shows only the current
+files, but a push also publishes every earlier commit, including files you
+later deleted. The third command lists every path in that history; each must
+be something you intend to publish, apart from the installer's empty
+`inventories/lab.ini` in an older folder. The last command must print nothing,
+or only the installer's first commit and the commit above. Any other commit
+touched the inventory and can hold real target addresses or Vault data.
+
+In that case, or if the path list shows anything else private, publish only
+the current files. Give them a new one-commit `main` and keep the old history
+on the controller under another name that you never push:
+
+```bash
+cd /opt/ansible-lab
+git checkout --orphan publish main
+git commit -m 'Lab playbooks for the private repository'
+git branch -m main local-history
+git branch -m publish main
+git log --oneline -- inventories/
+```
+
+The last command now prints nothing, and the working tree, `inventories/`
+included, is unchanged. Push only to a **private** repository:
 
 ```bash
 git remote add origin YOUR_PRIVATE_REPOSITORY_URL

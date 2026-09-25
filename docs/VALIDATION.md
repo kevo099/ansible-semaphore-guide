@@ -13,7 +13,7 @@ each documented block run as written, and the Enterprise Linux 9 seeded
 installer on AlmaLinux. Two fresh targets, Ubuntu 24.04.5 and AlmaLinux 9.8,
 were managed from them.
 
-The last two rows below record later runs. Chapter 9's RHEL and Ubuntu
+The last three rows below record later runs. Chapter 9's RHEL and Ubuntu
 Security Guide commands ran on two existing registered guests, which were
 restored to their pre-test checkpoints afterwards; a seeded controller was
 also installed on the RHEL guest. New VMs then tested Rocky Linux 9.8, from
@@ -24,9 +24,10 @@ Tested versions: Semaphore Community 2.19.12, PostgreSQL 16, and ansible-core
 2.20.8 with every Python dependency pinned in
 [`requirements-controller.txt`](../requirements-controller.txt). The runs
 installed ansible-core by version only; every controller install resolved
-exactly the set that file now pins. The runs covered the guide up to tag
-`v1.1.0`. Later changes passed the
-[offline checks](#repeat-the-offline-checks) but were not repeated on VMs.
+exactly the set that file now pins. The runs above covered the guide up to
+tag `v1.1.0`. The changes after it passed the
+[offline checks](#repeat-the-offline-checks), and the last row records a
+recheck of the changed scripts on the registered guests.
 
 | Area | Result |
 | --- | --- |
@@ -39,6 +40,7 @@ exactly the set that file now pins. The runs covered the guide up to tag
 | Seeded EL9 path (chapter 3b) | `add-target.sh` refused a mismatched fingerprint and a duplicate host. The lessons succeeded with both sudo-credential options. Each exposure mode opened only its intended port. On AlmaLinux the vendor `stig` profile went from 273 to 24 failing rules after one remediation pass without a reboot, with no scanner errors. Automation access and sudo still worked afterwards. |
 | Registered vendor guests (chapters 3b, 5 and 9) | On a registered RHEL 9.8 guest and an Ubuntu 24.04.5 guest attached to Ubuntu Pro, chapter 9's RHEL and USG inspection and CIS assessment commands ran as written: package and profile listing, the CIS preparation and before-scan, and USG fix-script generation. The manual CIS remediation was not applied. From the command line, all five lessons ran on RHEL: Baseline, Users and Webserver reported `changed=0` on repeat, and Patch left its required reboot to the operator. STIG audit assessed both hosts in one run; the Ubuntu Security Guide path also ran through Semaphore on a seeded controller installed on that RHEL guest. STIG apply with the approved reboot took Ubuntu from 64 to 10 failing rules and RHEL from 266 to 13, with no scanner errors, and automation access and sudo worked afterwards. Both guests were then restored to their pre-test checkpoints. |
 | Rocky Linux 9.8 (chapters 3b, 4 and 9) | The seeded installer ran on a Rocky controller. Chapter 4's target steps, with the seeded key, prepared an AlmaLinux and a Rocky target, and the seeded templates managed both, including an approved-reboot patch on AlmaLinux. On Rocky, Baseline, Users and Webserver reported `changed=0` on repeat and Patch left its required reboot to the operator; STIG audit used Rocky's own `ssg-rl9-ds.xml`, and STIG apply with the approved reboot took failing rules from 262 to 26 with no scanner errors. Access and sudo worked afterwards. With a VirtIO RNG device, `rngd`, which the Rocky image enables by default, stayed healthy after STIG apply. A template cloning this repository at tag `v1.1.0` ran Baseline on Rocky; at `v1.0.0`, which predates Rocky support, the preflight refused the host. |
+| Recheck of the later changes (chapters 3, 3b, 7 and 10) | On the two registered guests, restored to their checkpoints afterwards. With the Ubuntu Pro guest as controller: the Ubuntu installer, whose virtual environment matched `requirements-controller.txt` exactly; readiness with the UI on loopback, behind https and on loopback again, with port 80 closed and a warning when a reused certificate named another address; chapter 7's bare repository, which Ubuntu's Git 2.43 refused as dubious ownership without the `safe.directory` entry; and chapter 10's capture. With the RHEL guest as seeded controller managing the Ubuntu guest: `--lab-dir` paths under `/home`, `/tmp` and `/var/lib/semaphore` and a relative path were refused before any change; the lab folder's `.gitignore` left no inventory tracked; `add-target.sh` accepted a section header with a comment and refused a duplicate; Ping, Baseline preview and a STIG audit that printed its summary succeeded; Dry Run was refused for both STIG templates before connecting; each exposure mode worked; 3b's migration of a folder that tracked its inventory left Ping working; and chapter 10's capture included the PostgreSQL settings and the lab folder. RHEL's Git 2.52 read the bare repository without the entry. |
 
 ### Fixed during the verification
 
@@ -70,7 +72,7 @@ exactly the set that file now pins. The runs covered the guide up to tag
   with a CIS profile), its reboot and after-scan. Vendor STIG remediation was
   applied only through `stig-apply.yml`.
 - Repeated remediation until no further rule changes.
-- Chapter 10's capture and restore on an Enterprise Linux controller.
+- Chapter 10's restore on an Enterprise Linux controller; its capture ran there.
 - Enterprise Linux releases other than 9.8, as controller or target. The EL9
   installer's 9.4 minimum is where `python3.12` and the `postgresql:16` stream
   first appear, not a tested release.

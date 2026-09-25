@@ -197,9 +197,14 @@ parts. This variant has not been run:
   the installer does, then run `sudo restorecon -RF` on it.
 
 On either system, `expose-semaphore.sh` keeps an `exposure` marker and a
-`tls/` folder in `/etc/semaphore`. The commands below do not restore them.
-Once the replacement has passed its checks, run that script again with the
-mode you want.
+`tls/` folder in `/etc/semaphore`. The commands below do not restore them, so
+the replacement starts with the UI on loopback only. A capture taken in `http`
+mode also binds Semaphore to every address in its `config.json`; the block
+below sets it back to loopback in the staged copy before installing it.
+Without that, `check-controller.py` reports
+`semaphore_bind_matches_exposure_loopback: false`, and the restored Semaphore
+listens on the network during the isolated rehearsal. Once the replacement has
+passed its checks, run that script again with the mode you want.
 
 ### Restore the configuration files
 
@@ -213,6 +218,15 @@ umask 077
 install -d -m 0700 ~/private-staging/config
 tar -C ~/private-staging/config -xzf /PRIVATE/STAGING/controller-config.tar.gz
 c=~/private-staging/config/etc
+# A capture taken in http mode binds every address; start on loopback.
+python3 - "$c/semaphore/config.json" <<'PY'
+import json, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+config = json.loads(path.read_text())
+config["interface"] = "127.0.0.1"
+path.write_text(json.dumps(config, indent=2) + "\n")
+PY
 for f in config.json known_hosts gitconfig; do
   sudo install -o root -g semaphore -m 0640 "$c/semaphore/$f" "/etc/semaphore/$f"
 done
