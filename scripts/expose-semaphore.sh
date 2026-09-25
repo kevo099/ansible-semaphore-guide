@@ -102,9 +102,12 @@ retire_proxy() {
 # IPv4 or IPv6 address gets an IP entry in the certificate, a name a DNS entry, and
 # an IPv6 address needs brackets in a URL.
 primary_address() {
-  address="${address:-$(ip -4 route get 1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") print $(i+1); exit}')}"
+  # Without an IPv4 route, ip fails; let the message below explain instead of set -e.
+  if [[ -z "$address" ]]; then
+    address=$(ip -4 route get 1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") print $(i+1); exit}') || address=
+  fi
   address=${address#\[}; address=${address%\]}
-  [[ -n "$address" ]] || { echo 'Could not determine this VM address; pass --address.'; exit 1; }
+  [[ -n "$address" ]] || { echo 'Could not determine this VM IPv4 address (no IPv4 route); pass --address.'; exit 1; }
   if [[ "$address" =~ ^[0-9.]+$ || "$address" == *:* ]]; then
     if [[ "$address" == *%* ]] || ! python3 -c 'import ipaddress, sys; ipaddress.ip_address(sys.argv[1])' "$address" 2>/dev/null; then
       echo "Not a valid IP address: $address. Pass an address without a %zone suffix, or a DNS name."; exit 1
@@ -182,9 +185,16 @@ NGINXMAIN
     fi
     install -d -m 0750 -o root -g root "$tls_dir"
     if [[ ! -s "$tls_dir/semaphore.key" || ! -s "$tls_dir/semaphore.crt" ]]; then
-      openssl req -x509 -newkey rsa:4096 -sha256 -days 825 -nodes \
-        -keyout "$tls_dir/semaphore.key" -out "$tls_dir/semaphore.crt" \
-        -subj "/CN=$address" -addext "subjectAltName=$san" >/dev/null 2>&1
+      # Browsers match the subjectAltName. A fixed common name avoids X.509's
+      # 64-character limit, which a long DNS name would exceed.
+      if ! err=$(openssl req -x509 -newkey rsa:4096 -sha256 -days 825 -nodes \
+          -keyout "$tls_dir/semaphore.key" -out "$tls_dir/semaphore.crt" \
+          -subj '/CN=Semaphore practice controller' -addext "subjectAltName=$san" 2>&1 >/dev/null); then
+        rm -f "$tls_dir/semaphore.key" "$tls_dir/semaphore.crt"
+        printf '%s\n' "$err"
+        echo "Could not create the certificate for $address."
+        exit 1
+      fi
       chmod 0600 "$tls_dir/semaphore.key"; chmod 0644 "$tls_dir/semaphore.crt"
     else
       # The existing certificate is reused; say so when it names another address.
