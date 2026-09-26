@@ -4,7 +4,7 @@
 # ansible-core declares open ranges for its dependencies, so each one is pinned
 # here too. Change them together, then repeat docs/VALIDATION.md before publishing.
 # This ansible-core release supports the Python 3.9 supplied by EL9 targets.
-ansible-core==2.20.8
+ansible-core==2.20.9
 cffi==2.1.1
 cryptography==50.0.1
 Jinja2==3.1.6

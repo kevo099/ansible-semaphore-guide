@@ -36,6 +36,12 @@ Open `http://127.0.0.1:8088/`, log in with your own Semaphore account, and make
 sure you can log out and back in. Your SSH administrator and Semaphore UI
 administrator are separate identities.
 
+Semaphore Community 2.19.12 can also sign people in through LDAP or OpenID
+Connect and offers TOTP two-factor codes; the pricing page lists these under Pro,
+but the community build includes them. If you add a directory later, prefer
+OpenID Connect: 2.19.12's LDAP login does not verify the LDAP server's TLS
+certificate, so keep LDAP on a network you trust.
+
 ## Step 1: create a project
 
 Create a project named **Ansible Practice**. Use one project while learning so

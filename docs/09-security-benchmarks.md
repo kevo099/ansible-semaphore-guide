@@ -240,6 +240,16 @@ its FIPS mode and host-key offer were not checked. Ubuntu's USG accepted the
 `disa_stig` profile used by the seeded STIG lessons; that channel's
 `benchmarks.json` lists it as an alias of `stig-v1r1`.
 
+Record the content version with every result. The verification used SCAP
+Security Guide 0.1.82 on RHEL 9.8 and Rocky Linux 9.8, 0.1.81 on AlmaLinux 9.8,
+and the Ubuntu Security Guide profiles `cis_level1_server-v1.0.0` and
+`stig-v1r1` on Ubuntu 24.04. Benchmarks move faster than packaged content: by
+September 2026 CIS had published Ubuntu 24.04 v2.0.0 and RHEL 9 v3.0.0, and SCAP
+Security Guide 0.1.82 aligned its Ubuntu 24.04 STIG profile to V1R5. Report a
+result as, for example, "64 failing rules with USG `stig-v1r1`", not "STIG
+compliant", and check `benchmarks.json` and the installed `scap-security-guide`
+version before comparing results over time.
+
 A first remediation can install packages that make additional checks
 applicable. A second scan can therefore expose failures that were previously
 not applicable. Investigate the transition instead of assuming the host became
