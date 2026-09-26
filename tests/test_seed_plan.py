@@ -54,7 +54,9 @@ class SeedPlanTests(unittest.TestCase):
                 self.assertEqual(template["task_params"], {"limit": ["lab"]})
             self.assertEqual(template["app"], "ansible")
             self.assertIn(Path(template["playbook"]).name, playbooks)
-            self.assertIn(template["environment_id"], IDS["environments"].values())
+            self.assertNotIn("environment_id", template)
+            self.assertEqual(len(template["environment_ids"]), 1)
+            self.assertIn(template["environment_ids"][0], IDS["environments"].values())
 
     def test_templates_do_not_share_mutable_options(self):
         plan = self.plan()
@@ -69,10 +71,10 @@ class SeedPlanTests(unittest.TestCase):
     def test_only_the_named_reboot_template_allows_reboot(self):
         plan = self.plan()
         reboot_env = IDS["environments"]["Allow required reboot"]
-        allowed = [t["name"] for t in plan["templates"] if t["environment_id"] == reboot_env]
+        allowed = [t["name"] for t in plan["templates"] if reboot_env in t["environment_ids"]]
         self.assertEqual(allowed, ["Patch, allow required reboot", "STIG apply, allow required reboot"])
         for template in plan["templates"]:
-            if template["environment_id"] == reboot_env:
+            if reboot_env in template["environment_ids"]:
                 self.assertIn("allow required reboot", template["name"].lower())
         self.assertEqual(json.loads(plan["environments"]["Allow required reboot"]["json"]), {"allow_reboot": True})
         self.assertEqual(json.loads(plan["environments"]["Practice defaults"]["json"]), {})

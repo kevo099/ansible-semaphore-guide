@@ -13,7 +13,7 @@ each documented block run as written, and the Enterprise Linux 9 seeded
 installer on AlmaLinux. Two fresh targets, Ubuntu 24.04.5 and AlmaLinux 9.8,
 were managed from them.
 
-The last four rows below record later runs. Chapter 9's RHEL and Ubuntu
+The last five rows below record later runs. Chapter 9's RHEL and Ubuntu
 Security Guide commands ran on two existing registered guests, which were
 restored to their pre-test checkpoints afterwards; a seeded controller was
 also installed on the RHEL guest. New VMs then tested Rocky Linux 9.8, from
@@ -21,10 +21,12 @@ Rocky's signed cloud image: a seeded Rocky controller managing a Rocky target
 and an AlmaLinux 9.8 target.
 
 Tested versions: Semaphore Community 2.19.12, PostgreSQL 16, and ansible-core
-2.20.8 with every Python dependency pinned in
-[`requirements-controller.txt`](../requirements-controller.txt). The runs
-installed ansible-core by version only; every controller install resolved
-exactly the set that file now pins. The runs above covered the guide up to
+with every Python dependency pinned in
+[`requirements-controller.txt`](../requirements-controller.txt). The September
+runs used ansible-core 2.20.8 and installed it by version only; every
+controller install resolved exactly the set that file pins. On 26 September
+2026 the pin moved to 2.20.9, which resolves to the same dependency set; the
+last row records its recheck. The runs above covered the guide up to
 tag `v1.1.0`. The changes after it passed the
 [offline checks](#repeat-the-offline-checks). The last row records a recheck
 on the registered guests at commit `213a90b`, and a second recheck at commit
@@ -45,6 +47,7 @@ checks.
 | Rocky Linux 9.8 (chapters 3b, 4 and 9) | The seeded installer ran on a Rocky controller. Chapter 4's target steps, with the seeded key, prepared an AlmaLinux and a Rocky target, and the seeded templates managed both, including an approved-reboot patch on AlmaLinux. On Rocky, Baseline, Users and Webserver reported `changed=0` on repeat and Patch left its required reboot to the operator; STIG audit used Rocky's own `ssg-rl9-ds.xml`, and STIG apply with the approved reboot took failing rules from 262 to 26 with no scanner errors. Access and sudo worked afterwards. With a VirtIO RNG device, `rngd`, which the Rocky image enables by default, stayed healthy after STIG apply. A template cloning this repository at tag `v1.1.0` ran Baseline on Rocky; at `v1.0.0`, which predates Rocky support, the preflight refused the host. |
 | Recheck of the later changes (chapters 3, 3b, 7 and 10) | On the two registered guests, restored to their checkpoints afterwards. With the Ubuntu Pro guest as controller: the Ubuntu installer, whose virtual environment matched `requirements-controller.txt` exactly; readiness with the UI on loopback, behind https and on loopback again, with port 80 closed and a warning when a reused certificate named another address; chapter 7's bare repository, which Ubuntu's Git 2.43 refused as dubious ownership without the `safe.directory` entry; and chapter 10's capture. With the RHEL guest as seeded controller managing the Ubuntu guest: `--lab-dir` paths under `/home`, `/tmp` and `/var/lib/semaphore` and a relative path were refused before any change; the lab folder's `.gitignore` left no inventory tracked; `add-target.sh` accepted a section header with a comment and refused a duplicate; Ping, Baseline preview and a STIG audit that printed its summary succeeded; Dry Run was refused for both STIG templates before connecting; each exposure mode worked; 3b's migration of a folder that tracked its inventory left Ping working; and chapter 10's capture included the PostgreSQL settings and the lab folder. RHEL's Git 2.52 read the bare repository without the entry. |
 | Second recheck (chapters 3b, 4, 5 and 10) | At commit `ffabdda` on the same registered guests, restored afterwards. Certificates with a fixed common name and the address only in the subjectAltName were accepted by a strict TLS client for an IP address, a DNS name and an 88-character name, and a mismatched name was rejected. With 3b's Vault option, Ping from the lab folder failed without the Vault password; with `--ask-vault-pass` and no `-K`, Ping and a check-mode Baseline succeeded. 3b's publish review, untracking of a private file and one-commit history pushed a single commit without the inventory, the private file or a file deleted earlier. Chapter 10 ran end to end on Enterprise Linux: a capture taken with the UI in `http` mode, checked off the controller, was restored onto the same guest after rolling it back to its checkpoint. The pinned runtime matched the capture, `config.json` was reset to loopback, all 46 tables had the same row counts, the target was blocked while Semaphore started, and then Ping and a check-mode Baseline decrypted the restored credentials. The restored PostgreSQL was not enabled at boot, which chapter 10 now covers. |
+| Recheck of ansible-core 2.20.9 and the seeder (chapters 3, 3b and 6) | At commit `9104b30` on the same registered guests, restored afterwards. Both installers installed ansible-core 2.20.9 with exactly the pinned set and passed readiness. The seeded templates carried their variable groups through `environment_ids`: only the two "allow required reboot" templates use **Allow required reboot**. Against the Ubuntu Pro guest, Ping, Baseline preview, Baseline apply and a `changed=0` repeat, and both patch templates succeeded. The guest did not need a reboot, so the approved-reboot path was not exercised in this run. |
 
 ### Fixed during the verification
 

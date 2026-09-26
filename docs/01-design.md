@@ -36,6 +36,15 @@ package and the `postgresql:16` module stream, which first appear in release
 repositories enabled. Each installer refuses the other's operating system, so
 changing your mind later means building a new controller VM.
 
+The guide is tested on Ubuntu 24.04 and Enterprise Linux 9. Two changes matter
+before you add newer releases. Ubuntu 26.04 replaces classic sudo with sudo-rs,
+whose password prompt ansible-core 2.20 and 2.21 do not recognize, so password
+`become` fails on those targets; 2.22 recognizes its English prompt. Until then,
+setting `ansible_become_exe: sudo.ws` for those hosts is the upstream
+workaround; it was not tested here. RHEL 10 and Rocky Linux 10 require an
+x86-64-v3 CPU, so give their VMs a CPU type that exposes it, such as `host` in
+Proxmox; AlmaLinux 10 also ships an x86-64-v2 build.
+
 The `.example.test` names are documentation examples. Use your own DNS or put
 the actual guest IPs in your local inventory. DNS integration, Active Directory
 and a particular subnet layout are not prerequisites.

@@ -84,7 +84,7 @@ accounts. Read each playbook before running it.
 | --- | --- |
 | Native controller | Ubuntu Server 24.04 LTS, amd64; alternative seeded path on RHEL, AlmaLinux or Rocky Linux 9.4 or later, x86_64 (RHEL registered, with BaseOS and AppStream enabled) |
 | Controller Python | 3.12 in the operating system; separate Ansible virtual environment |
-| Ansible Core | 2.20.8, with every Python dependency pinned in [`requirements-controller.txt`](requirements-controller.txt) |
+| Ansible Core | 2.20.9, with every Python dependency pinned in [`requirements-controller.txt`](requirements-controller.txt) |
 | Semaphore UI | Community 2.19.12, checksum-verified native binary |
 | Database | PostgreSQL 16 from Ubuntu repositories or the EL9 `postgresql:16` module stream |
 | Main practice targets | Ubuntu 24.04 and AlmaLinux 9; Rocky Linux 9 also works |
@@ -97,6 +97,16 @@ operating-system packages follow the distribution's updates within the release
 series shown. Review release notes and rerun validation before upgrading. No
 container runtime, Kubernetes cluster, domain controller or paid Semaphore
 feature is required for the main walkthrough.
+
+The ansible-core lines have fixed support dates. 2.20 becomes security-only on
+2 November 2026 and reaches end of life in May 2027. 2.21 is the last line that
+runs on Python 3.12, the controller Python of Ubuntu 24.04 and of the EL9
+`python3.12` package; it reaches end of life in November 2027. 2.22, planned
+for November 2026, needs Python 3.13 or later on the controller. Managed nodes
+on EL9's Python 3.9 stay supported through 2.22, and 2.23 plans to drop Python
+3.9. The [release and maintenance
+table](https://docs.ansible.com/projects/ansible/latest/reference_appendices/release_and_maintenance.html)
+has the current dates.
 
 See [validation and limitations](docs/VALIDATION.md) for what the September
 2026 runs on fresh VMs, registered RHEL and Ubuntu Pro guests and Rocky Linux

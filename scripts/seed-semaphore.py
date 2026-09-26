@@ -76,7 +76,8 @@ def template_payload(project_id, ids, lesson):
         "playbook": playbook,
         "inventory_id": ids["inventory"],
         "repository_id": ids["repository"],
-        "environment_id": ids["environments"][group],
+        # environment_id is deprecated since Semaphore 2.18; a list replaces it.
+        "environment_ids": [ids["environments"][group]],
         "arguments": json.dumps(extra_args),
         "task_params": copy.deepcopy(options),
         "description": ("Seeded by the guide; runs from the local lab folder. "

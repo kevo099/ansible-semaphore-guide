@@ -8,7 +8,7 @@ usage() {
   cat <<'EOF'
 Usage: bash scripts/install-controller.sh [--plan | --apply]
 
-Creates a native Semaphore 2.19.12 / PostgreSQL 16 / Ansible 2.20.8
+Creates a native Semaphore 2.19.12 / PostgreSQL 16 / Ansible 2.20.9
 controller on a fresh Ubuntu 24.04 amd64 VM. It does not create a VM.
 
 The default is a read-only plan. --apply requires root and refuses existing

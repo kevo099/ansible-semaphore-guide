@@ -8,7 +8,7 @@ usage() {
   cat <<'USAGE'
 Usage: sudo bash scripts/install-controller-el9.sh [--plan | --apply [--editor USER] [--lab-dir DIR] [--expose https|http]]
 
-Creates a native Semaphore 2.19.12 / PostgreSQL 16 / Ansible 2.20.8 controller
+Creates a native Semaphore 2.19.12 / PostgreSQL 16 / Ansible 2.20.9 controller
 on a fresh RHEL, AlmaLinux or Rocky Linux 9.4 or later x86_64 VM, then seeds
 Semaphore with a project that runs the guide playbooks from a local folder on
 this VM. RHEL must be registered with BaseOS and AppStream enabled. It does
