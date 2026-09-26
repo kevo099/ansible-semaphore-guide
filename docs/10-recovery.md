@@ -56,8 +56,8 @@ This base capture covers the paths shown. Add your separately documented
 inventories, Git, external secrets and optional proxy/SSH configuration to the
 private recovery set; do not assume they are all under these paths.
 
-The capture is written for both controllers and has run on both; only an
-Ubuntu capture has been restored (see [validation](VALIDATION.md)). On the
+The capture is written for both controllers and has been captured and
+restored on both (see [validation](VALIDATION.md)). On the
 [Enterprise Linux controller](03-controller-el9.md) it records PostgreSQL's
 `postgresql.conf` and `pg_hba.conf` from `/var/lib/pgsql/data` instead of
 `/etc/postgresql/16/main`, and the lab folder `/opt/ansible-lab`. If you
@@ -175,14 +175,17 @@ These steps and the commands below restore an Ubuntu controller onto an
 Ubuntu replacement, which is the drill recorded in [validation](VALIDATION.md).
 For a capture from the [Enterprise Linux controller](03-controller-el9.md),
 use a replacement with the same Enterprise Linux release and change these
-parts. This variant has not been run:
+parts. This variant was run on a registered RHEL 9.8 controller:
 
 - Step 2 has no manual chapter. Do not run `install-controller-el9.sh`: it
   generates new secrets, creates an administrator and seeds a new project.
   Take the commands from its steps 2 and 3, the `useradd` and `install -d`
   lines of steps 4–5, `postgresql-setup --initdb` from step 6, and the binary
   with its `restorecon` from step 7.
-- The PostgreSQL unit is `postgresql`, not `postgresql@16-main`. Its settings
+- The PostgreSQL unit is `postgresql`, not `postgresql@16-main`, and a new
+  Enterprise Linux cluster does not start at boot until you enable it: where
+  the Ubuntu commands restart PostgreSQL, run
+  `sudo systemctl enable --now postgresql`. Its settings
   are `postgresql.conf` and `pg_hba.conf` in `/var/lib/pgsql/data`, found
   under `var/lib/pgsql/data` in the archive. Install those two as
   `postgres:postgres` with mode 0600 instead of the `conf.d` and `pg_hba.conf`
