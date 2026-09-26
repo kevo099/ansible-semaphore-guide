@@ -56,12 +56,12 @@ This base capture covers the paths shown. Add your separately documented
 inventories, Git, external secrets and optional proxy/SSH configuration to the
 private recovery set; do not assume they are all under these paths.
 
-The capture is written for both controllers, although only the Ubuntu one has
-been tested. On the [Enterprise Linux controller](03-controller-el9.md) it
-records PostgreSQL's `postgresql.conf` and `pg_hba.conf` from
-`/var/lib/pgsql/data` instead of `/etc/postgresql/16/main`, and the lab folder
-`/opt/ansible-lab`. If you installed with `--lab-dir`, add that path to the
-`for extra in` list.
+The capture is written for both controllers and has run on both; only an
+Ubuntu capture has been restored (see [validation](VALIDATION.md)). On the
+[Enterprise Linux controller](03-controller-el9.md) it records PostgreSQL's
+`postgresql.conf` and `pg_hba.conf` from `/var/lib/pgsql/data` instead of
+`/etc/postgresql/16/main`, and the lab folder `/opt/ansible-lab`. If you
+installed with `--lab-dir`, add that path to the `for extra in` list.
 
 ```bash
 sudo bash <<'BASH'

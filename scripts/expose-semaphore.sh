@@ -107,7 +107,11 @@ primary_address() {
     address=$(ip -4 route get 1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") print $(i+1); exit}') || address=
   fi
   address=${address#\[}; address=${address%\]}
-  [[ -n "$address" ]] || { echo 'Could not determine this VM IPv4 address (no IPv4 route); pass --address.'; exit 1; }
+  [[ -n "$address" ]] || {
+    echo "Could not determine this VM's IPv4 address (no IPv4 route). Run:"
+    echo "  sudo bash $0 --mode $mode --address IP_OR_NAME"
+    exit 1
+  }
   if [[ "$address" =~ ^[0-9.]+$ || "$address" == *:* ]]; then
     if [[ "$address" == *%* ]] || ! python3 -c 'import ipaddress, sys; ipaddress.ip_address(sys.argv[1])' "$address" 2>/dev/null; then
       echo "Not a valid IP address: $address. Pass an address without a %zone suffix, or a DNS name."; exit 1
