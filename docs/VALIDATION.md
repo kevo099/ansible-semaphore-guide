@@ -26,8 +26,12 @@ Tested versions: Semaphore Community 2.19.12, PostgreSQL 16, and ansible-core
 installed ansible-core by version only; every controller install resolved
 exactly the set that file now pins. The runs above covered the guide up to
 tag `v1.1.0`. The changes after it passed the
-[offline checks](#repeat-the-offline-checks), and the last row records a
-recheck of the changed scripts on the registered guests.
+[offline checks](#repeat-the-offline-checks). The last row records a recheck
+on the registered guests at commit `213a90b`. Later changes passed only the
+offline checks: `expose-semaphore.sh`'s fixed certificate common name and its
+message for a VM without an IPv4 route, 3b's one-commit publish, chapter 10's
+loopback reset of an `http` capture, and the `--ask-vault-pass` notes of
+chapters 4 and 5.
 
 | Area | Result |
 | --- | --- |

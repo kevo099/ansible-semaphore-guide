@@ -393,8 +393,12 @@ or only the installer's first commit and the commit above. Any other commit
 touched the inventory and can hold real target addresses or Vault data.
 
 In that case, or if the path list shows anything else private, publish only
-the current files. Give them a new one-commit `main` and keep the old history
-on the controller under another name that you never push:
+the current files. A new history still contains every file Git tracks now, so
+first stop tracking any private file that `git ls-files` lists: run
+`git rm --cached FILE`, add its path to `.gitignore` and commit, as the block
+above does for `inventories/`. Then give the current files a new one-commit
+`main` and keep the old history on the controller under another name that you
+never push:
 
 ```bash
 cd /opt/ansible-lab
