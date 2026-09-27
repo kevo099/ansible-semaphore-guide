@@ -1,0 +1,18 @@
+---
+- name: Operations pause
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Begin
+      ansible.builtin.debug:
+        msg: Operations begin
+
+    - name: Wait without changing managed state
+      ansible.builtin.command:
+        argv: [sleep, "40"]
+      changed_when: false
+
+    - name: End
+      ansible.builtin.debug:
+        msg: Operations end

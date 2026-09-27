@@ -1,6 +1,6 @@
 # 11. Troubleshoot by layer
 
-[Previous: recovery](10-recovery.md) · [Next: learning exercises](12-learning-path.md)
+[Back to the guide](../README.md) · [Learning exercises](12-learning-path.md)
 
 Start with the first failed layer: guest state → network → SSH trust → login
 key → Python → sudo → module → application. Preserve the original error and
@@ -28,6 +28,23 @@ or loosen security controls without understanding what failed.
 | Task appears finished but recap is incomplete | Output persistence and stream timing | Wait for the complete host recap, then inspect the actual failure. |
 | Browser works but task is queued | Application concurrency and another running task | Check task state before launching duplicates. |
 | Restored UI cannot decrypt keys | Matching database and access-key encryption configuration | Restore the matching private configuration; generating a new key will not decrypt the old records. |
+
+## Semaphore feature symptoms
+
+These come from the Semaphore Community 2.19.12 feature campaign; the linked
+chapter explains each one.
+
+| Symptom | Likely cause | Where to read |
+| --- | --- | --- |
+| A schedule ran hours early or late | Schedules use `schedule.timezone` (UTC by default), and a one-time `run_at` drops the offset you send | [Schedules](16-semaphore-operations.md#do-create-a-one-time-schedule) |
+| A schedule stopped running after an API edit | A schedule `PUT` clears the fields you leave out, including **active** | [Schedule edits](16-semaphore-operations.md#concept-schedule-parameters-and-edits) |
+| A task shows `stopped` but its play kept running | Stop ends the task record before every process has ended; a force-stopped queued task can still run | [Stop without trusting the badge](16-semaphore-operations.md#check-stop-without-trusting-the-badge) |
+| A webhook returns 204 but no task starts | The receiver answers 204 even for a wrong secret or no match | [Prove dispatch](17-api-and-integrations.md#check-prove-dispatch-and-refusal) |
+| An alert failed and the task log now shows a webhook URL | Failed deliveries are logged with their URL | [Recipients and delivery](16-semaphore-operations.md#check-recipients-and-delivery) |
+| No password login works, not even the local admin | LDAP is enabled and its server is unreachable | [LDAP limitations](appendices/identity-providers.md#concept-ldap-limitations-in-21912) |
+| A runner task waits forever | The only eligible runner is offline, or remote execution is on with no runner | [Runner availability](18-runners.md#check-execution-and-availability) |
+| An imported project's tasks fail with `secret must be valid json in key` | Exports omit Key Store values; re-enter them privately | [Make the imported project runnable](appendices/maintenance.md#check-make-the-imported-project-runnable) |
+| Tasks that use credentials fail with `illegal base64 data` after a downgrade | 2.18 cannot read credentials stored by 2.19 | [Why a downgrade is not a rollback](appendices/maintenance.md#concept-why-a-downgrade-is-not-a-rollback) |
 
 ## SSH identity selection
 

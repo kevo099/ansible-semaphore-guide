@@ -24,14 +24,15 @@ def fail(path, reason):
     errors.append(f"{path.relative_to(ROOT)}: {reason}")
 
 
-def source_files():
-    if (ROOT / ".git").is_dir():
+def source_files(root=ROOT):
+    # A clone has a .git directory; a linked worktree has a .git file. Both honor .gitignore.
+    if (root / ".git").exists():
         result = subprocess.run(
             ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
-            cwd=ROOT, check=True, capture_output=True, text=True,
+            cwd=root, check=True, capture_output=True, text=True,
         )
-        return [ROOT / name for name in sorted(set(result.stdout.split("\0")) - {""})]
-    return sorted(p for p in ROOT.rglob("*") if p.is_file() and not (set(p.relative_to(ROOT).parts) & SKIP_DIRS))
+        return [root / name for name in sorted(set(result.stdout.split("\0")) - {""})]
+    return sorted(p for p in root.rglob("*") if p.is_file() and not (set(p.relative_to(root).parts) & SKIP_DIRS))
 
 
 def headings(text):

@@ -31,26 +31,59 @@ SSH; the targets do not need an Ansible agent. Semaphore supplies the web
 interface, credentials, job configuration and task history. It runs Ansible;
 it does not replace the playbooks.
 
-## Read in this order
+## Choose your route
+
+Everyone starts with route A. Routes B and C both build on it; take either or
+both, in any order. Each chapter links to the next one, and
+[troubleshooting](docs/11-troubleshooting.md) is there whenever a check fails.
+
+**Route A: a first working lab.** You finish with a controller, verified
+target access and a real job run from both the terminal and Semaphore.
 
 | Step | Guide | Result |
 | --- | --- | --- |
 | 1 | [Design and prerequisites](docs/01-design.md) | Choose resources, networks and account boundaries. |
 | 2 | [Create the VMs](docs/02-create-vms.md) | Build a controller and two fresh targets. |
-| 3 | [Install the controller](docs/03-controller.md) | Install natively, manually or with the reviewed installer. |
-| 3b | [Enterprise Linux 9 seeded controller](docs/03-controller-el9.md) | Alternative: one run installs and seeds a local-folder practice project on RHEL, AlmaLinux or Rocky Linux 9.4 or later. |
+| 3 | **One of:** [Ubuntu controller](docs/03-controller.md) or [Enterprise Linux 9 seeded controller](docs/03-controller-el9.md) | Install natively on Ubuntu 24.04, manually or with the installer; or install on RHEL, AlmaLinux or Rocky Linux 9.4 or later in one run that also seeds a practice project. |
 | 4 | [SSH, sudo and target bootstrap](docs/04-access.md) | Establish verified, key-based automation access. |
 | 5 | [Command-line Ansible lessons](docs/05-cli-lessons.md) | Preview, apply, repeat and inspect five playbooks. |
 | 6 | [Configure Semaphore](docs/06-semaphore.md) | Run the same lessons from named task templates. |
+
+[Browser access](docs/appendices/browser-access.md) covers the private tunnel
+and, if you need it, publishing the UI on the controller's address.
+
+**Route B: develop and operate safely.**
+
+| Step | Guide | Result |
+| --- | --- | --- |
 | 7 | [Git and VS Code](docs/07-git-and-vscode.md) | Edit, review and deliberately deliver changes. |
+| 10 | [Backup, restore and rebuild](docs/10-recovery.md) | Take a recovery capture before you patch or harden anything. |
 | 8 | [Patching and daily operations](docs/08-operations.md) | Handle maintenance, reboots, drift and failures. |
-| 9 | [Optional CIS/STIG practice](docs/09-security-benchmarks.md) | Assess a specific vendor baseline and interpret findings. |
-| 10 | [Backup, restore and rebuild](docs/10-recovery.md) | Protect configuration, encrypted credentials and data. |
-| 11 | [Troubleshooting](docs/11-troubleshooting.md) | Diagnose failures by layer. |
+| 9 | [Optional CIS/STIG practice](docs/09-security-benchmarks.md) | Assess a specific vendor baseline and interpret findings, on disposable targets. |
 | 12 | [Learning exercises and RHCE alignment](docs/12-learning-path.md) | Progress toward independently written automation. |
 | Optional | [Azure and cloud-init](docs/13-azure.md) | Extend the same SSH bootstrap model to cloud VMs. |
 
-Each main walkthrough uses **Goal → Do → Check → Concept**. Commands identify
+**Route C: Semaphore Community features.** Each chapter was written from a
+live test of Semaphore Community 2.19.12 and says what is free, what is paid
+and what to watch for. Read 14 and 15 first; then 16, 17 and 18 as you need
+them.
+
+| Step | Guide | Result |
+| --- | --- | --- |
+| 14 | [Inputs and templates](docs/14-inputs-and-templates.md) | Variable groups, surveys, launch options, build and deploy templates. |
+| 15 | [Identity, roles and credentials](docs/15-identity.md) | Users, the four project roles, API tokens, TOTP and where secrets belong. |
+| 16 | [Schedules, notifications and task control](docs/16-semaphore-operations.md) | Run on a timetable, get alerts, limit concurrency and stop tasks safely. |
+| 17 | [API and integrations](docs/17-api-and-integrations.md) | Launch and watch tasks from scripts and authenticated webhooks. |
+| 18 | [Runners](docs/18-runners.md) | Run tasks on a separate execution host. |
+
+[Community coverage](docs/COMMUNITY-COVERAGE.md) lists every capability with
+its edition and test result. Optional appendices cover
+[other task apps](docs/appendices/other-apps.md),
+[OpenID Connect and LDAP](docs/appendices/identity-providers.md),
+[task identity with OpenBao](docs/appendices/task-identity.md) and
+[export, key rotation and upgrades](docs/appendices/maintenance.md).
+
+Each walkthrough uses **Goal → Do → Check → Concept**. Commands identify
 whether they run on your workstation, controller or target. Finish a check
 before proceeding to the next layer.
 
@@ -84,7 +117,7 @@ accounts. Read each playbook before running it.
 | --- | --- |
 | Native controller | Ubuntu Server 24.04 LTS, amd64; alternative seeded path on RHEL, AlmaLinux or Rocky Linux 9.4 or later, x86_64 (RHEL registered, with BaseOS and AppStream enabled) |
 | Controller Python | 3.12 in the operating system; separate Ansible virtual environment |
-| Ansible Core | 2.20.9, with every Python dependency pinned in [`requirements-controller.txt`](requirements-controller.txt) |
+| Ansible Core | 2.21.4, with every Python dependency pinned in [`requirements-controller.txt`](requirements-controller.txt) |
 | Semaphore UI | Community 2.19.12, checksum-verified native binary |
 | Database | PostgreSQL 16 from Ubuntu repositories or the EL9 `postgresql:16` module stream |
 | Main practice targets | Ubuntu 24.04 and AlmaLinux 9; Rocky Linux 9 also works |
@@ -96,7 +129,9 @@ Semaphore is pinned by version and checksum, and the Ansible environment by
 operating-system packages follow the distribution's updates within the release
 series shown. Review release notes and rerun validation before upgrading. No
 container runtime, Kubernetes cluster, domain controller or paid Semaphore
-feature is required for the main walkthrough.
+feature is required for the main walkthrough. The optional feature chapters
+use a container runtime only for disposable practice services such as a local
+mail catcher or identity provider.
 
 The ansible-core lines have fixed support dates. 2.20 becomes security-only on
 2 November 2026 and reaches end of life in May 2027. 2.21 is the last line that
@@ -110,23 +145,28 @@ has the current dates.
 
 See [validation and limitations](docs/VALIDATION.md) for what the September
 2026 runs on fresh VMs, registered RHEL and Ubuntu Pro guests and Rocky Linux
-verified, the versions tested, what they did not establish, and how to repeat
-the offline checks.
+verified, the 2.21.4 requalification and the Community feature campaign, what
+they did not establish, and how to repeat the offline checks.
 This is a learning setup, not a high-availability production design or a claim
 of compliance with a security standard.
 
 ## Quick orientation
 
-On a new controller, get a copy of this repository:
+On a new controller, get a copy of this repository and read the installer's
+plan; it makes no changes:
 
 ```bash
 git clone https://github.com/kevo099/ansible-semaphore-guide.git
 cd ansible-semaphore-guide
-bash scripts/install-controller.sh --plan
+bash scripts/install-controller.sh --plan        # Ubuntu 24.04
+bash scripts/install-controller-el9.sh --plan    # RHEL, AlmaLinux or Rocky Linux 9
 ```
 
-The plan makes no changes. Follow [the controller guide](docs/03-controller.md)
-before using `--apply`. After target bootstrap, a first scoped test looks like:
+Follow [the Ubuntu chapter](docs/03-controller.md) or
+[the Enterprise Linux chapter](docs/03-controller-el9.md) before using
+`--apply`. After target bootstrap, a first scoped test from the Ubuntu
+controller's working copy looks like this; the seeded Enterprise Linux
+controller has the same playbooks in `/opt/ansible-lab`:
 
 ```bash
 cp inventories/lab.ini.example inventories/lab.ini

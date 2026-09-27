@@ -1,0 +1,24 @@
+---
+- name: Inspect practice inputs
+  hosts: lab
+  gather_facts: false
+  tasks:
+    - name: Require the intended input values
+      ansible.builtin.assert:
+        that:
+          - ansible_limit is defined
+          - demo_colour | default('') in ['blue', 'green']
+          - (demo_count | default('') | string) is match('^[1-3]$')
+          - demo_enabled is defined and demo_enabled is boolean
+        fail_msg: Supply a limit, blue or green, count 1 to 3, and a JSON boolean.
+
+    - name: Report harmless inputs
+      ansible.builtin.debug:
+        msg:
+          host: "{{ inventory_hostname }}"
+          limit: "{{ ansible_limit }}"
+          marker: "{{ demo_marker }}"
+          enabled: "{{ demo_enabled }}"
+          colour: "{{ demo_colour }}"
+          count: "{{ demo_count | int }}"
+          mode: "{{ lookup('ansible.builtin.env', 'DEMO_MODE', default='') }}"

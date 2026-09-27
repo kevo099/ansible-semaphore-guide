@@ -1,6 +1,6 @@
 # 12. Progress from examples to independent automation
 
-[Previous: troubleshooting](11-troubleshooting.md) · [Optional: Azure](13-azure.md)
+[Previous: security benchmarks](09-security-benchmarks.md) · [Optional: Azure](13-azure.md) · [Community features](14-inputs-and-templates.md)
 
 ## Goal
 
@@ -66,6 +66,17 @@ Semaphore after the CLI path works.
 Add a documented maintenance operation and a recovery drill. Explain exactly
 what your backup includes and demonstrate an authenticated task after recovery.
 Keep the exercise small enough that you can understand every change.
+
+## Stage 5, optional: operate it through Semaphore
+
+Run the mini-project the way a small team would, using the Community features
+in [chapters 14 to 18](14-inputs-and-templates.md). Give it a survey whose
+values the playbook validates, a second user with the Task Runner role, a
+schedule you can prove fires at the time you expect, a failure alert that
+reaches you, and one launch through the API with a dedicated user's token.
+Then remove each of them and show that nothing is left running or scheduled.
+The goal is to explain every trigger that can start your automation and every
+person who can.
 
 ## Relationship to RHCE/EX294
 

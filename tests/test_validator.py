@@ -6,6 +6,9 @@ file passes the validator itself.
 
 import importlib.util
 from pathlib import Path
+import shutil
+import subprocess
+import tempfile
 import unittest
 
 
@@ -81,3 +84,28 @@ class PublicationBoundaryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(shutil.which("git"), "git is not installed")
+class SourceDiscoveryTests(unittest.TestCase):
+    def git(self, cwd, *args):
+        subprocess.run(["git", "-c", "user.name=Lab", "-c", "user.email=lab@example.test", *args],
+                       cwd=cwd, check=True, capture_output=True)
+
+    def test_clone_and_linked_worktree_both_honor_gitignore(self):
+        with tempfile.TemporaryDirectory() as directory:
+            clone = Path(directory) / "clone"
+            clone.mkdir()
+            self.git(clone, "init", "-q", "-b", "main")
+            (clone / ".gitignore").write_text("inventories/*\n")
+            (clone / "README.md").write_text("guide\n")
+            self.git(clone, "add", ".")
+            self.git(clone, "commit", "-q", "-m", "start")
+            worktree = Path(directory) / "worktree"
+            self.git(clone, "worktree", "add", "-q", str(worktree))
+            for root in (clone, worktree):
+                with self.subTest(root=root.name):
+                    (root / "inventories").mkdir(exist_ok=True)
+                    (root / "inventories" / "lab.ini").write_text("private\n")
+                    names = {path.relative_to(root).as_posix() for path in validate.source_files(root)}
+                    self.assertEqual(names, {".gitignore", "README.md"})

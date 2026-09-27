@@ -84,13 +84,13 @@ sudo chmod -R go+rX /opt/ansible-venv
 /opt/ansible-venv/bin/ansible --version
 ```
 
-The virtual environment receives ansible-core 2.20.9 with every Python
+The virtual environment receives ansible-core 2.21.4 with every Python
 dependency pinned in
 [`requirements-controller.txt`](../requirements-controller.txt), the set that
 the September 2026 verification installed. Python 3.12 and PostgreSQL 16 come
 from Ubuntu's repositories and follow its updates.
 
-**Check:** the Ansible output reports core 2.20.9, jinja 3.1.6 and Python 3.12
+**Check:** the Ansible output reports core 2.21.4, jinja 3.1.6 and Python 3.12
 from the virtual environment. The OS's default Python remains available for its
 own utilities.
 
@@ -259,25 +259,10 @@ terminal or password-manager workflow; do not paste it into Git, chat, job
 variables or a screenshot. Change the UI password and store the new value in
 your password manager. The initial password file does not update automatically.
 
-An optional loopback nginx configuration is provided in
-[`templates/nginx-loopback.conf`](../templates/nginx-loopback.conf). It is not
-needed for the direct SSH tunnel and is not installed by the script. If you
-choose it, configure nginx on a dedicated controller, disable its default
-public listener, validate with `nginx -t`, and forward to loopback port 8080.
-Use the [official reverse-proxy guide](https://semaphoreui.com/docs/admin-guide/reverse-proxy/nginx)
-for a separately designed HTTPS deployment.
-
 To reach the UI on the controller's own address instead of through a tunnel,
-run `sudo bash scripts/expose-semaphore.sh --mode https` from the repository
-root after either installation path; the script supports Ubuntu as well as
-Enterprise Linux. It installs nginx, removes the package's default site,
-proxies port 443 to the still loopback-only Semaphore, opens 443 in `ufw` when
-`ufw` is active and prints the self-signed certificate's SHA-256 fingerprint to
-compare in the browser. `--mode loopback` takes the UI off the network again.
-The Ubuntu installer has no `--expose` option. See
-[chapter 3b](03-controller-el9.md#do-reach-the-ui-on-the-vms-address-instead-of-a-tunnel)
-for the modes, what `--mode loopback` leaves in place, the checks and the
-cloud-firewall caution.
+see [browser access](appendices/browser-access.md#https-on-the-vms-address):
+`scripts/expose-semaphore.sh --mode https` works after either installation
+path, and `--mode loopback` takes the UI off the network again.
 
 ## Concept
 
