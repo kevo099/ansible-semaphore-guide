@@ -22,7 +22,7 @@ one reviewed run, and understand what the installer decided for you.
 
 | Layer | Result |
 | --- | --- |
-| Runtime | Python 3.12, Git, `/opt/ansible-venv` with ansible-core 2.20.9 and every Python dependency pinned in [`requirements-controller.txt`](../requirements-controller.txt) |
+| Runtime | Python 3.12, Git, `/opt/ansible-venv` with ansible-core 2.21.4 and every Python dependency pinned in [`requirements-controller.txt`](../requirements-controller.txt) |
 | Database | PostgreSQL 16 from the AppStream module stream, loopback only, SCRAM login |
 | Application | Semaphore Community 2.19.12, checksum-verified, `127.0.0.1:3000`, hardened `semaphore.service` |
 | Secrets | In `/etc/semaphore` (0750, root and the `semaphore` group): `config.json` (0640, readable by the service), the initial admin password and the `svc_ansible` RSA 4096 private key (root-only), and its public key (0644); no value is printed |

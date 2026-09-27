@@ -84,7 +84,7 @@ accounts. Read each playbook before running it.
 | --- | --- |
 | Native controller | Ubuntu Server 24.04 LTS, amd64; alternative seeded path on RHEL, AlmaLinux or Rocky Linux 9.4 or later, x86_64 (RHEL registered, with BaseOS and AppStream enabled) |
 | Controller Python | 3.12 in the operating system; separate Ansible virtual environment |
-| Ansible Core | 2.20.9, with every Python dependency pinned in [`requirements-controller.txt`](requirements-controller.txt) |
+| Ansible Core | 2.21.4, with every Python dependency pinned in [`requirements-controller.txt`](requirements-controller.txt) |
 | Semaphore UI | Community 2.19.12, checksum-verified native binary |
 | Database | PostgreSQL 16 from Ubuntu repositories or the EL9 `postgresql:16` module stream |
 | Main practice targets | Ubuntu 24.04 and AlmaLinux 9; Rocky Linux 9 also works |

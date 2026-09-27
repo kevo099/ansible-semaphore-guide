@@ -84,13 +84,13 @@ sudo chmod -R go+rX /opt/ansible-venv
 /opt/ansible-venv/bin/ansible --version
 ```
 
-The virtual environment receives ansible-core 2.20.9 with every Python
+The virtual environment receives ansible-core 2.21.4 with every Python
 dependency pinned in
 [`requirements-controller.txt`](../requirements-controller.txt), the set that
 the September 2026 verification installed. Python 3.12 and PostgreSQL 16 come
 from Ubuntu's repositories and follow its updates.
 
-**Check:** the Ansible output reports core 2.20.9, jinja 3.1.6 and Python 3.12
+**Check:** the Ansible output reports core 2.21.4, jinja 3.1.6 and Python 3.12
 from the virtual environment. The OS's default Python remains available for its
 own utilities.
 
