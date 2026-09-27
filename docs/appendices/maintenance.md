@@ -14,21 +14,25 @@ Move project configuration, rotate encryption keys and plan a recoverable upgrad
 | Evidence | [Portability and retention](../validation/2026-09-community.md#history-audit-and-portability), [rotation](../validation/2026-09-community.md#task-jwt-and-key-rotation), [version drill](../validation/2026-09-community.md#upgrade-and-rollback-drill) |
 | Known limits | Exports omit Key Store values/history and lose fields; rekey backups cover only access-key ciphertexts; downgrade can leave tasks unusable. |
 
-Finish [chapter 6](../06-semaphore.md) and take [chapter 10's private capture](../10-recovery.md#a-private-application-capture).
-Use its [isolated replacement](../10-recovery.md#restore-first-into-an-isolated-replacement),
-blocking original-target access. Record settings privately and control all task launches.
+Finish [chapter 6](../06-semaphore.md) and take [chapter 10's private
+capture](../10-recovery.md#a-private-application-capture). Use its [isolated
+replacement](../10-recovery.md#restore-first-into-an-isolated-replacement),
+blocking original-target access. Record settings privately and control all task
+launches.
 
 ## Do: export and import a project
 
-Project export/import is configuration portability. Key Store secret values, Variable
-Group secrets, history/output, events, API tokens, membership and runner registrations
-do not travel. External playbooks, inventory files and controller configuration need
-separate handling. Recovery is chapter 10's database, configuration, keys and runtime capture.
+Project export/import is configuration portability. Key Store secret values,
+Variable Group secrets, history/output, events, API tokens, membership and
+runner registrations do not travel. External playbooks, inventory files and
+controller configuration need separate handling. Recovery is chapter 10's
+database, configuration, keys and runtime capture.
 
-The tested paths are `GET /api/project/PROJECT_ID/backup` and `POST /api/projects/restore`,
-with the JSON document as the restore body. Use an unused `meta.name`: a duplicate
-returned HTTP 400. CLI export matched the API's JSON content. API restore made the
-restoring user owner; CLI import made the first database admin owner.
+The tested paths are `GET /api/project/PROJECT_ID/backup` and `POST
+/api/projects/restore`, with the JSON document as the restore body. Use an
+unused `meta.name`: a duplicate returned HTTP 400. CLI export matched the API's
+JSON content. API restore made the restoring user owner; CLI import made the
+first database admin owner.
 
 Treat exports as private: the test found a webhook alias in plain text. The pinned source
 also permits ordinary variable values and some runner fields to contain credentials.
@@ -84,8 +88,9 @@ Review these boundaries before enabling any imported work:
 | One-time schedule `run_at` | Pinned source writes the timestamp as `{}`; rebuild it deliberately before scheduling. |
 | Runners | Pinned source clears restored project-runner tokens; registration must be established separately. |
 
-Populated JWT/schedule fields and runner restoration were not tested in this export run.
-Restore is nontransactional in the pinned source: inspect for a partial project after failure.
+Populated JWT/schedule fields and runner restoration were not tested in this
+export run. Restore is nontransactional in the pinned source: inspect for a
+partial project after failure.
 
 Cleanup: delete only **Portability practice**. **Where: controller, as your
 administrator account.** Run `sudo rm -r /var/lib/semaphore/portability-practice`.
@@ -116,11 +121,24 @@ chmod 0640 /etc/semaphore/keys/ROTATION_KEY.key
 BASH
 ```
 
-This creates 32 random bytes in base64 without echoing them; existing nonempty keys stay.
-Use a new label per rotation. On Enterprise Linux, run `restorecon -RF /etc/semaphore/keys`.
-Check file metadata with `stat -c '%U:%G %a'`: expect `root:semaphore 640`.
-`base64 -d < /etc/semaphore/keys/ROTATION_KEY.key | wc -c` must report 32, and
-`runuser -u semaphore -- test -r /etc/semaphore/keys/ROTATION_KEY.key` must succeed.
+This creates 32 random bytes in base64 without echoing them; existing nonempty
+keys stay. Use a new label per rotation. Check the file as root; the key is
+readable only by root and the `semaphore` group, which your account is not in:
+
+```bash
+sudo bash <<'BASH'
+set -euo pipefail
+key=/etc/semaphore/keys/ROTATION_KEY.key
+if command -v restorecon >/dev/null; then restorecon -RF /etc/semaphore/keys; fi
+stat -c '%U:%G %a' "$key"
+base64 -d "$key" | wc -c
+runuser -u semaphore -- test -r "$key" && echo 'The service account can read the key.'
+BASH
+```
+
+Expect `root:semaphore 640`, `32` and the confirmation line. The registry and
+configuration edits below also need root: open a root shell with `sudo -i`
+for them, and leave it when the rotation is finished.
 
 Create `/etc/semaphore/encryption-keys.json` with this initial registry. It references
 the file; it contains no key material:
@@ -265,8 +283,9 @@ Ping successfully. The version-switch interval was 18 seconds, excluding capture
 downtime and the final Ping check. Newer fields were empty in this dataset; this does
 not prove populated newer data survives a downgrade.
 
-For a failed upgrade, restore chapter 10's matching pre-upgrade capture and runtime,
-then prove a credential-using task. Do not use `--undo-to` as your recovery plan.
-Future-version upgrades were not tested. Whole-database flags `--err-log-size`,
-`--skip-task-output` and `--merge-existing-users` are parsed but unused in 2.19.12.
-Remove only the isolated rehearsal copy after its checks; retain the capture under its policy.
+For a failed upgrade, restore chapter 10's matching pre-upgrade capture and
+runtime, then prove a credential-using task. Do not use `--undo-to` as your
+recovery plan. Future-version upgrades were not tested. Whole-database flags
+`--err-log-size`, `--skip-task-output` and `--merge-existing-users` are parsed
+but unused in 2.19.12. Remove only the isolated rehearsal copy after its checks;
+retain the capture under its policy.

@@ -148,8 +148,9 @@ the configuration and restart Semaphore:
 
 ```bash
 python3 -m json.tool /etc/semaphore/config.json >/dev/null && \
-  systemctl restart semaphore && systemctl is-active semaphore && \
-  curl --fail --silent --show-error http://127.0.0.1:3000/api/auth/login
+  systemctl restart semaphore && \
+  curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 1 \
+    http://127.0.0.1:3000/api/auth/login
 ```
 
 The login metadata should list **Dex practice** and `login_with_password: true`.
@@ -211,9 +212,9 @@ remedy in this version. Do not use this result as a secure LDAP deployment recip
 
 The isolated test used lldap **0.6.3-alpine-rootless**, upstream image
 `docker.io/lldap/lldap@sha256:ba2c50930ea998eefd5454aa678a7977448019248b1827da87d330df0b71c284`,
-with all three listeners on loopback. LDAP sign-in created an external user;
-the second login found the same account, and a wrong password was refused.
-These observations prove compatibility with that fixture, not Active Directory.
+with all three listeners on loopback. LDAP sign-in created an external user; the
+second login found the same account, and a wrong password was refused. These
+observations prove compatibility with that fixture, not Active Directory.
 
 Two other findings affect the recovery plan:
 

@@ -36,8 +36,12 @@ on the target for convenience; the recommended separate placement was **not test
 ## Do: prepare the connection
 
 Prerequisites: a working [chapter 6](06-semaphore.md) task, a fresh Ubuntu 24.04 amd64
-runner with admin SSH and a reviewed guide checkout, and an administrator API
-token from [chapter 17](17-api-and-integrations.md).
+runner with admin SSH and a reviewed guide checkout, and a short-lived API
+token for a Semaphore **administrator**. Chapter 17's practice token is
+deliberately not an administrator's and cannot create runners (403). Signed in
+as an administrator, use **API Tokens → New Token** with a short expiry, check
+it privately with `GET /api/user` (`"admin": true`) as
+[chapter 17](17-api-and-integrations.md) shows, and revoke it after registration.
 Take a [recovery capture](10-recovery.md); record the existing `use_remote_runner`,
 `runners` and exposure settings for cleanup.
 
@@ -183,6 +187,7 @@ set +x
 set -euo pipefail
 umask 077
 runner_api_dir=$(mktemp -d)
+trap 'rm -rf -- "$runner_api_dir"' EXIT
 read -rs -p 'Administrator API token: ' RUNNER_ADMIN_TOKEN; printf '\n'
 printf 'header = "Authorization: Bearer %s"\n' "$RUNNER_ADMIN_TOKEN" > "$runner_api_dir/curl.conf"
 unset RUNNER_ADMIN_TOKEN
@@ -207,9 +212,11 @@ journalctl -u semaphore-runner --since '5 minutes ago' --no-pager
 )
 ```
 
-Expect `semaphore-runner:semaphore-runner 600` and `Runner connected`. If the
-block stops early, investigate, then remove the `/tmp/tmp.*` directory it left. Revoke a temporary admin token
-when finished; do not publish these files.
+Expect `semaphore-runner:semaphore-runner 600`. The journal can show
+`Runner connected` a few seconds after the block ends; the rehearsal saw the
+runner **Online** within ten seconds. If the block stops early, its temporary
+directory is removed automatically; investigate the printed error before
+running it again. Revoke the temporary administrator token when finished.
 
 **Where: browser, as a Semaphore administrator.** Open the account menu →
 **Runners**; confirm **Runner practice** becomes **Online**. Registration alone
@@ -268,10 +275,12 @@ liveness/reconciliation. Source defaults are 120/420/30 seconds respectively;
 **Where: browser, in Ansible Practice, as a project owner.** Run **Runner practice
 Ping**. Read the full target recap and runner-assignment message; record the task ID.
 
-**Where: runner, as root.** Run `journalctl -u semaphore-runner --since '5 minutes ago' --no-pager`.
-Match that task ID with `Task started` and `Task finished`.
+**Where: runner, as root.** Run `journalctl -u semaphore-runner --since '5
+minutes ago' --no-pager`. Match that task ID with `Task started` and `Task
+finished`.
 
-**Where: target, as root.** Check its SSH journal independently for the runner's connection.
+**Where: target, as root.** Check its SSH journal independently for the runner's
+connection.
 
 The campaign blocked controller-to-target SSH: the local task failed, then the
 runner task succeeded with no unreachable or failed hosts. Runner journal entries,

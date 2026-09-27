@@ -100,8 +100,10 @@ and its `host_vars` on the controller. Keep that folder and repository object,
 and keep adding targets there.
 
 **Check:** a template switched to the new repository runs Ping and shows a
-clone step in its log, and `git log --oneline -- inventories/` in the pushed
-repository prints nothing.
+clone step in its log. In the pushed repository, `git log --oneline --
+inventories/` prints nothing after a new one-commit history, or only the
+installer's first commit and the untracking commit when you kept the reviewed
+history.
 
 ## Concept
 

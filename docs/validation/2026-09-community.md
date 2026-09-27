@@ -33,6 +33,36 @@ Each capability below is classified on two separate axes: its **edition**
 **live result**. A capability can be free and still behave in a way you need
 to plan around; those findings are listed as sharp edges.
 
+## Rehearsal of the new chapters
+
+After the feature tests, the new chapters' own example files and fenced
+command blocks were run as written on the same controller, read straight from
+this branch. UI steps were made through the API with the bodies the UI sends.
+
+| Page | What ran as written | Result |
+| --- | --- | --- |
+| [Inputs and templates](../14-inputs-and-templates.md) | The copy block, both variable groups, the survey and `input-demo.yml` | Passed: markers `second`/`second`/`blue`/`2`; survey `green`/`3`/`survey`; count 4 failed its assertion. |
+| [Other task apps](../appendices/other-apps.md) | The file, state-directory and runtime blocks; Bash and Python templates; the OpenTofu template and state check | Passed: exit 0 and 3 behaved as described; plan and confirm, unchanged, reject, plan only, auto-approve and destroy all matched. |
+| [Identity](../15-identity.md) | The token shell session as a Task Runner, the demotion and the revocation | Passed: `task_runner`, 201 then 403 for the edit; `guest` and 403 after demotion; 401 after deletion. |
+| [Operations](../16-semaphore-operations.md) | The copy block, the local inventory, `operations-pause.yml` and `operations-failure.yml`, one plain Stop on a queued run, a one-time schedule | Passed: the second run waited; the stopped queued run never started; the one-time schedule ran once and became inactive. |
+| [API and integrations](../17-api-and-integrations.md) | The whole shell session: token bootstrap, launch and poll, paging, the token-authenticated webhook, an unauthenticated repeat, revocation | Passed: one task from the API and one from the webhook, none from the unauthenticated repeat, 401 after revocation. |
+| [Task identity](../appendices/task-identity.md) | The JWT, JWKS, OpenBao and role blocks and `openbao-jwt-read.yml` | Passed: matching digest for the allowed template; the other template refused with the claim error; no JWT or value in any log. |
+| [Runners](../18-runners.md) | Every block on an Ubuntu 24.04 runner host (co-located with the target): HTTPS exposure, the checksum-verified install, account, configuration, unit, one-time registration, the runner inventory and template, the offline wait and the removal | Passed: Ping ran on the runner and its journal recorded the task; a task waited while the runner was offline and completed when it returned; the runner was deleted and the controller returned to loopback. |
+| [Maintenance](../appendices/maintenance.md) and [syslog](../16-semaphore-operations.md#do-send-service-logs-to-syslog) | The export and import block; the syslog fragment, restart and `journalctl` check | Passed: the imported project had its eleven templates and empty keys, and its Ping failed with `secret must be valid json`; the syslog check matched the task's queue line. The key-file creation and check blocks also ran as written; the rotation itself follows the tested module sequence and was not rehearsed separately. |
+
+The rehearsal and the review of the drafts found and fixed these defects
+before publication:
+
+- A `curl` right after `systemctl restart semaphore` met a closed port; the
+  blocks now retry until Semaphore listens again.
+- The runtime check ran `tofu --version` as the service account from root's
+  working directory, which that account cannot read; it now changes to `/`.
+- The OpenBao example hid the refusal reason with `no_log`; it now reports
+  OpenBao's status and error text, which carry no credential.
+- Command blocks meant for an interactive shell used `exit` or a top-level
+  `set -e`, which would have closed the reader's terminal on the first error;
+  they now print a `Stop:` message or run in a subshell (found in review).
+
 ## Platform and edition baseline
 
 - `semaphore version` and `/api/info` both reported 2.19.12 Community.
@@ -61,7 +91,8 @@ dependency set is otherwise identical.
 | STIG apply, allow required reboot | success; remediation applied, target rebooted, then Ping and a `changed=0` Baseline preview succeeded |
 
 Not rerun on 2.21.4: AlmaLinux, Rocky Linux or RHEL targets, the Ubuntu manual
-path and chapter 10's restore.
+path, chapter 10's restore and the seeded **STIG apply (vendor fixes, approval
+required)** template; its reboot variant ran.
 
 ## Inputs and templates
 
@@ -84,18 +115,22 @@ Sharp edges found:
   created later wins, whatever order you list them in.
 - **Printed secrets are not masked.** A secret the play prints appears
   verbatim in the task log. Only Ansible's `no_log` hides it.
-- **`var` secrets and survey values are on the command line.** They are passed
-  to `ansible-playbook` as `--extra-vars name=value`, so any local account on
-  the controller can read them from the process list while the task runs; an
-  unprivileged, non-`semaphore` account did. `env` secrets were visible only to
-  root. A `var` secret containing a space was cut at the space.
+- **`var` secrets and survey values are on the command line.** Group `var`
+  secrets are passed to `ansible-playbook` as separate `--extra-vars
+  name=value` arguments; extra-variable survey values, survey secrets included,
+  are passed in JSON. Both were visible to an unrelated, non-`semaphore` local
+  account in the process list while the task ran. Group `env` secrets and
+  environment-target survey values were in the process environment, readable
+  by root and the service account but not by that account. A group `var`
+  secret containing a space was split; the survey secret kept its space.
 - **Survey values are evaluated as templates.** A value of
   `{{ lookup('ansible.builtin.pipe', 'id -un') }}` ran on the controller as the
   service account.
 - **Survey rules are enforced by the UI only.** Through the API, a required
   field could be omitted and an integer or enum field given any value.
-- **Bad JSON in a task's `environment` or `params` returns HTTP 500**, not
-  400, and leaves a failed task row.
+- **Bad task input returns HTTP 500**, not 400. Malformed embedded
+  `environment` JSON left an error task row; wrong-typed `params` created no
+  task row. Only a malformed JSON request body returned 400.
 - A local-folder repository has no branches: Semaphore runs its working tree,
   so a branch override needs a real Git repository.
 
@@ -123,14 +158,15 @@ Chapter: [API and integrations](../17-api-and-integrations.md).
 | Cross-origin session cookie (CSRF) | Community | Refused with 403. |
 | Swagger UI at `/swagger` | Community | Served without login. Its embedded description says 2.16.14 and omits newer fields. |
 | Keyset paging on `/tasks/last` | Community | Passed: `count` and `before`, `X-Has-Next`, no repeats. |
-| Integrations with token, HMAC, basic, Bitbucket and GitHub authentication | Community | Each started exactly one task with valid credentials and none with wrong or missing ones. |
+| Integrations with token, HMAC, basic, Bitbucket and GitHub authentication | Community | Each started exactly one task with valid credentials and none for the invalid cases exercised; missing credentials were tested for token, HMAC and basic authentication. |
 | Matchers and extractors | Community | Passed: non-matching events started no task; extracted values reached the play. |
 
 Sharp edges found:
 
 - **The receiver answers 204 whether or not a task started**, including for a
-  wrong secret. Only the `X-Semaphore-Task-ID` response header, or the task
-  list, shows that a task ran. An unknown alias gets an empty 200.
+  wrong secret. The `X-Semaphore-Task-ID` response header, or the task list,
+  identifies an accepted task; poll it to a terminal status and read its
+  output to prove it ran. An unknown alias gets an empty 200.
 - An extractor that wrote a string into the task's limit, which is a list,
   made every request start no task, still answering 204.
 - A token acts as its user with that user's current role; see
@@ -142,11 +178,11 @@ Chapter: [schedules, notifications and task control](../16-semaphore-operations.
 
 | Capability | Edition | Live result |
 | --- | --- | --- |
-| Cron schedules, `@every` and other descriptors | Community | Passed; tasks started within 0.01 s of the due time. |
+| Cron schedules and `@every` | Community | Passed: the timed checks created task records within 0.01 s of the due time; execution can then wait in the queue. `@hourly` passed syntax validation only. |
 | One-time schedules (`run_at`), delete after run | Community | Passed: one run, then the schedule was deactivated or deleted. |
 | Task parameters on a schedule | Community | Passed, subject to the template's override settings. |
-| Enable and disable | Community | Passed; no run after disabling. |
-| Commit-check schedules | Community | Passed: the first poll ran the template, an unchanged repository did not, a new commit did. |
+| Enable and disable ordinary schedules | Community | Passed; no run after disabling. |
+| Commit-check schedules | Community | Passed with a caveat: the first poll ran the template, an unchanged repository did not, a new commit did. Setting `active: false` did **not** stop the checker; clearing the template's checkbox removes it. |
 | `schedule.timezone` and a `CRON_TZ=` prefix | Community | Passed; the service's own `TZ` was ignored. |
 
 Sharp edges found:
@@ -245,8 +281,9 @@ Sharp edges found:
 - An OIDC e-mail equal to an existing local user's was refused, not linked.
 - **LDAP does not verify the LDAPS certificate**: an untrusted self-signed
   certificate was accepted.
-- **While the LDAP server was down, new logins failed for everyone, the local
-  admin included.** Existing sessions kept working.
+- **While the LDAP server was down, new password logins failed for everyone,
+  the local admin included.** Existing sessions kept working. OIDC sign-in
+  takes a separate path; it was not tested during the outage.
 - A directory user with the same name as a local account locked that account
   out with both passwords.
 
@@ -290,14 +327,18 @@ Sharp edges found:
   deletes its events.
 - `/api/events` shows only projects you are a member of, even to an
   administrator.
-- **A project export carries no secret values.** Key Store entries come back
-  empty: the first task on the restored project failed with
+- **A project export omits Key Store values and variable-group secrets, but it
+  is not free of credentials.** Restored Key Store entries came back empty: the
+  first task on the restored project failed with
   `secret must be valid json in key 'Practice target SSH'`, and Ping succeeded
-  once the keys were re-entered. Task history and events do not travel.
+  once the keys were re-entered. The export did contain a webhook alias in
+  plain text, and the source shows it can also carry other credential-bearing
+  values. Keep exports private. Task history and events do not travel.
 - A restore needs a project name that does not exist yet; a duplicate is
   refused with 400.
-- Export writes a template's JWT settings and a one-time schedule's time as
-  `{}`, so those do not survive.
+- The pinned source shows that populated template JWT settings and one-time
+  schedule times are exported as `{}`. The test project had neither populated,
+  so this was not exercised.
 - Pruned and deleted tasks disappear, but their events remain.
 
 ## Runners
@@ -334,8 +375,8 @@ stopped Semaphore, undid the database migrations with
 | Step | Result |
 | --- | --- |
 | `--undo-to 2.18`, then to the exact 2.18 target | Both exited 0 and the migrations table matched. A `v`-prefixed version and combined flags were refused before any change. |
-| Community 2.18.30 on the downgraded database | It started, applied its own migration, and login, projects and templates worked. **Every task failed** with `illegal base64 data`: 2.19 stores Key Store secrets in a key-id envelope that 2.18 cannot read. |
-| Back to 2.19.12 | The migrations were applied again, the schema matched the starting schema, no rows were lost, readiness passed and Ping succeeded. Downtime was 18 seconds. |
+| Community 2.18.30 on the downgraded database | It started, applied its own migration, and login, projects and templates worked. **The tested Ping failed** while decrypting its inventory credentials, with `illegal base64 data`: 2.18 cannot decode the key-id envelope 2.19 stores Key Store secrets in. |
+| Back to 2.19.12 | The migrations were applied again, the schema matched the starting schema, no rows were lost, readiness passed and Ping succeeded. The measured stop-to-return interval of the version switch was 18 seconds, excluding the capture and the final checks. |
 
 Conclusion: `--undo-to` with an older binary is not a working rollback from
 2.19. Test an upgrade on a restored copy first, and roll back by restoring the

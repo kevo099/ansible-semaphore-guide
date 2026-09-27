@@ -23,10 +23,11 @@ OpenBao's HTTP API itself, using only `ansible.builtin` modules.
 **Where: browser, as the practice project's administrator.**
 
 Complete [the first Semaphore job](../06-semaphore.md) first. Use a reviewed
-repository revision containing [openbao-jwt-read.yml](../../examples/semaphore/openbao-jwt-read.yml);
-the earlier starter tag does not contain this new example. This optional exercise
-needs controller root access, Python 3, curl and Linux Podman with host networking;
-the main guide requires no container runtime.
+repository revision containing
+[openbao-jwt-read.yml](../../examples/semaphore/openbao-jwt-read.yml), such as
+this guide at tag `v1.3.0` or later; the `v1.2.0` lesson tag does not contain
+it. This optional exercise needs controller root access, Python 3, curl and
+Linux Podman with host networking; the main guide requires no container runtime.
 
 Create a Static inventory named **JWT practice localhost**, containing only
 `localhost ansible_connection=local`, with no SSH or sudo credential. Create two
@@ -67,11 +68,13 @@ Restart Semaphore when no jobs are running, then inspect its public key set:
 
 ```bash
 systemctl restart semaphore
-curl --fail --silent --show-error http://127.0.0.1:3000/.well-known/jwks.json
+curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 1 \
+  http://127.0.0.1:3000/.well-known/jwks.json
 ```
 
-The campaign saw HTTP 404 while JWT was disabled, then one `EC`, `P-256`, `ES256`
-signing key when enabled. This URL is at the web root, outside `/api`; it
+The retries cover the few seconds Semaphore needs to listen again after a
+restart. The campaign saw HTTP 404 while JWT was disabled, then one `EC`,
+`P-256`, `ES256` signing key when enabled. This URL is at the web root, outside `/api`; it
 publishes the public key, not a task token. Stop if the key set is unavailable.
 
 **Where: browser, as the practice project's administrator.**
@@ -202,7 +205,10 @@ cleanup, so the OpenBao token also has a short TTL. Do not enable verbose
 credential debugging or print the JWT to diagnose a censored failure.
 
 Run **JWT practice denied** with the same audience and role. It must fail login
-and print no digest. The campaign observed HTTP 400 with this exact error:
+and print no digest. The playbook hides the login request and response with
+`no_log`, then reports only OpenBao's HTTP status and error text, which carry
+no credential. The campaign and the rehearsal of this playbook observed HTTP
+400 with this error:
 
 ```text
 error validating claims: claim "template_id" does not match any associated bound claim values
@@ -216,7 +222,9 @@ private preflight; the campaign probe reported negative cases within successful 
 The live allowed run matched the stored value's digest, received a 300-second
 OpenBao token and revoked it with HTTP 204. Its JWT lifetime was 300 seconds;
 the other template inherited 600 seconds. Output scans found no raw value or JWT.
-The public example has offline checks, not a separate live qualification.
+The public example also passed a live rehearsal: the allowed run matched the
+digest, the denied run reported HTTP 400 without a digest, and the JWT-off run
+failed its preflight.
 Expiry and altered-token denials remain **not tested**.
 
 ## Do: clean up the exercise

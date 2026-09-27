@@ -4,7 +4,8 @@
 
 ## Goal
 
-Run a reviewed Ping template through the API, verify its output, and connect an authenticated incoming webhook with fixed hosts and code.
+Run a reviewed Ping template through the API, verify its output, and connect an
+authenticated incoming webhook with fixed hosts and code.
 
 | Edition and evidence | Scope |
 | --- | --- |
@@ -20,27 +21,30 @@ and have Bash, curl, jq and an existing dedicated-user token for initial authent
 Use a disposable **API practice Ping** template with one fixed inventory host,
 reviewed repository ref, and run-time limit/branch overrides disabled. Qualify it first.
 
-This exercise creates a named API token, task records, protected files, and an integration with its own key and alias.
-Record these objects for scoped cleanup. Keep existing project credentials.
+This exercise creates a named API token, task records, protected files, and an
+integration with its own key and alias. Record these objects for scoped cleanup.
+Keep existing project credentials.
 
 ## Do: inspect Swagger and token access
 
 **Where: browser, as your dedicated Semaphore practice user.**
 
-Open `http://127.0.0.1:8088/swagger`; it loaded without authentication in the campaign.
-Its schema says **2.16.14** and omits token expiry, `X-Has-Next`, and the incoming receiver.
-Use it for discovery; verify fields against responses and the pinned 2.19.12 implementation.
+Open `http://127.0.0.1:8088/swagger`; it loaded without authentication in the
+campaign. Its schema says **2.16.14** and omits token expiry, `X-Has-Next`, and
+the incoming receiver. Use it for discovery; verify fields against responses and
+the pinned 2.19.12 implementation.
 
 A user API token acts as its user; it is not scoped to a project or resource.
-Use a dedicated low-privilege user per integration, with membership only where needed.
-Arrange it through [identity and roles](15-identity.md); keep resource setup with the project owner.
-A token acts with its user's **current** project role: in the campaign a
-demotion from Task Runner to Guest applied to the token at once, and the next
-task launch was refused with 403.
+Use a dedicated low-privilege user per integration, with membership only where
+needed. Arrange it through [identity and roles](15-identity.md); keep resource
+setup with the project owner. A token acts with its user's **current** project
+role: in the campaign a demotion from Task Runner to Guest applied to the token
+at once, and the next task launch was refused with 403.
 
-The token API was tested directly; browser interaction was not tested. Source UI labels:
-**API Tokens → New Token**, **Token Name**, **Expires**. Create **api-practice** with a one-hour expiry
-using the recipe below. Use an unused name and check workstation/controller clock agreement.
+The token API was tested directly; browser interaction was not tested. Source UI
+labels: **API Tokens → New Token**, **Token Name**, **Expires**. Create
+**api-practice** with a one-hour expiry using the recipe below. Use an unused
+name and check workstation/controller clock agreement.
 
 | Token operation | Tested contract |
 | --- | --- |
@@ -49,9 +53,10 @@ using the recipe below. Use an unused name and check workstation/controller cloc
 | Authenticate: `GET /api/user` | Bearer token identifies its user; invalid, expired, or deleted token gets 401. |
 | Delete: `DELETE /api/user/tokens/TOKEN_PREFIX` | Hard deletion by an ID prefix, at least eight characters; 204. No soft-revoke route exists in 2.19.12. |
 
-Expiry is checked at login/authentication time, including each bearer request.
-A short-lived token stopped working after expiry while its listed `expired` stayed `false`.
-Past expiry at creation returned **400**. Check `expires_at` and an authenticated request.
+Expiry is checked at login/authentication time, including each bearer request. A
+short-lived token stopped working after expiry while its listed `expired` stayed
+`false`. Past expiry at creation returned **400**. Check `expires_at` and an
+authenticated request.
 
 ## Do: keep authentication private
 
@@ -112,11 +117,12 @@ jq -n --argjson template "$template_id" --arg limit "$target_limit" \
   > "$practice_dir/task-request.json"
 ```
 
-`template_id` selects the template. Optional `environment` is a JSON **string** containing an object.
-`params` is an object; the tested `limit` is a string array.
-The source defines `tags` and `skip_tags` as string arrays; these were not tested here.
-Variable Groups (API: `environment`, `environment_ids`): template `environment_ids` selects groups;
-task `environment` supplies extra variables. Do not put `environment_ids` in a task creation body.
+`template_id` selects the template. Optional `environment` is a JSON **string**
+containing an object. `params` is an object; the tested `limit` is a string
+array. The source defines `tags` and `skip_tags` as string arrays; these were
+not tested here. Variable Groups (API: `environment`, `environment_ids`):
+template `environment_ids` selects groups; task `environment` supplies extra
+variables. Do not put `environment_ids` in a task creation body.
 
 A locked template keeps its own limit and branch despite task overrides. The request
 repeats the fixed host; the template controls it. Task extra variables can still
@@ -124,8 +130,9 @@ override group values: keep them empty here; see [inputs](14-inputs-and-template
 
 ## Do: launch and poll one task
 
-Creation is not proof of execution. This poll has a two-minute budget plus the active request's timeout.
-It never retries a launch or cancels on timeout. Terminal statuses are `success`, `error`, and `stopped`.
+Creation is not proof of execution. This poll has a two-minute budget plus the
+active request's timeout. It never retries a launch or cancels on timeout.
+Terminal statuses are `success`, `error`, and `stopped`.
 
 ```bash
 poll_task() {
@@ -164,9 +171,10 @@ Even HTTP 500 can leave a task row: the campaign saw that with malformed inner
 
 ## Check: read the effect and history
 
-Read `task.json` and the saved output: confirm user ID, template, repository ref, expected host and Ping recap.
-Match the user ID with `/api/user`. If the recap is missing, refetch output after a short wait, at most five times:
-final status can precede the last output. Missing output leaves the check incomplete.
+Read `task.json` and the saved output: confirm user ID, template, repository
+ref, expected host and Ping recap. Match the user ID with `/api/user`. If the
+recap is missing, refetch output after a short wait, at most five times: final
+status can precede the last output. Missing output leaves the check incomplete.
 
 | Read route, below `/api/project/PROJECT_ID` | Meaning |
 | --- | --- |
@@ -185,10 +193,11 @@ api --dump-header "$practice_dir/page.headers" --output "$practice_dir/page.json
 jq '.[-1].id' "$practice_dir/page.json"
 ```
 
-The campaign walked four pages without duplicates while no new tasks were created.
-The source caps `count` at **200**; the small live dataset could not prove the cap.
-`/templates/TEMPLATE_ID/tasks/last` also paged. Plain `/tasks` has no cursor or `X-Has-Next`;
-its source limit is 1000 rows, so it is not a full-history export.
+The campaign walked four pages without duplicates while no new tasks were
+created. The source caps `count` at **200**; the small live dataset could not
+prove the cap. `/templates/TEMPLATE_ID/tasks/last` also paged. Plain `/tasks`
+has no cursor or `X-Has-Next`; its source limit is 1000 rows, so it is not a
+full-history export.
 
 If this practice task needs stopping, `POST /api/project/PROJECT_ID/tasks/TASK_ID/stop`
 requires a JSON body: `{"force": false}`. No body returned **400** and the task kept
@@ -205,10 +214,11 @@ Use private bearer configuration; keep browser cookies private and CSRF protecti
 
 **Where: workstation, as the project owner, in a separate shell.**
 
-Use the private curl-config pattern with the owner's credential; keep the runtime user limited.
-The campaign tested Token authentication with a harmless echo template; use your qualified Ping template here.
-Send these JSON objects with the owner's authenticated client. Assemble credential
-input privately with `read -rs` into a mode-0600 request file, then use `--data-binary @FILE`.
+Use the private curl-config pattern with the owner's credential; keep the
+runtime user limited. The campaign tested Token authentication with a harmless
+echo template; use your qualified Ping template here. Send these JSON objects
+with the owner's authenticated client. Assemble credential input privately with
+`read -rs` into a mode-0600 request file, then use `--data-binary @FILE`.
 
 | POST route below `/api/project/PROJECT_ID` | Body fields and returned object |
 | --- | --- |
@@ -216,15 +226,17 @@ input privately with `read -rs` into a mode-0600 request file, then use `--data-
 | `/integrations` | `project_id`, `name: "API practice webhook"`, `template_id`, `auth_method: "token"`, `auth_header: "X-Practice-Token"`, `auth_secret_id: KEY_ID`, `searchable: false`. Save returned `id` as `INTEGRATION_ID`. |
 | `/integrations/INTEGRATION_ID/aliases` | `{}`; 200 returns `{id, url}`. Retain the alias URL privately. |
 
-Source UI equivalents: **Auth method → Token**, **Auth header**, **Vault Password** (the key),
-**Use project alias** off, then **Add Alias**. Browser setup was not tested.
-The key's Password is a separate webhook verification value; use a generated nonempty alphanumeric value.
-The source can accept a missing header against an empty configured value (not tested).
-Keep task-parameter extractors out and preserve the template's host/ref gates.
+Source UI equivalents: **Auth method → Token**, **Auth header**, **Vault
+Password** (the key), **Use project alias** off, then **Add Alias**. Browser
+setup was not tested. The key's Password is a separate webhook verification
+value; use a generated nonempty alphanumeric value. The source can accept a
+missing header against an empty configured value (not tested). Keep
+task-parameter extractors out and preserve the template's host/ref gates.
 
 **Where: workstation, as your own account, in the same Bash session.**
 
-Enter only the alias segment at the hidden prompt; the config uses your known tunnel origin.
+Enter only the alias segment at the hidden prompt; the config uses your known
+tunnel origin.
 
 ```bash
 read -rs -p 'Integration alias: ' hook_alias
@@ -247,11 +259,12 @@ curl --disable --config "$practice_dir/hook.cfg" --silent --show-error \
 
 ## Check: prove dispatch and refusal
 
-**204 does not mean a task started.** Correct authentication, failed authentication,
-and no matching integration all returned 204. Find `X-Semaphore-Task-ID` in the
-saved headers, confirm that ID in the task list, then use `poll_task ID` and inspect
-the Ping recap. Tested webhook tasks had `user_id: null`; their key is not a user API token.
-An unknown alias returned an empty **200**, with no task.
+**204 does not mean a task started.** Correct authentication, failed
+authentication, and no matching integration all returned 204. Find
+`X-Semaphore-Task-ID` in the saved headers, confirm that ID in the task list,
+then use `poll_task ID` and inspect the Ping recap. Tested webhook tasks had
+`user_id: null`; their key is not a user API token. An unknown alias returned an
+empty **200**, with no task.
 
 Repeat once with the `X-Practice-Token` header line removed from a copy of the
 protected curl config. Expect 204, no task header, and no new task row. Inspect
@@ -264,32 +277,37 @@ history after an ambiguous response; do not retry webhook deliveries blindly.
 | Bitbucket Webhooks | `X-Hub-Signature` with `sha256=` followed by lowercase HMAC-SHA256 hex. | Valid signature ran; wrong key or missing prefix started nothing. |
 | GitHub Webhooks | `X-Hub-Signature-256` with the same prefixed form. | Valid signature and matching event ran; bad signature or event/branch mismatch started nothing. |
 
-These were local provider-shaped requests; hosted GitHub/Bitbucket delivery was not tested.
-Valid cases had a task header, new row and successful task; rejected cases had neither header nor row despite 204.
+These were local provider-shaped requests; hosted GitHub/Bitbucket delivery was
+not tested. Valid cases had a task header, new row and successful task; rejected
+cases had neither header nor row despite 204.
 
 ## Concept: aliases and bounded inputs
 
-A project alias dispatches to searchable integrations. The tested GitHub case matched event, branch and repository fields.
-The source requires all matchers to pass, and at least one matcher for a project alias.
-Zero-matcher refusal was not tested. Individual aliases bypass matchers; enabling
-**Use project alias** made the integration's own alias return 200 without a task. Filters are not authentication.
+A project alias dispatches to searchable integrations. The tested GitHub case
+matched event, branch and repository fields. The source requires all matchers to
+pass, and at least one matcher for a project alias. Zero-matcher refusal was not
+tested. Individual aliases bypass matchers; enabling **Use project alias** made
+the integration's own alias return 200 without a task. Filters are not
+authentication.
 
-Extractors copy headers or body data into task inputs. New keys reached Ansible with an empty Variable Group;
-a JSON number became a string. Extracting a string into the typed task `limit` array
-prevented dispatch while still returning 204. Never map webhook fields into shell
-arguments or unrestricted variables. Allowlist harmless data, retain the template's
-own limit/branch gates, and keep **Task Params** extraction out of this exercise.
+Extractors copy headers or body data into task inputs. New keys reached Ansible
+with an empty Variable Group; a JSON number became a string. Extracting a string
+into the typed task `limit` array prevented dispatch while still returning 204.
+Never map webhook fields into shell arguments or unrestricted variables.
+Allowlist harmless data, retain the template's own limit/branch gates, and keep
+**Task Params** extraction out of this exercise.
 
 ## Do: clean up and revoke
 
 **Where: workstation, as the project owner, in the setup shell.**
 
 DELETE `/api/project/PROJECT_ID/integrations/INTEGRATION_ID`, then
-`/api/project/PROJECT_ID/keys/KEY_ID`, using only IDs recorded above. Deletion removes
-the integration's individual aliases, matchers and extractors; project aliases need
-separate deletion. Verify integration GET returns 404 and its list entry is absent.
-After tasks finish and you retain output, remove the dedicated template: this also removes task history.
-Remove the owner's temporary setup files; retain the existing owner token.
+`/api/project/PROJECT_ID/keys/KEY_ID`, using only IDs recorded above. Deletion
+removes the integration's individual aliases, matchers and extractors; project
+aliases need separate deletion. Verify integration GET returns 404 and its list
+entry is absent. After tasks finish and you retain output, remove the dedicated
+template: this also removes task history. Remove the owner's temporary setup
+files; retain the existing owner token.
 
 **Where: workstation, as your own account, in the same Bash session.**
 
@@ -301,17 +319,24 @@ The SQL source matches prefixes (including `_` as a wildcard); use this dedicate
 jq -er --arg base "$api_base" '"url = \"\($base)/user/tokens/\(.id[0:8])\""' \
   "$practice_dir/token-created.json" > "$practice_dir/revoke.cfg"
 api_config="$practice_dir/bootstrap.cfg"
-api --config "$practice_dir/revoke.cfg" --request DELETE --output /dev/null ||
-  printf 'Stop: the delete request failed.\n' >&2
-status=$(curl --disable --config "$practice_dir/api.cfg" --silent --show-error \
-  --connect-timeout 5 --max-time 15 --output /dev/null --write-out '%{http_code}' "$api_base/user")
-printf 'After deletion: HTTP %s\n' "$status"
-[[ $status == 401 ]] || printf 'Stop: the deleted token still works.\n' >&2
-api "$api_base/user/tokens" | jq -e 'all(.[]; .name != "api-practice")' ||
-  printf 'Stop: the practice token is still listed.\n' >&2
-rm -r -- "${practice_dir:?}"
-unset practice_dir api_config
-unset -f api poll_task
+revoke_practice_token() {
+  local status
+  api --config "$practice_dir/revoke.cfg" --request DELETE --output /dev/null ||
+    { printf 'Stop: the delete request failed.\n' >&2; return 1; }
+  status=$(curl --disable --config "$practice_dir/api.cfg" --silent --show-error \
+    --connect-timeout 5 --max-time 15 --output /dev/null --write-out '%{http_code}' "$api_base/user")
+  printf 'After deletion: HTTP %s\n' "$status"
+  [[ $status == 401 ]] || { printf 'Stop: the deleted token still works.\n' >&2; return 1; }
+  api "$api_base/user/tokens" | jq -e 'all(.[]; .name != "api-practice")' >/dev/null ||
+    { printf 'Stop: the practice token is still listed.\n' >&2; return 1; }
+}
+if revoke_practice_token; then
+  rm -r -- "${practice_dir:?}"
+  unset practice_dir api_config
+  unset -f api poll_task revoke_practice_token
+else
+  printf 'Kept %s so you can retry the revocation.\n' "$practice_dir" >&2
+fi
 ```
 
 ## Concept: triggers and edition boundaries

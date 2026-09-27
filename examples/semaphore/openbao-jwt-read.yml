@@ -41,14 +41,23 @@
             body:
               role: "{{ bao_role }}"
               jwt: "{{ bao_task_jwt }}"
-            status_code: 200
+            status_code: [200, 400, 403]
             timeout: 20
             follow_redirects: none
             use_proxy: false
             use_netrc: false
           register: bao_login
-          changed_when: true
+          changed_when: bao_login.status == 200
           no_log: true
+
+        - name: Stop when OpenBao refused this task identity
+          ansible.builtin.assert:
+            that:
+              - bao_login.status == 200
+            fail_msg: >-
+              OpenBao refused the login with HTTP {{ bao_login.status }}:
+              {{ bao_login.json.errors | default(['no error text']) | join('; ') }}
+            quiet: true
 
         - name: Read the single allowed KV version two path
           ansible.builtin.uri:

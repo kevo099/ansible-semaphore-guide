@@ -4,7 +4,8 @@
 
 ## Goal
 
-Run harmless scripts and a local-only OpenTofu resource; inspect inputs, exit status and confirmation.
+Run harmless scripts and a local-only OpenTofu resource; inspect inputs, exit
+status and confirmation.
 
 | Edition and evidence | Scope |
 | --- | --- |
@@ -25,9 +26,11 @@ the pinned Terraform-family runner passes `-lock=false`.
 
 **Where: controller, as root.**
 
-1. Inspect the service's `PATH`: the guide uses `/opt/ansible-venv/bin:/usr/local/bin:/usr/bin:/bin`.
-2. Ensure `bash` and `python3` exist there. Install OpenTofu **1.12.6** for local state.
-   Terragrunt **1.1.6** is optional. These are campaign pins, not the latest-version claims.
+1. Inspect the service's `PATH`: the guide uses
+   `/opt/ansible-venv/bin:/usr/local/bin:/usr/bin:/bin`.
+2. Ensure `bash` and `python3` exist there. Install OpenTofu **1.12.6** for
+   local state. Terragrunt **1.1.6** is optional. These are campaign pins, not
+   the latest-version claims.
 3. For Linux amd64, verify downloads before installing them in `/usr/local/bin`:
 
 | Binary | Release asset | SHA-256 of the asset |
@@ -105,17 +108,19 @@ Keep **Extra variables** as `{}`. In **Environment variables**, enter:
 {"APP_MARKER":"practice marker","APP_EXIT":"0"}
 ```
 
-Create **App practice Bash** using **Bash Script**, and **App practice Python** using
-**Python Script**. Select the local repository and **App practice scripts**. Set
-**Script Filename \*** to `app-practice/marker.sh` or `app-practice/marker.py`.
-Keep **CLI args** empty and launch each. Change `APP_EXIT` to `"3"`, rerun, then restore `"0"`.
+Create **App practice Bash** using **Bash Script**, and **App practice Python**
+using **Python Script**. Select the local repository and **App practice
+scripts**. Set **Script Filename \*** to `app-practice/marker.sh` or
+`app-practice/marker.py`. Keep **CLI args** empty and launch each. Change
+`APP_EXIT` to `"3"`, rerun, then restore `"0"`.
 
 ## Check: inputs and exit status
 
 Expect the chosen marker in each log: `APP_EXIT=0` gives `success`; `APP_EXIT=3`
-gives `error` and `exit status 3`. The campaign observed Python's zero/nonzero pair
-and Bash's success; Bash's nonzero behavior comes from the shared runner source.
-These smaller teaching scripts were not the exact campaign probe files.
+gives `error` and `exit status 3`. The original probes observed Python's
+zero/nonzero pair and Bash's success. The later chapter rehearsal ran these
+teaching scripts for both apps: exit 0 succeeded and exit 3 produced `error`
+with `exit status 3`.
 
 The live Bash/Python probes and `ShellApp` source establish this input contract:
 
@@ -180,9 +185,10 @@ Create **App practice tofu** in **Variable Groups**. Set **Extra variables** to
 
 **Where: workstation, using your authenticated practice-project API client.**
 
-Create with `POST /api/project/PROJECT_ID/templates`. Replace each quoted uppercase
-ID placeholder below with its numeric ID. `arguments` is a JSON-encoded string.
-Preserve `"default":[]`: with only `init`, ordinary variable and destroy arguments are omitted.
+Create with `POST /api/project/PROJECT_ID/templates`. Replace each quoted
+uppercase ID placeholder below with its numeric ID. `arguments` is a
+JSON-encoded string. Preserve `"default":[]`: with only `init`, ordinary
+variable and destroy arguments are omitted.
 
 ```json
 {
@@ -198,7 +204,8 @@ Preserve `"default":[]`: with only `init`, ordinary variable and destroy argumen
 ```
 
 The API creates a default workspace inventory; record its id for cleanup.
-**Allow destroy** is not an enforcement boundary: destroy succeeded with `allow_destroy:false`.
+**Allow destroy** is not an enforcement boundary: destroy succeeded with
+`allow_destroy:false`.
 
 ## Check: plan, confirm and destroy
 
@@ -215,7 +222,8 @@ to `/api/project/PROJECT_ID/tasks/TASK_ID/confirm`. The observed run continued t
 plan and apply, not an approval system with separate approvers. The campaign used
 its administrator; it did not test an approver-role matrix.
 
-Set the group's `message` before each changed run; send the listed `params` in the launch body.
+Set the group's `message` before each changed run; send the listed `params` in
+the launch body.
 
 | Run | `params` | Action and independently checked result |
 | --- | --- | --- |
@@ -243,7 +251,7 @@ PY
 | App or feature | Edition and tested status in 2.19.12 |
 | --- | --- |
 | Ansible | Works in Community; lesson qualification covered separately in [chapter 6](../06-semaphore.md) |
-| Bash / Python | Works in Community; actual input delivery and Python failure observed |
+| Bash / Python | Works in Community; input delivery observed; exit 0 and exit 3 observed for both in the rehearsal |
 | OpenTofu | Works in Community; plan, confirm/apply, reject, no-change, plan-only, auto-approve and destroy observed |
 | Terragrunt | Works in Community; **plan only**, via OpenTofu; apply/destroy not tested |
 | Terraform | Community runner exists in source; **not tested**, binary not installed |

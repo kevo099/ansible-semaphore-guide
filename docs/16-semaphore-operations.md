@@ -4,8 +4,8 @@
 
 ## Goal
 
-Schedule a qualified playbook, understand why tasks wait, and verify alerts and task output.
-Leave no recurring practice work behind.
+Schedule a qualified playbook, understand why tasks wait, and verify alerts and
+task output. Leave no recurring practice work behind.
 
 | Edition and evidence | Scope |
 | --- | --- |
@@ -17,37 +17,43 @@ Leave no recurring practice work behind.
 
 ## Do: establish an operating baseline
 
-Prerequisites: finish [chapter 6](06-semaphore.md), have project Owner access, and use its
-working Ping template with an explicit target Limit. These exercises create schedules and tasks.
+Prerequisites: finish [chapter 6](06-semaphore.md), have project Owner access,
+and use its working Ping template with an explicit target Limit. These exercises
+create schedules and tasks.
 
-**Where: browser, as the project Owner.** Run Ping manually. Read the complete target recap,
-checking identity, `changed=0` and no failures. Record its ref, inventory, credentials and Limit.
+**Where: browser, as the project Owner.** Run Ping manually. Read the complete
+target recap, checking identity, `changed=0` and no failures. Record its ref,
+inventory, credentials and Limit.
 
-Schedules use `schedule.timezone`, default **UTC**, not the server's local zone. The environment
-setting is `SEMAPHORE_SCHEDULE_TIMEZONE`. It is read at startup: restart after changing it.
-`GET /api/info` reports `schedule_timezone`; use [chapter 17](17-api-and-integrations.md) for API
-access. Keep UTC for this exercise and compare dispatch times in UTC.
+Schedules use `schedule.timezone`, default **UTC**, not the server's local zone.
+The environment setting is `SEMAPHORE_SCHEDULE_TIMEZONE`. It is read at startup:
+restart after changing it. `GET /api/info` reports `schedule_timezone`; use
+[chapter 17](17-api-and-integrations.md) for API access. Keep UTC for this
+exercise and compare dispatch times in UTC.
 
 ## Do: create a one-time schedule
 
-**Where: browser, as the project Owner.** Open **Schedule → New Schedule → Run once**.
-Name it **Operations ping once**, select the Ping **Template**, leave **Enabled** on, and choose
-**Run at** a few minutes ahead in the schedule timezone. Leave **Delete after run** off.
-Read **Next run time**, then save.
+**Where: browser, as the project Owner.** Open **Schedule → New Schedule → Run
+once**. Name it **Operations ping once**, select the Ping **Template**, leave
+**Enabled** on, and choose **Run at** a few minutes ahead in the schedule
+timezone. Leave **Delete after run** off. Read **Next run time**, then save.
 
-For API clients, the type is `"run_at"`; `run_at` must be a future timestamp. **Send UTC ending
-in `Z`.** The tested PostgreSQL setup dropped supplied offsets: `+05:45` became 5 hours
-45 minutes late, and `-04:00` became four hours early. That early entry was already past and
-became inactive. The pinned UI source converts its input to UTC first.
+For API clients, the type is `"run_at"`; `run_at` must be a future timestamp.
+**Send UTC ending in `Z`.** The tested PostgreSQL setup dropped supplied
+offsets: `+05:45` became 5 hours 45 minutes late, and `-04:00` became four hours
+early. That early entry was already past and became inactive. The pinned UI
+source converts its input to UTC first.
 
 ## Check: verify the scheduled run
 
-Compare the new task's creation/start times with the requested time; queueing can delay execution.
-Confirm the intended target recap and one execution. The tested one-time entry became inactive
-after firing. Delete only **Operations ping once** when its task finishes.
+Compare the new task's creation/start times with the requested time; queueing
+can delay execution. Confirm the intended target recap and one execution. The
+tested one-time entry became inactive after firing. Delete only **Operations
+ping once** when its task finishes.
 
-Repeat with **Delete after run** checked. The schedule disappeared in the test while its task
-record remained, with API `schedule_id` null. Deletion does not prove the task finished.
+Repeat with **Delete after run** checked. The schedule disappeared in the test
+while its task record remained, with API `schedule_id` null. Deletion does not
+prove the task finished.
 
 ## Do: create and stop a recurring schedule
 
@@ -66,16 +72,18 @@ then delete only this schedule. Re-enabling an ordinary cron schedule resumes it
 | `CRON_TZ=Asia/Kathmandu * * * * *` | Per-schedule timezone prefix supported; timed checks used hour/minute expressions in this zone |
 | Four or six fields; minute `61` | Validation rejected them |
 
-`CRON_TZ=Zone` overrides the configured zone for that expression. Tests confirmed the process
-zone did not select the scheduler's default zone. Validate API input with
-`POST /api/project/PROJECT_ID/schedules/validate` and `{"cron_format":"* * * * *"}`.
-Acceptance proves syntax; verify dispatch separately.
+`CRON_TZ=Zone` overrides the configured zone for that expression. Tests
+confirmed the process zone did not select the scheduler's default zone. Validate
+API input with `POST /api/project/PROJECT_ID/schedules/validate` and
+`{"cron_format":"* * * * *"}`. Acceptance proves syntax; verify dispatch
+separately.
 
 ## Concept: schedule parameters and edits
 
-For cron API objects, omit `type` or use `""`; `"cron"` is invalid. Set `active` explicitly:
-omitting it stores false. Schedules carry task parameters including messages, extra variables
-and Ansible run options. This is a fragment, not a complete request:
+For cron API objects, omit `type` or use `""`; `"cron"` is invalid. Set `active`
+explicitly: omitting it stores false. Schedules carry task parameters including
+messages, extra variables and Ansible run options. This is a fragment, not a
+complete request:
 
 ```json
 {
@@ -87,8 +95,9 @@ and Ansible run options. This is a fragment, not a complete request:
 }
 ```
 
-Tests verified parameters in task output. An allowed tag override worked; a disallowed Limit
-override was ignored. Keep the fixed Ping Limit; see [inputs and templates](14-inputs-and-templates.md).
+Tests verified parameters in task output. An allowed tag override worked; a
+disallowed Limit override was ignored. Keep the fixed Ping Limit; see [inputs
+and templates](14-inputs-and-templates.md).
 
 **A schedule PUT replaces omitted fields.** The test omitted `active` and
 `task_params`; they became false and null. GET the **individual** schedule, edit
@@ -105,9 +114,10 @@ and a repository credential that can read it. This creates a commit checker.
 **Auto-run task if new git commit have been found**. Select its **Repository**
 and polling interval (the English field reads **checkInterval**), then save.
 
-This polls with `git ls-remote`; it is not a webhook. The first poll runs without a new commit.
-In the test, an unchanged poll launched nothing; a changed ref launched a successful task.
-Editing without a new commit launched again because the edit resets the remembered hash.
+This polls with `git ls-remote`; it is not a webhook. The first poll runs
+without a new commit. In the test, an unchanged poll launched nothing; a changed
+ref launched a successful task. Editing without a new commit launched again
+because the edit resets the remembered hash.
 
 **The inactive flag does not stop this poller.** The test saved `active:false`,
 made another commit, and observed a task start on the next poll. For cleanup,
@@ -117,8 +127,8 @@ find them at `/api/project/PROJECT_ID/templates/TEMPLATE_ID/schedules`.
 
 ## Concept: three concurrency limits
 
-Keep the guide's global limit of one while learning. Parallel tasks can change the same target
-at once; a template flag does not provide target locking.
+Keep the guide's global limit of one while learning. Parallel tasks can change
+the same target at once; a template flag does not provide target locking.
 
 | Gate | Setting and effect in 2.19.12 |
 | --- | --- |
@@ -126,10 +136,11 @@ at once; a template flag does not provide target locking.
 | Project | **Max number of parallel tasks (Optional)**, API `max_parallel_tasks`; applies on the next dispatch check without restart. `0` means no project limit. |
 | Template | **Allow parallel tasks**, API `allow_parallel_tasks`; off serializes runs of that template. Other limits still apply when it is on. |
 
-The source shows that enabling the template flag while its first task runs does **not** release
-a run already queued behind it: the running task keeps its earlier template copy. The live test
-enabled the flag before submitting a second run, which still waited. Overlap checks used playbook
-begin/end output and task times.
+The source shows that enabling the template flag while its first task runs does
+**not** release a run already queued behind it: the running task keeps its
+earlier template copy. The live test enabled the flag before submitting a second
+run, which still waited. Overlap checks used playbook begin/end output and task
+times.
 
 `max_task_duration_sec` is **not enforced for tasks executed on the server itself**:
 a 30-second local task succeeded with a 15-second setting. The pinned source only
@@ -167,38 +178,44 @@ markers before any cancellation practice.
 
 ## Check: stop without trusting the badge
 
-Run the pause task twice again. Click **Stop** once on the **queued** task. It remains `stopping`
-until dequeued, then becomes `stopped` without running. Verify it has no begin/end markers.
+Run the pause task twice again. Click **Stop** once on the **queued** task. It
+remains `stopping` until dequeued, then becomes `stopped` without running.
+Verify it has no begin/end markers.
 
 **Do not follow Stop with Force Stop on a queued task.** Both that UI sequence
 and a direct forced API stop marked it `stopped` immediately in the tests, but
 the playbook still ran when dequeued. Its log had begin/end markers and a recap
 even though its recorded start time was null. A single ordinary Stop prevented it.
 
-For a running task, **Stop is not a kill of everything**. With ordinary and forced stops, an
-`ansible-playbook` worker and its `sleep` were alive three seconds after the task showed `stopped`.
+For a running task, **Stop is not a kill of everything**. With ordinary and
+forced stops, an `ansible-playbook` worker and its `sleep` were alive three
+seconds after the task showed `stopped`.
 
-**Where: controller, as root.** Inspect stopped local tasks; keep command-line output private:
+**Where: controller, as root.** Inspect stopped local tasks; keep command-line
+output private:
 
 ```bash
 pgrep -u semaphore -fa ansible-playbook
 ps -u semaphore -o pid,ppid,pgid,etime,args --forest
 ```
 
-Match commands, parent/child PIDs and elapsed times to your stopped task. End only verified
-leftovers with `kill -TERM -- PID`, substituting each child and worker PID; recheck and use
-`kill -KILL -- PID` only if it remains. Do not kill every Semaphore process. Check targets
-separately: stopped work may have changed them; terminating a controller process is not rollback.
+Match commands, parent/child PIDs and elapsed times to your stopped task. End
+only verified leftovers with `kill -TERM -- PID`, substituting each child and
+worker PID; recheck and use `kill -KILL -- PID` only if it remains. Do not kill
+every Semaphore process. Check targets separately: stopped work may have changed
+them; terminating a controller process is not rollback.
 
-Stopping a **finished** task through the API rewrote its success status to `stopped`, retaining
-its times. Do not use stop requests as history cleanup. Keep the practice objects for the alert
-exercise; if skipping it, remove only those objects and the pause playbook after all runs end.
+Stopping a **finished** task through the API rewrote its success status to
+`stopped`, retaining its times. Do not use stop requests as history cleanup.
+Keep the practice objects for the alert exercise; if skipping it, remove only
+those objects and the pause playbook after all runs end.
 
 ## Do: deliver a practice notification
 
-Prerequisites: the local practice inventory/repository above and a test SMTP receiver you control.
-Save current alert settings privately for restoration. This adds **Operations failure**, its
-playbook and optionally one Mailpit container. The rest of this chapter needs no container runtime.
+Prerequisites: the local practice inventory/repository above and a test SMTP
+receiver you control. Save current alert settings privately for restoration.
+This adds **Operations failure**, its playbook and optionally one Mailpit
+container. The rest of this chapter needs no container runtime.
 
 **Where: controller, as root.** Optional fixture: with Podman already installed
 and ports 1025/8025 unused, start the tested Mailpit v1.31.3 digest on loopback:
@@ -230,14 +247,17 @@ do not replace the whole file, and keep it `root:semaphore` mode 0640.
 }
 ```
 
-**Where: workstation, as your SSH administrator.** For Mailpit, forward loopback port 8025 using
-the [private tunnel](appendices/browser-access.md#private-tunnel) pattern; open its web interface.
+**Where: workstation, as your SSH administrator.** For Mailpit, forward loopback
+port 8025 using the [private
+tunnel](appendices/browser-access.md#private-tunnel) pattern; open its web
+interface.
 
-**Where: browser, as the project Owner.** Enable **Allow alerts for this project** (API `alert`)
-and **Save**. Save your account's e-mail address and **Send alerts** choice, then press
-**Test Alerts** in project settings. Check the receiver. Project alerts off returned 409;
-204 alone does not establish delivery. The subject says “failed” despite a synthetic success
-task. This test only addresses opted-in project members.
+**Where: browser, as the project Owner.** Enable **Allow alerts for this
+project** (API `alert`) and **Save**. Save your account's e-mail address and
+**Send alerts** choice, then press **Test Alerts** in project settings. Check
+the receiver. Project alerts off returned 409; 204 alone does not establish
+delivery. The subject says “failed” despite a synthetic success task. This test
+only addresses opted-in project members.
 
 The failure exercise uses
 [`examples/semaphore/operations-failure.yml`](../examples/semaphore/operations-failure.yml),
@@ -245,14 +265,15 @@ which fails on purpose on the controller.
 
 ## Check: recipients and delivery
 
-**Where: browser, as the project Owner.** Create **Operations failure** using that playbook,
-the same repository and **Operations local**. Run it, then **Operations pause**. Inspect task
-results and receiver contents independently.
+**Where: browser, as the project Owner.** Create **Operations failure** using
+that playbook, the same repository and **Operations local**. Run it, then
+**Operations pause**. Inspect task results and receiver contents independently.
 
-Normal task e-mail is **failure-only**, gated by **Send alerts**. Tests delivered to an opted-in
-**global administrator outside the project** and an opted-in member; an opted-out member got
-nothing. The source merges members and global admins for real tasks. Do not assume the test
-button's member-only recipient list is the real failure recipient list.
+Normal task e-mail is **failure-only**, gated by **Send alerts**. Tests
+delivered to an opted-in **global administrator outside the project** and an
+opted-in member; an opted-out member got nothing. The source merges members and
+global admins for real tasks. Do not assume the test button's member-only
+recipient list is the real failure recipient list.
 
 Webhooks received success and failure. **Suppress success notifications** on the
 template (API `suppress_success_alerts`) silenced success but preserved failure.
@@ -268,13 +289,15 @@ The pinned source excludes stopped tasks from all alerts; that case was not test
 | Gotify | `gotify_alert`, `gotify_url`, `gotify_token` | Local JSON capture, success and failure |
 | Telegram / implicit-TLS e-mail | Present in pinned source | Not tested; no setup recipe here |
 
-Local captures prove payloads, not real SaaS delivery. Enter credentials privately into protected
-configuration, keeping them out of commands and history. In this source `email_secure:true`
-with `email_tls:true` selects implicit TLS, not STARTTLS. Do not infer security from option names.
+Local captures prove payloads, not real SaaS delivery. Enter credentials
+privately into protected configuration, keeping them out of commands and
+history. In this source `email_secure:true` with `email_tls:true` selects
+implicit TLS, not STARTTLS. Do not infer security from option names.
 
-**Treat task logs as sensitive once alerts are enabled.** Connection failures printed complete
-webhook URLs and the Gotify token into task output. A dead webhook receiver left the task result
-unchanged; e-mail still arrived. Check receiver evidence and delivery errors before declaring success.
+**Treat task logs as sensitive once alerts are enabled.** Connection failures
+printed complete webhook URLs and the Gotify token into task output. A dead
+webhook receiver left the task result unchanged; e-mail still arrived. Check
+receiver evidence and delivery errors before declaring success.
 
 Cleanup: restore only the alert settings you changed, including user/project/
 template flags. **Where: controller, as root.** After tasks finish, restore the
@@ -336,8 +359,9 @@ them in Community wrote no files. Ordinary service logging is separate.
 
 ## Check: read task output through the API
 
-**Where: browser, as a project member.** Read a completed task's full output. Match its ID,
-timestamps, begin/end markers and recap. Use [chapter 17](17-api-and-integrations.md) for these API reads:
+**Where: browser, as a project member.** Read a completed task's full output.
+Match its ID, timestamps, begin/end markers and recap. Use [chapter
+17](17-api-and-integrations.md) for these API reads:
 
 | Path after `/api/project/PROJECT_ID` | What it returned |
 | --- | --- |
@@ -345,9 +369,10 @@ timestamps, begin/end markers and recap. Use [chapter 17](17-api-and-integration
 | `/tasks/TASK_ID/output` | JSON rows including output text, task ID and time |
 | `/stats`, `/templates/TEMPLATE_ID/stats` | Daily counts by status; `avg_duration` remained zero |
 
-The Community **task summary** endpoints returned empty/null data; task summaries are **paid
-only**, separate from working raw-output and stats reads. The pinned stats implementation does
-not populate `avg_duration`; zero is not measured instant execution. These reads create no objects.
+The Community **task summary** endpoints returned empty/null data; task
+summaries are **paid only**, separate from working raw-output and stats reads.
+The pinned stats implementation does not populate `avg_duration`; zero is not
+measured instant execution. These reads create no objects.
 
 ## Do: send service logs to syslog
 

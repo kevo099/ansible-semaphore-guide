@@ -30,8 +30,8 @@ The guide ships a harmless playbook for this chapter,
 [`examples/semaphore/input-demo.yml`](../examples/semaphore/input-demo.yml).
 It asserts that its inputs have allowed values, then prints them as markers;
 it changes nothing on the target. Point the template at a repository that
-contains it: this guide's repository at a release tag that includes it, as
-chapter 6 does for the lessons, or your own copy. On the seeded Enterprise
+contains it: this guide's repository at tag `v1.3.0` or later, as chapter 6
+does for the lessons at `v1.2.0`, or your own copy. On the seeded Enterprise
 Linux controller, copy it into the lab folder as its owner:
 
 ```bash
@@ -82,6 +82,10 @@ folder), the
 working inventory from chapter 6, and both **Variable Groups**. Set **Ansible
 options → Limit** to one inventory alias, such as `lab-ubuntu`. Leave **CLI
 args** empty and check boxes under **Prompts** and **Ansible prompts** off.
+
+If your inventory uses chapter 3b's encrypted host variables, also select
+**Lab vault password** under **Ansible options → Vaults**, as on your working
+lesson templates; without it the play stops before the demo's assertions.
 
 Several groups can be attached. The template API field is `environment_ids`;
 the singular `environment_id` still works but is deprecated. **Merge order is

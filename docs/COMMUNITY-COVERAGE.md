@@ -44,7 +44,7 @@ the campaign did not exercise it.
 | TOTP two-factor | Community | caveats: seeds readable by project members; tokens bypass it | [15](15-identity.md) |
 | API tokens with expiry | Community | passed; act with the user's current role | [15](15-identity.md), [17](17-api-and-integrations.md) |
 | OpenID Connect | Community | passed; no automatic linking to local accounts | [OIDC and LDAP](appendices/identity-providers.md) |
-| LDAP | Community | caveats: no certificate verification; an outage blocks all new logins | [OIDC and LDAP](appendices/identity-providers.md) |
+| LDAP | Community | caveats: no certificate verification; an outage blocks all new password logins | [OIDC and LDAP](appendices/identity-providers.md) |
 | Task JWT for external secret stores | Community | passed with OpenBao | [task identity](appendices/task-identity.md) |
 | E-mail one-time codes, custom roles | paid | stub | none |
 | Per-template permissions | paid | grant refused | none |
@@ -56,7 +56,7 @@ the campaign did not exercise it.
 | --- | --- | --- | --- |
 | Cron and descriptor schedules, `CRON_TZ=` | Community | passed; UTC unless `schedule.timezone` is set | [16](16-semaphore-operations.md) |
 | One-time schedules, delete after run | Community | caveats: a UTC offset sent with `run_at` is dropped | [16](16-semaphore-operations.md) |
-| Commit-check schedules | Community | passed | [16](16-semaphore-operations.md) |
+| Commit-check schedules | Community | caveats: `active: false` does not stop polling | [16](16-semaphore-operations.md) |
 | E-mail alerts (SMTP, SMTP AUTH) | Community | passed with a local mail catcher; failures only | [16](16-semaphore-operations.md) |
 | Slack, Teams, Rocket.Chat, DingTalk, Gotify alerts | Community | caveats: a failed delivery writes the webhook URL into the task log | [16](16-semaphore-operations.md) |
 | Telegram alerts, implicit-TLS e-mail | Community | not tested | [16](16-semaphore-operations.md) |
@@ -75,7 +75,7 @@ the campaign did not exercise it.
 | syslog output | Community | passed | [16](16-semaphore-operations.md) |
 | Activity and task log files | paid | no-op stub | none |
 | Task retention and deletion | Community | passed | [maintenance](appendices/maintenance.md) |
-| Project export, import, backup and restore | Community | caveats: no secret values, no history | [maintenance](appendices/maintenance.md) |
+| Project export, import, backup and restore | Community | caveats: Key Store values and history are omitted, but exports can hold webhook aliases; keep them private | [maintenance](appendices/maintenance.md) |
 
 ## API and integrations
 

@@ -91,7 +91,9 @@ authority, read the [official reverse-proxy
 guide](https://semaphoreui.com/docs/admin-guide/reverse-proxy/nginx). An
 optional loopback-only nginx example is in
 [`templates/nginx-loopback.conf`](../../templates/nginx-loopback.conf); it is
-not needed for the tunnel and no script installs it.
+not needed for the tunnel and no script installs it. If you choose it,
+configure nginx on a dedicated controller, disable its default public
+listener, validate with `nginx -t`, and forward to loopback port 8080.
 
 ## Return to loopback
 

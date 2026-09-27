@@ -256,8 +256,9 @@ shown above before Semaphore can read them.
 
 ## Do: the vendor STIG lessons
 
-The three seeded STIG templates are optional and change security policy on
-their target. Do not run them while learning the installation. They are
+The three seeded STIG templates are optional. The audit changes no security
+policy; the two apply templates do. Do not run them while learning the
+installation. They are
 described in [chapter 9](09-security-benchmarks.md#the-seeded-stig-templates),
 after the recovery preparation they depend on.
 
