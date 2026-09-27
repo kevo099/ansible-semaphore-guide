@@ -22,12 +22,12 @@ jobs:
         run: python scripts/validate.py
       - name: Run the offline unit tests
         run: python -m unittest discover -s tests -v
-      - name: Check all lesson playbooks
+      - name: Check all lesson and example playbooks
         run: |
-          for playbook in playbooks/*.yml; do
+          for playbook in playbooks/*.yml examples/semaphore/*.yml; do
             ansible-playbook -i inventories/lab.ini.example --syntax-check "$playbook"
           done
-          ansible-lint --offline playbooks/
+          ansible-lint --offline playbooks/ examples/
       - name: Confirm the installers default to a plan
         run: |
           for installer in scripts/install-controller.sh scripts/install-controller-el9.sh; do

@@ -1,6 +1,6 @@
 # 12. Progress from examples to independent automation
 
-[Previous: troubleshooting](11-troubleshooting.md) · [Optional: Azure](13-azure.md)
+[Previous: security benchmarks](09-security-benchmarks.md) · [Optional: Azure](13-azure.md) · [Community features](14-inputs-and-templates.md)
 
 ## Goal
 

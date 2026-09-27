@@ -1,0 +1,34 @@
+# Native Community runner; matches the guide's controller hardening style.
+# The process PATH must find the pinned Ansible venv before system binaries.
+[Unit]
+Description=Semaphore UI native task runner
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=semaphore-runner
+Group=semaphore-runner
+WorkingDirectory=/var/lib/semaphore-runner
+Environment=HOME=/var/lib/semaphore-runner
+Environment=PATH=/opt/semaphore-runner/venv/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/local/bin/semaphore runner start --config /etc/semaphore-runner/config.json
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/semaphore-runner
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

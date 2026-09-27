@@ -1,6 +1,6 @@
 # 8. Patching and daily operation
 
-[Previous: Git and VS Code](07-git-and-vscode.md) · [Next: security benchmarks](09-security-benchmarks.md)
+[Previous: recovery](10-recovery.md) · [Next: security benchmarks](09-security-benchmarks.md)
 
 ## Goal
 
@@ -120,6 +120,10 @@ reboot a target outside the intended maintenance window.
 The example controller permits one application task at a time. Increase
 concurrency only after measuring CPU, available RAM, storage and per-job
 behavior; free-looking memory during a ping does not size a fleet-wide scanner.
+
+[Chapter 16](16-semaphore-operations.md) shows how to create, observe and
+remove schedules in Semaphore 2.19.12, which time zone they use, how the
+concurrency limits behave and what stopping a task does and does not end.
 
 ## Inspect resource and retention growth
 

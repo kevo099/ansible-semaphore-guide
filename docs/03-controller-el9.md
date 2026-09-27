@@ -105,51 +105,12 @@ above. The Key Store shows the SSH key by name only.
 
 ## Do: reach the UI on the VM's address instead of a tunnel
 
-The default keeps Semaphore on loopback for SSH tunnels. When the VM sits on
-its own, with no VPN or jump host, publish the UI on its address:
-
-```bash
-sudo bash scripts/expose-semaphore.sh --mode https
-```
-
-Or pass `--expose https` to the installer to do it in the same run. This
-installs nginx with a locally generated self-signed certificate on port 443,
-proxies to the still loopback-only Semaphore, opens 443 in the host firewall
-and prints the certificate's SHA-256 fingerprint. Compare that fingerprint
-with the browser's warning the first time, then continue to
-`https://VM_ADDRESS/`. The package's own `nginx.conf` also serves a test page
-on port 80, so on Enterprise Linux the script keeps it as
-`/etc/nginx/nginx.conf.before-semaphore` and installs a main file without that
-server. `--mode http` instead binds Semaphore itself to every address on port
-3000 in plain text; use it only on a network you fully control.
-
-The certificate and the printed URL name the address the VM uses for its
-default route. On a cloud VM behind NAT, that is the private address. There,
-run the script yourself with `--address` and the public IP address or DNS name
-you browse to; the installer's `--expose` cannot pass one. The certificate is
-created only once, so to give it a new address later, remove it first:
-
-```bash
-sudo rm /etc/semaphore/tls/semaphore.key /etc/semaphore/tls/semaphore.crt
-sudo bash scripts/expose-semaphore.sh --mode https \
-  --address controller.example.test
-```
-
-`--mode loopback` closes the firewall port, removes the proxy site, binds
-Semaphore to 127.0.0.1 again, and stops and disables nginx when it serves
-nothing else; switching from https to http retires nginx the same way. It
-leaves the nginx package, the replacement `nginx.conf`, the SELinux boolean
-`httpd_can_network_connect` and the certificate in `/etc/semaphore/tls`, which
-a later `--mode https` reuses.
-
-**Check:** from another machine, `curl -k https://VM_ADDRESS/api/ping` prints
-`pong`, while `curl http://VM_ADDRESS:3000/` and `curl http://VM_ADDRESS/`
-cannot connect. `check-controller.py` reports the exposure it found and fails
-if nginx listens anywhere other than 443.
-
-**Concept:** the script changes the host, not the cloud. Allow port 443 in the
-VM's network security group or equivalent only from your own address; an
-admin login page open to the internet is the mistake this design avoids.
+Pass `--expose https` to the installer, or run
+`sudo bash scripts/expose-semaphore.sh --mode https` later, to publish the UI
+behind nginx on port 443 with a self-signed certificate.
+[Browser access](appendices/browser-access.md#https-on-the-vms-address)
+describes the modes, the checks, the cloud-firewall caution and
+[the return to loopback](appendices/browser-access.md#return-to-loopback).
 
 ## Do: add a target without leaving the terminal
 
@@ -295,139 +256,18 @@ shown above before Semaphore can read them.
 
 ## Do: the vendor STIG lessons
 
-The three seeded STIG templates wrap the operating-system vendor's own STIG
-tooling and content that [chapter 9](09-security-benchmarks.md) walks through
-by hand: the packaged SCAP Security Guide `stig` profile on RHEL, AlmaLinux
-and Rocky Linux, and the Ubuntu Security Guide `disa_stig` profile on Ubuntu.
-The guide adds no rules of its own. On Enterprise Linux two things differ from
-chapter 9's hand-run commands. First, the scans omit
-`--fetch-remote-resources`, so a rule whose check lives in a remote vendor
-feed, such as `security_patches_up_to_date`, reports `notchecked`. To fetch
-those feeds, set `stig_fetch_remote_resources` to `true` in a variable group,
-or pass `-e '{"stig_fetch_remote_resources": true}'` from the CLI; the target
-then needs access to them. Second, the remediation is
-`oscap xccdf eval --remediate` with the data stream's own fixes, not the
-packaged Ansible playbook that chapter 9 applies on RHEL.
-
-- **STIG audit (vendor scan only)** installs the scanner where missing, runs
-  the assessment, keeps the XML and HTML on the target under
-  `/var/log/stig-practice/`, fetches them to the controller and prints outcome
-  counts. It changes no policy. Ubuntu needs `usg` already installed through
-  your own Ubuntu Pro attachment. Without it, that host fails with an
-  explanation while the other hosts' scans still complete, so the task is
-  marked failed but the Enterprise Linux results are in the same log.
-- **STIG apply (vendor fixes, approval required)** scans, applies the vendor
-  remediation with `oscap --remediate` or `usg fix`, and scans again;
-  **STIG apply, allow required reboot** also reboots before the second scan.
-  Each changes exactly one target per run: its Run dialog asks for that host
-  in **Limit**, for example `lab-alma`, and for confirmation that a recovery
-  point for it exists. A run selecting more than one host is refused before
-  any connection. From the CLI the same gates are `--limit lab-alma` and
-  `-e '{"stig_confirm": true}'`, plus `--ask-vault-pass` if you chose the
-  Vault option for sudo passwords.
-
-The STIG templates refuse Dry Run because the scanner does not run in check
-mode.
-
-**Check:** after an audit, the task log shows for each host a JSON summary of
-pass, fail, not-applicable and not-checked counts, then where its reports are:
-on the target, and under the controller home of the service or of your
-account, depending on where you ran it. If the summary shows
-`has_scanner_errors_or_unknowns: true`, a warning follows it. Treat that scan
-as incomplete and see
-[chapter 11](11-troubleshooting.md#benchmark-result-surprises) before
-comparing counts.
-
-**Concept:** vendor remediation is not gentle. It commonly removes
-passwordless sudo, tightens SSH and changes kernel parameters, and a first
-pass often leaves failing rules that need a reboot or a manual decision. On
-AlmaLinux, Rocky Linux and RHEL 9 it sets the `FIPS:STIG` crypto policy. In the
-verification run an AlmaLinux target then offered only RSA and ECDSA host keys
-and refused Ed25519 user keys, including an administrator's everyday Ed25519
-key; expect the same on RHEL 9 and Rocky Linux, which apply the same policy,
-although the run did not check their host-key offer. The guide's RSA host-key pin and RSA 4096
-automation key keep working. The policy alone does not enable FIPS mode; see
-[chapter 9](09-security-benchmarks.md) before treating a host as FIPS. Run it
-only against a disposable target with console access and a recovery point.
+The three seeded STIG templates are optional and change security policy on
+their target. Do not run them while learning the installation. They are
+described in [chapter 9](09-security-benchmarks.md#the-seeded-stig-templates),
+after the recovery preparation they depend on.
 
 ## Do: move to a real repository later
 
 Semaphore reads the **Local lab folder** straight from its working tree,
-uncommitted edits included. A template switched to a remote repository runs
-only what you committed and pushed, so review and commit before you switch.
-
-The folder's `.gitignore` keeps `inventories/`, `host_vars/` and `group_vars/`
-out of Git, so target addresses and Vault files stay on the controller. A
-folder installed with v1.1.0 of this guide or earlier has no such file, and
-its first commit tracks `inventories/lab.ini`. If `git ls-files inventories`
-prints anything, stop tracking that folder first. The files stay on disk,
-where Semaphore keeps reading them. Git records you as the author, so set
-`git config --global user.name` and `user.email` first if you have not:
-
-```bash
-cd /opt/ansible-lab
-printf '%s\n' 'inventories/' 'host_vars/' 'group_vars/' >> .gitignore
-git rm -r -q --cached inventories
-git add .gitignore
-git commit -m 'Keep the local inventory and Vault files out of Git'
-```
-
-Then review what a push would publish:
-
-```bash
-cd /opt/ansible-lab
-git status --short
-git ls-files
-git log --name-only --format= | sort -u
-git log --oneline -- inventories/
-```
-
-Commit your playbook changes by name, as in
-[the Git chapter](07-git-and-vscode.md#do-create-your-own-working-copy);
-`.gitignore` is not a secret detector. `git ls-files` shows only the current
-files, but a push also publishes every earlier commit, including files you
-later deleted. The third command lists every path in that history; each must
-be something you intend to publish, apart from the installer's empty
-`inventories/lab.ini` in an older folder. The last command must print nothing,
-or only the installer's first commit and the commit above. Any other commit
-touched the inventory and can hold real target addresses or Vault data.
-
-In that case, or if the path list shows anything else private, publish only
-the current files. A new history still contains every file Git tracks now, so
-first stop tracking any private file that `git ls-files` lists: run
-`git rm --cached FILE`, add its path to `.gitignore` and commit, as the block
-above does for `inventories/`. Then give the current files a new one-commit
-`main` and keep the old history on the controller under another name that you
-never push:
-
-```bash
-cd /opt/ansible-lab
-git checkout --orphan publish main
-git commit -m 'Lab playbooks for the private repository'
-git branch -m main local-history
-git branch -m publish main
-git log --oneline -- inventories/
-```
-
-The last command now prints nothing, and the working tree, `inventories/`
-included, is unchanged. Push only to a **private** repository:
-
-```bash
-git remote add origin YOUR_PRIVATE_REPOSITORY_URL
-git push -u origin main
-```
-
-Then add a second Semaphore repository object with the repository's HTTPS URL
-and its own read-only access token, stored as a **Login with password** key:
-the user name your Git host expects for tokens in **Username** and the token
-in **Password**. Avoid an SSH URL with an SSH key: Semaphore 2.19.12 clones
-over SSH with host-key checking turned off (`StrictHostKeyChecking=no`,
-`UserKnownHostsFile=/dev/null`), so it would not verify the Git host. Switch
-one template at a time. The inventory, keys and variable groups stay as they
-are: **Lab inventory file** stays bound to the **Local lab folder**
-repository, so Semaphore keeps reading `/opt/ansible-lab/inventories/lab.ini`
-and its `host_vars` on the controller. Keep that folder and repository object,
-and keep adding targets there.
+uncommitted edits included. When you want tasks to run only reviewed, pushed
+code, follow [moving the lab folder to Git](appendices/git-migration.md). It
+covers the private files to untrack first, the history review before any push,
+and why **Lab inventory file** stays bound to the local folder.
 
 ## Enterprise Linux differences worth knowing
 

@@ -1,6 +1,6 @@
 # 7. Edit with Git and VS Code
 
-[Previous: Semaphore](06-semaphore.md) · [Next: operations](08-operations.md)
+[Previous: Semaphore](06-semaphore.md) · [Next: recovery](10-recovery.md)
 
 ## Goal
 

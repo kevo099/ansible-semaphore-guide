@@ -1,6 +1,6 @@
 # 10. Backup, restore and rebuild
 
-[Previous: benchmarks](09-security-benchmarks.md) · [Next: troubleshooting](11-troubleshooting.md)
+[Previous: Git and VS Code](07-git-and-vscode.md) · [Next: operations](08-operations.md)
 
 ## Goal
 

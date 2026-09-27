@@ -1,0 +1,9 @@
+---
+- name: Operations alert test
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Fail on purpose to trigger a notification
+      ansible.builtin.fail:
+        msg: Deliberate operations notification test

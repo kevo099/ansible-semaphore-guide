@@ -1,0 +1,90 @@
+---
+# Run from a Semaphore template with task JWT issuance enabled.
+# Configure the matching OpenBao role as described in the task-identity appendix.
+- name: Read one practice value using Semaphore task identity
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    bao_url: http://127.0.0.1:8200
+    bao_auth_mount: semaphore-practice
+    bao_role: semaphore-practice-read
+    bao_kv_mount: practicekv
+    bao_kv_path: semaphore/demo
+    bao_value_field: value
+  tasks:
+    - name: Require a normal run for the authentication exchange
+      ansible.builtin.assert:
+        that:
+          - not ansible_check_mode
+        fail_msg: Run this example without check mode.
+
+    - name: Read the task JWT privately
+      ansible.builtin.set_fact:
+        bao_task_jwt: "{{ lookup('ansible.builtin.env', 'SEMAPHORE_JWT', default='') }}"
+      no_log: true
+
+    - name: Require the task JWT before contacting OpenBao
+      ansible.builtin.assert:
+        that:
+          - bao_task_jwt | length > 0
+        fail_msg: Enable JWT issuance on both the server and this template.
+      no_log: true
+
+    - name: Exchange the task identity and always release the issued token
+      block:
+        - name: Log in to the claim-bound OpenBao role
+          ansible.builtin.uri:
+            url: "{{ bao_url }}/v1/auth/{{ bao_auth_mount }}/login"
+            method: POST
+            body_format: json
+            body:
+              role: "{{ bao_role }}"
+              jwt: "{{ bao_task_jwt }}"
+            status_code: 200
+            timeout: 20
+            follow_redirects: none
+            use_proxy: false
+            use_netrc: false
+          register: bao_login
+          changed_when: true
+          no_log: true
+
+        - name: Read the single allowed KV version two path
+          ansible.builtin.uri:
+            url: "{{ bao_url }}/v1/{{ bao_kv_mount }}/data/{{ bao_kv_path }}"
+            method: GET
+            headers:
+              X-Vault-Token: "{{ bao_login.json.auth.client_token }}"
+            status_code: 200
+            timeout: 20
+            follow_redirects: none
+            use_proxy: false
+            use_netrc: false
+          register: bao_read
+          no_log: true
+
+        - name: Reduce the practice value to a SHA-256 digest
+          ansible.builtin.set_fact:
+            bao_value_sha256: "{{ bao_read.json.data.data[bao_value_field] | hash('sha256') }}"
+          no_log: true
+
+      always:
+        - name: Revoke the issued OpenBao token even after a read failure
+          ansible.builtin.uri:
+            url: "{{ bao_url }}/v1/auth/token/revoke-self"
+            method: POST
+            headers:
+              X-Vault-Token: "{{ bao_login.json.auth.client_token }}"
+            status_code: 204
+            timeout: 20
+            follow_redirects: none
+            use_proxy: false
+            use_netrc: false
+          when: bao_login.json.auth.client_token is defined
+          changed_when: true
+          no_log: true
+
+    - name: Report only the practice value digest
+      ansible.builtin.debug:
+        msg: "SHA-256: {{ bao_value_sha256 }}"

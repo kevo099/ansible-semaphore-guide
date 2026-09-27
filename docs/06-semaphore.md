@@ -1,6 +1,6 @@
 # 6. Run the lessons through Semaphore
 
-[Previous: CLI lessons](05-cli-lessons.md) · [Next: Git and VS Code](07-git-and-vscode.md)
+[Previous: CLI lessons](05-cli-lessons.md) · [Next: Git and VS Code](07-git-and-vscode.md) · [Community features](14-inputs-and-templates.md)
 
 ## Goal
 
@@ -203,8 +203,8 @@ does not list those fields.
 Launch a template with its run (▶) button, then **Run** in the dialog. The
 dialog's **Dry Run** (`--check`) and **Diff** (`--diff`) switches apply to that
 one run only; the preview templates keep those arguments fixed so a preview is
-repeatable. Templates for the STIG playbooks, such as the three that
-[3b seeds](03-controller-el9.md#do-the-vendor-stig-lessons), refuse Dry Run
+repeatable. Templates for the STIG playbooks, such as
+[the three that 3b seeds](09-security-benchmarks.md#the-seeded-stig-templates), refuse Dry Run
 because the scanner does not run in check mode.
 
 1. Run **Ubuntu — Ping**. Verify target identity, `changed=0`, and no failures.

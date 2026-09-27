@@ -1,6 +1,6 @@
 # 11. Troubleshoot by layer
 
-[Previous: recovery](10-recovery.md) · [Next: learning exercises](12-learning-path.md)
+[Back to the guide](../README.md) · [Learning exercises](12-learning-path.md)
 
 Start with the first failed layer: guest state → network → SSH trust → login
 key → Python → sudo → module → application. Preserve the original error and

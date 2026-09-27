@@ -1,6 +1,6 @@
 # 9. Optional CIS and DISA STIG practice
 
-[Previous: operations](08-operations.md) · [Next: recovery](10-recovery.md)
+[Previous: operations](08-operations.md) · [Next: learning exercises](12-learning-path.md)
 
 ## Goal
 
@@ -14,9 +14,9 @@ not apply CIS or STIG hardening.
 
 The seeded Enterprise Linux controller ships the same vendor assessments as
 two playbooks, [`stig-audit.yml`](../playbooks/stig-audit.yml) and
-[`stig-apply.yml`](../playbooks/stig-apply.yml); see
-[their description](03-controller-el9.md#do-the-vendor-stig-lessons). Read this
-chapter first so you know what those commands do.
+[`stig-apply.yml`](../playbooks/stig-apply.yml), run by three templates; see
+[the seeded STIG templates](#the-seeded-stig-templates) near the end of this
+chapter. Read the manual sections first so you know what those commands do.
 
 ## Choose the question you are testing
 
@@ -254,6 +254,64 @@ A first remediation can install packages that make additional checks
 applicable. A second scan can therefore expose failures that were previously
 not applicable. Investigate the transition instead of assuming the host became
 less secure merely because the raw fail count increased.
+
+## The seeded STIG templates
+
+The [Enterprise Linux seeded controller](03-controller-el9.md) creates three
+STIG templates. They wrap the operating-system vendor's own STIG tooling and
+content that this chapter walks through by hand: the packaged SCAP Security
+Guide `stig` profile on RHEL, AlmaLinux and Rocky Linux, and the Ubuntu
+Security Guide `disa_stig` profile on Ubuntu.
+The guide adds no rules of its own. On Enterprise Linux two things differ from
+the hand-run commands above. First, the scans omit
+`--fetch-remote-resources`, so a rule whose check lives in a remote vendor
+feed, such as `security_patches_up_to_date`, reports `notchecked`. To fetch
+those feeds, set `stig_fetch_remote_resources` to `true` in a variable group,
+or pass `-e '{"stig_fetch_remote_resources": true}'` from the CLI; the target
+then needs access to them. Second, the remediation is
+`oscap xccdf eval --remediate` with the data stream's own fixes, not the
+packaged Ansible playbook applied on RHEL above.
+
+- **STIG audit (vendor scan only)** installs the scanner where missing, runs
+  the assessment, keeps the XML and HTML on the target under
+  `/var/log/stig-practice/`, fetches them to the controller and prints outcome
+  counts. It changes no policy. Ubuntu needs `usg` already installed through
+  your own Ubuntu Pro attachment. Without it, that host fails with an
+  explanation while the other hosts' scans still complete, so the task is
+  marked failed but the Enterprise Linux results are in the same log.
+- **STIG apply (vendor fixes, approval required)** scans, applies the vendor
+  remediation with `oscap --remediate` or `usg fix`, and scans again;
+  **STIG apply, allow required reboot** also reboots before the second scan.
+  Each changes exactly one target per run: its Run dialog asks for that host
+  in **Limit**, for example `lab-alma`, and for confirmation that a recovery
+  point for it exists. A run selecting more than one host is refused before
+  any connection. From the CLI the same gates are `--limit lab-alma` and
+  `-e '{"stig_confirm": true}'`, plus `--ask-vault-pass` if you chose the
+  Vault option for sudo passwords.
+
+The STIG templates refuse Dry Run because the scanner does not run in check
+mode.
+
+**Check:** after an audit, the task log shows for each host a JSON summary of
+pass, fail, not-applicable and not-checked counts, then where its reports are:
+on the target, and under the controller home of the service or of your
+account, depending on where you ran it. If the summary shows
+`has_scanner_errors_or_unknowns: true`, a warning follows it. Treat that scan
+as incomplete and see
+[chapter 11](11-troubleshooting.md#benchmark-result-surprises) before
+comparing counts.
+
+**Concept:** vendor remediation is not gentle. It commonly removes
+passwordless sudo, tightens SSH and changes kernel parameters, and a first
+pass often leaves failing rules that need a reboot or a manual decision. On
+AlmaLinux, Rocky Linux and RHEL 9 it sets the `FIPS:STIG` crypto policy. In the
+verification run an AlmaLinux target then offered only RSA and ECDSA host keys
+and refused Ed25519 user keys, including an administrator's everyday Ed25519
+key; expect the same on RHEL 9 and Rocky Linux, which apply the same policy,
+although the run did not check their host-key offer. The guide's RSA host-key pin and RSA 4096
+automation key keep working. The policy alone does not enable FIPS mode; see
+the interpretation section above before treating a host as FIPS. Run it
+only against a disposable target with console access and a recovery point.
 
 ## Concept
 
