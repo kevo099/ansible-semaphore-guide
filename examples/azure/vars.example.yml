@@ -25,11 +25,9 @@ azure_automation_public_key_file: files/ansible_lab.pub     # copy of the contro
 azure_targets:
   - name: lab-ubuntu
     private_ip: REPLACE_WITH_ADDRESS_IN_SUBNET
-    family: ubuntu
     image: {publisher: Canonical, offer: ubuntu-24_04-lts, sku: server, version: latest}
   - name: lab-alma
     private_ip: REPLACE_WITH_ADDRESS_IN_SUBNET
-    family: el
     image: {publisher: almalinux, offer: almalinux-x86_64, sku: 9-gen2, version: latest}
 
 # Optional: a controller VM in Azure (controller.yml). It is the only VM with a

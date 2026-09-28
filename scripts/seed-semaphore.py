@@ -34,6 +34,8 @@ RECOVERY_PROMPT = [{
 ALL_LAB_TARGETS = {"limit": ["lab"]}
 # STIG apply changes one approved target per run, so its Run dialog asks for the host.
 ONE_TARGET_PER_RUN = {"limit": [], "allow_override_limit": True}
+# A content file is written for one system, so its Run dialog asks for the matching hosts.
+MATCHING_TARGETS = {"limit": [], "allow_override_limit": True}
 
 LESSONS = [
     # name, playbook, extra arguments, variable group, run prompt, Ansible options
@@ -50,11 +52,17 @@ LESSONS = [
      RECOVERY_PROMPT, ONE_TARGET_PER_RUN),
     ("STIG apply, allow required reboot", "playbooks/stig-apply.yml", [], "Allow required reboot",
      RECOVERY_PROMPT, ONE_TARGET_PER_RUN),
+    ("STIG audit, local SCAP content", "playbooks/stig-audit.yml", [], "Local SCAP content",
+     [], MATCHING_TARGETS),
 ]
 
 VARIABLE_GROUPS = {
     "Practice defaults": {},
     "Allow required reboot": {"allow_reboot": True},
+    # Edit both values after copying a benchmark into the lab folder's content/;
+    # the playbook refuses the placeholders.
+    "Local SCAP content": {"stig_content_file": "content/REPLACE_WITH_BENCHMARK.xml",
+                           "stig_content_profile": "REPLACE_WITH_PROFILE_ID"},
 }
 
 
@@ -81,7 +89,9 @@ def template_payload(project_id, ids, lesson):
         "arguments": json.dumps(extra_args),
         "task_params": copy.deepcopy(options),
         "description": ("Seeded by the guide; runs from the local lab folder. "
-                        + ("Enter exactly one host in the Limit prompt." if one_target
+                        + ("Enter the hosts or group that the content file is written for in the Limit prompt."
+                           if options is MATCHING_TARGETS
+                           else "Enter exactly one host in the Limit prompt." if one_target
                            else "Limit: every host in the lab group.")),
         "allow_override_args_in_task": False,
         "suppress_success_alerts": False,

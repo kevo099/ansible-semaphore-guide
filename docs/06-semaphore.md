@@ -12,15 +12,19 @@ target bootstrap. Labels below are the ones Semaphore Community 2.19.12 shows;
 older releases call variable groups “environments.” Do not assume a feature in
 newer online documentation exists in the pinned release.
 
-If you installed the [seeded Enterprise Linux controller](03-controller-el9.md),
+If you used the [Ubuntu installer](03-controller.md) or the
+[Enterprise Linux installer](03-controller-el9.md),
 the **Ansible Practice** project, its SSH key, inventory, repository, variable
-groups and eleven templates already exist. Do not create a second project with
+groups and twelve templates already exist. Do not create a second project with
 the same name. Read steps 1-6 to understand those objects, and add the sudo
 credential as
 [3b describes](03-controller-el9.md#do-give-the-templates-the-targets-sudo-password).
 Then qualify the seeded lesson templates with step 7's sequence. Their names
 have no `Ubuntu —` prefix, and their limit is the whole `lab` group, so one run
-covers every target you added; read each host's recap.
+covers every target you added; read each host's recap. The STIG apply and local
+SCAP content templates instead ask for their hosts when you run them. Keep their local-folder
+repository and file inventory; the Git repository and static inventories below
+are for the manual setup.
 
 ## Open your private browser connection
 
@@ -204,7 +208,7 @@ Launch a template with its run (▶) button, then **Run** in the dialog. The
 dialog's **Dry Run** (`--check`) and **Diff** (`--diff`) switches apply to that
 one run only; the preview templates keep those arguments fixed so a preview is
 repeatable. Templates for the STIG playbooks, such as
-[the three that 3b seeds](09-security-benchmarks.md#the-seeded-stig-templates), refuse Dry Run
+[the four that both installers seed](09-security-benchmarks.md#the-seeded-stig-templates), refuse Dry Run
 because the scanner does not run in check mode.
 
 1. Run **Ubuntu — Ping**. Verify target identity, `changed=0`, and no failures.

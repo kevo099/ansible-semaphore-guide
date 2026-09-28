@@ -2,7 +2,7 @@
 
 [Previous: controller](03-controller.md) or [Enterprise Linux controller](03-controller-el9.md) · [Next: command-line lessons](05-cli-lessons.md)
 
-**Coming from the seeded Enterprise Linux controller (3b)?** Semaphore already
+**Coming from a controller made by either installer (chapter 3 or 3b)?** Semaphore already
 has its own key pair, and `add-target.sh` pinned each target's host key in
 `/etc/semaphore/known_hosts`. Do steps 2 to 4 on each target, but in step 3
 copy the service's public key, which `sudo cat /etc/semaphore/svc_ansible.pub`
@@ -88,9 +88,14 @@ Steps 3 and 4 are also available as one playbook,
 run from the controller as the target's own administrator. It is useful for a
 VM that already exists, such as a cloud VM created in a portal;
 [chapter 13](13-azure.md#do-finish-access-with-one-playbook) shows it end to
-end. On the seeded Enterprise Linux controller, pass it the exported service
-key as well, as that chapter shows, or it replaces the key Semaphore uses. The
-manual steps below explain what it does.
+end. On a seeded controller, pass it the exported service key as well, as that
+chapter shows, or it replaces the key Semaphore uses. Without SSH, the same
+steps run as root through Azure Run Command or `sudo bash` with
+[`examples/onboard/onboard-linux.sh`](../examples/onboard/onboard-linux.sh), and
+a new VM can do them at first boot with
+[`examples/onboard/cloud-init.yaml`](../examples/onboard/cloud-init.yaml); see
+[chapter 13](13-azure.md#do-onboard-an-existing-vm-with-run-command). The
+manual steps below explain what they do.
 
 First copy the public key from the controller to each target administrator's
 home directory. This `scp`, like step 2's first connection, logs in to the
@@ -245,10 +250,10 @@ in the public inventory; see [Git and Vault](07-git-and-vscode.md).
 
 ## Step 6: install target trust for Semaphore
 
-The service uses a separate known-hosts file. Skip this step on the seeded
-Enterprise Linux controller: `add-target.sh` already maintains that file, and
-the block below replaces it. Otherwise, on the controller, copy only the
-already verified entries for the addresses your inventory uses:
+The service uses a separate known-hosts file. Skip this step on a controller
+made by either installer: `add-target.sh` already maintains that file, and the
+block below replaces it. After chapter 3's manual path, on the controller, copy
+only the already verified entries for the addresses your inventory uses:
 
 ```bash
 (

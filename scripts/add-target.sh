@@ -16,7 +16,7 @@ umask 077
 usage() { sed -n '2,/^[^#]/{/^#/p}' "$0"; }
 missing() { echo "$1 needs a value."; usage; exit 2; }
 
-name= address= group= fingerprint= lab_dir=/opt/ansible-lab known_hosts=/etc/semaphore/known_hosts
+name='' address='' group='' fingerprint='' lab_dir=/opt/ansible-lab known_hosts=/etc/semaphore/known_hosts
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --name) [[ $# -ge 2 ]] || missing "$1"; name="$2"; shift ;;
@@ -90,4 +90,4 @@ PY
 cat "$matched" >> "$known_hosts"
 echo "Added $name ($address) to $inventory under [$group] and trusted its verified host key."
 echo "Next: authorize the key shown by 'sudo cat /etc/semaphore/svc_ansible.pub' for svc_ansible"
-echo "on $name (chapter 3b), then run the Ping template."
+echo "on $name (chapter 4, step 3, or examples/onboard/onboard-linux.sh), then run the Ping template."

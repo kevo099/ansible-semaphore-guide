@@ -14,9 +14,11 @@ not apply CIS or STIG hardening.
 
 The seeded Enterprise Linux controller ships the same vendor assessments as
 two playbooks, [`stig-audit.yml`](../playbooks/stig-audit.yml) and
-[`stig-apply.yml`](../playbooks/stig-apply.yml), run by three templates; see
+[`stig-apply.yml`](../playbooks/stig-apply.yml), run by four templates; see
 [the seeded STIG templates](#the-seeded-stig-templates) near the end of this
-chapter. Read the manual sections first so you know what those commands do.
+chapter. [The security baseline catalog](appendices/security-baselines.md)
+compares STIG, CIS and the other common baselines and lists the profile IDs
+these playbooks accept. Read the manual sections first so you know what those commands do.
 
 ## Choose the question you are testing
 
@@ -257,8 +259,9 @@ less secure merely because the raw fail count increased.
 
 ## The seeded STIG templates
 
-The [Enterprise Linux seeded controller](03-controller-el9.md) creates three
-STIG templates. They wrap the operating-system vendor's own STIG tooling and
+Both seeded controllers, [Ubuntu](03-controller.md) and
+[Enterprise Linux](03-controller-el9.md), create four STIG templates. The
+first three wrap the operating-system vendor's own STIG tooling and
 content that this chapter walks through by hand: the packaged SCAP Security
 Guide `stig` profile on RHEL, AlmaLinux and Rocky Linux, and the Ubuntu
 Security Guide `disa_stig` profile on Ubuntu.
@@ -288,6 +291,10 @@ packaged Ansible playbook applied on RHEL above.
   any connection. From the CLI the same gates are `--limit lab-alma` and
   `-e '{"stig_confirm": true}'`, plus `--ask-vault-pass` if you chose the
   Vault option for sudo passwords.
+- **STIG audit, local SCAP content** scans with a content file you place in
+  the lab folder, such as a DISA SCAP benchmark, using the profile you name in
+  the **Local SCAP content** variable group; see
+  [scan with a local SCAP content file](#scan-with-a-local-scap-content-file).
 
 The STIG templates refuse Dry Run because the scanner does not run in check
 mode.
@@ -312,6 +319,87 @@ although the run did not check their host-key offer. The guide's RSA host-key pi
 automation key keep working. The policy alone does not enable FIPS mode; see
 the interpretation section above before treating a host as FIPS. Run it
 only against a disposable target with console access and a recovery point.
+
+## Scan with a local SCAP content file
+
+The audit can also scan with a SCAP data stream file you supply instead of
+the vendor's packaged content, for example DISA's own SCAP benchmark for a
+newer STIG release. The file lives in the lab folder, so no repository or
+download happens during the run. `stig-audit.yml` then uses OpenSCAP on
+either family, installing `openscap-scanner` where it is missing, and the
+results, summary and HTML report work as for the vendor scan.
+
+**Where: the controller, as the lab folder's editor.** DISA publishes each
+SCAP benchmark as a ZIP file that downloads without an account. Check the
+[DISA SCAP content page](https://public.cyber.mil/stigs/scap/) for the current
+release; the example uses the RHEL 9 benchmark V2R9:
+
+```bash
+cd /opt/ansible-lab/content
+curl -fLO https://dl.dod.cyber.mil/wp-content/uploads/stigs/zip/U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.zip
+sha256sum U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.zip
+python3 -m zipfile -e U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.zip .
+chmod 0640 U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.xml
+grep -o 'Profile id="[^"]*"' U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.xml
+```
+
+Record the checksum with your results. The seeded installers create
+`content/` in the lab folder; the file must stay readable by the `semaphore`
+group, which `chmod 0640` keeps. DISA benchmarks list the profiles
+`xccdf_mil.disa.stig_profile_MAC-1_Classified` through `MAC-3_Sensitive`,
+plus `CAT_I_Only` and `Disable_Slow_Rules`. Choose the one your system owner
+names; `MAC-1_Classified` selects the most checks.
+
+**In Semaphore:** open **Variable Groups → Local SCAP content** and replace
+both placeholders in its extra variables:
+
+```json
+{
+  "stig_content_file": "content/U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.xml",
+  "stig_content_profile": "xccdf_mil.disa.stig_profile_MAC-1_Classified"
+}
+```
+
+Then run **STIG audit, local SCAP content** and enter the hosts the file is
+written for in **Limit**, for example `lab-rhel`. While the placeholders
+remain, the run stops with an explanation before scanning. From the CLI, run
+from the lab folder with your own key and the targets' sudo password, as
+[chapter 5](05-cli-lessons.md) does, and pass the same two variables:
+
+```bash
+cd /opt/ansible-lab
+/opt/ansible-venv/bin/ansible-playbook playbooks/stig-audit.yml --limit lab-rhel \
+  --private-key ~/.ssh/ansible_lab -K \
+  -e '{"stig_content_file": "content/U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.xml", "stig_content_profile": "xccdf_mil.disa.stig_profile_MAC-1_Classified"}'
+```
+
+On a seeded controller that key must be authorized on the targets beside the
+service key; [chapter 3b](03-controller-el9.md#do-add-a-target-without-leaving-the-terminal)
+shows how. With the Vault option for sudo passwords, use `--ask-vault-pass`
+instead of `-K`.
+
+A relative path is read from the lab folder; an absolute path works too. The
+content is for audits only: `stig-apply.yml` refuses `stig_content_file`,
+because DISA benchmarks carry checks but no fixes, and remediation always
+uses the vendor's packaged content.
+
+A benchmark checks that it runs on its own platform. In the test, DISA's RHEL 9
+benchmark reported all 392 of its rules as not applicable on AlmaLinux 9.8, so
+scan AlmaLinux and Rocky Linux with their own packaged content. DISA content
+and the vendor's `stig` profile also check different releases in different
+ways, so their counts differ on the same machine. On targets the vendor STIG
+had already hardened, the test saw:
+
+| Target | Content and profile | Pass | Fail | Not applicable |
+| --- | --- | --- | --- | --- |
+| RHEL 9.8 | DISA RHEL 9 V2R9, `MAC-1_Classified` | 340 | 27 | 25 |
+| AlmaLinux 9.8 | DISA RHEL 9 V2R9, `MAC-1_Classified` | 0 | 0 | 392 |
+| Ubuntu 24.04 (Ubuntu Pro) | DISA Ubuntu 24.04 V1R5, `MAC-1_Classified` | 141 | 22 | 2 |
+
+Every run reported zero scanner errors. The same variables select other
+content, such as a newer SCAP Security Guide release's data stream or a CIS
+profile's; [the security baseline catalog](appendices/security-baselines.md)
+lists the profile IDs by platform.
 
 ## Concept
 

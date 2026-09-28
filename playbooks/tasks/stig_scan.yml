@@ -1,16 +1,61 @@
 ---
-# Shared by stig-audit.yml and stig-apply.yml. Uses only the operating-system
-# vendor's scanner and STIG content; the guide adds no rules of its own.
+# Shared by stig-audit.yml and stig-apply.yml. By default it uses only the
+# operating-system vendor's scanner and STIG content; the guide adds no rules of
+# its own. With stig_content_file, stig-audit.yml scans with a SCAP data stream
+# you supply instead, such as a DISA SCAP benchmark, using OpenSCAP on either family.
 # Expects: stig_phase, stig_profile_el, stig_usg_profile,
-# stig_fetch_remote_resources, stig_remote_dir, stig_fetch_dir.
+# stig_fetch_remote_resources, stig_remote_dir, stig_fetch_dir,
+# stig_content_file, stig_content_profile.
+- name: Note whether this scan uses a local SCAP content file
+  ansible.builtin.set_fact:
+    stig_local_content: "{{ stig_content_file | default('') | length > 0 }}"
+    # A relative path is inside the lab folder, next to playbooks/.
+    stig_content_source: >-
+      {{ stig_content_file if stig_content_file | default('') is abs
+         else playbook_dir ~ '/../' ~ stig_content_file | default('') }}
+
+- name: Check the local content file and its profile on the controller
+  when: stig_local_content
+  block:
+    - name: Look for the local content file on the controller
+      ansible.builtin.stat:
+        path: "{{ stig_content_source }}"
+      register: stig_content_stat
+      delegate_to: localhost
+      become: false
+
+    - name: Refuse a missing file, a placeholder or an incomplete profile ID
+      ansible.builtin.assert:
+        that:
+          - "'REPLACE_WITH' not in stig_content_file ~ stig_content_profile | default('')"
+          - stig_content_stat.stat.exists
+          - stig_content_stat.stat.isreg | default(false)
+          - stig_content_file is match('.*[.]xml$')
+          - stig_content_profile | default('') is match('^xccdf_[A-Za-z0-9_.-]+_profile_[A-Za-z0-9_.-]+$')
+        fail_msg: >-
+          Set stig_content_file to an XML SCAP data stream in the lab folder, for
+          example content/U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.xml, and
+          stig_content_profile to a full profile ID that file lists (oscap info FILE),
+          for example xccdf_mil.disa.stig_profile_MAC-1_Classified.
+        quiet: true
+
 - name: Install the vendor SCAP scanner and content on Enterprise Linux
   ansible.builtin.dnf:
-    name:
-      - openscap-scanner
-      - scap-security-guide
+    name: "{{ ['openscap-scanner'] + ([] if stig_local_content else ['scap-security-guide']) }}"
     state: present
     lock_timeout: 120
   when: ansible_facts['os_family'] == 'RedHat'
+
+- name: Install the OpenSCAP scanner on Ubuntu for local content
+  ansible.builtin.apt:
+    name: openscap-scanner
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+    lock_timeout: 120
+  when:
+    - ansible_facts['os_family'] == 'Debian'
+    - stig_local_content
 
 - name: Look for the Ubuntu Security Guide command
   ansible.builtin.command:
@@ -18,7 +63,9 @@
   register: stig_usg_present
   changed_when: false
   failed_when: false
-  when: ansible_facts['os_family'] == 'Debian'
+  when:
+    - ansible_facts['os_family'] == 'Debian'
+    - not stig_local_content
 
 - name: Explain the Ubuntu prerequisite instead of attaching a subscription
   ansible.builtin.assert:
@@ -29,7 +76,9 @@
       your own account, then run: sudo pro enable usg && sudo apt-get install -y usg.
       This lesson never handles subscription tokens.
     quiet: true
-  when: ansible_facts['os_family'] == 'Debian'
+  when:
+    - ansible_facts['os_family'] == 'Debian'
+    - not stig_local_content
 
 # Each distribution packages its own data stream; never point one at another's content.
 - name: Choose the vendor STIG data stream for this Enterprise Linux release
@@ -37,7 +86,9 @@
     stig_datastream: >-
       /usr/share/xml/scap/ssg/content/ssg-{{ {'RedHat': 'rhel9', 'AlmaLinux': 'almalinux9',
       'Rocky': 'rl9'}[ansible_facts['distribution']] }}-ds.xml
-  when: ansible_facts['os_family'] == 'RedHat'
+  when:
+    - ansible_facts['os_family'] == 'RedHat'
+    - not stig_local_content
 
 - name: Create the evidence directory on the target
   ansible.builtin.file:
@@ -46,6 +97,35 @@
     owner: root
     group: root
     mode: '0700'
+
+- name: Copy the local content file to the target
+  ansible.builtin.copy:
+    src: "{{ stig_content_source }}"
+    dest: "{{ stig_remote_dir }}/content.xml"
+    owner: root
+    group: root
+    mode: '0600'
+  when: stig_local_content
+
+# The content's own platform checks decide applicability: a benchmark written
+# for another system reports its rules as notapplicable instead of failing them.
+- name: Scan against the profile in the local content file
+  ansible.builtin.command:
+    argv:
+      - oscap
+      - xccdf
+      - eval
+      - --profile
+      - "{{ stig_content_profile }}"
+      - --results
+      - "{{ stig_remote_dir }}/{{ stig_phase }}.xml"
+      - --report
+      - "{{ stig_remote_dir }}/{{ stig_phase }}.html"
+      - "{{ stig_remote_dir }}/content.xml"
+  register: stig_scan_local
+  changed_when: false
+  failed_when: stig_scan_local.rc not in [0, 2]
+  when: stig_local_content
 
 # oscap returns 2 when at least one rule failed; only 1 is a scanner error.
 - name: Scan Enterprise Linux against the vendor STIG profile
@@ -60,7 +140,9 @@
   register: stig_scan_el
   changed_when: false
   failed_when: stig_scan_el.rc not in [0, 2]
-  when: ansible_facts['os_family'] == 'RedHat'
+  when:
+    - ansible_facts['os_family'] == 'RedHat'
+    - not stig_local_content
 
 - name: Scan Ubuntu with the Ubuntu Security Guide STIG profile
   ansible.builtin.command:
@@ -75,7 +157,9 @@
   register: stig_scan_usg
   changed_when: false
   failed_when: false
-  when: ansible_facts['os_family'] == 'Debian'
+  when:
+    - ansible_facts['os_family'] == 'Debian'
+    - not stig_local_content
 
 - name: Confirm the scanner wrote its XCCDF results
   ansible.builtin.stat:

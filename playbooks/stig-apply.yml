@@ -9,6 +9,8 @@
     stig_profile_el: xccdf_org.ssgproject.content_profile_stig
     stig_usg_profile: disa_stig
     stig_fetch_remote_resources: false
+    stig_content_file: ''
+    stig_content_profile: ''
     allow_reboot: false
     # A Semaphore survey answer is a string; converting it here keeps the
     # approval check a real boolean. From the CLI pass -e '{"stig_confirm": true}'.
@@ -41,6 +43,18 @@
           Check mode skips the vendor scanner and cannot predict vendor
           remediation. For a read-only assessment, run stig-audit.yml without
           --check or Dry Run.
+        quiet: true
+      tags: always
+
+    # A DISA SCAP benchmark carries checks but no fixes, so remediation always
+    # uses the vendor's packaged content. Audit other content with stig-audit.yml.
+    - name: Refuse a local content file, which remediation does not use
+      ansible.builtin.assert:
+        that:
+          - stig_content_file | default('') | length == 0
+        fail_msg: >-
+          stig_content_file is for audits only. Remediation applies the vendor's
+          packaged fixes; scan with your content file through stig-audit.yml.
         quiet: true
       tags: always
 

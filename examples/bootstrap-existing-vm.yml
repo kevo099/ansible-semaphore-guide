@@ -25,13 +25,17 @@
       private: true
       confirm: true
   vars:
-    # Every public key that may log in as svc_ansible. On the seeded Enterprise
-    # Linux controller, list the exported service key and, if you use one, your CLI key.
+    # Every public key that may log in as svc_ansible. On a controller made by either
+    # installer, list the exported service key and, if you use one, your CLI key.
     automation_public_key_files:
       - ~/.ssh/ansible_lab.pub
     automation_public_keys: "{{ query('ansible.builtin.file', *automation_public_key_files) }}"
     ssh_service: "{{ 'ssh' if ansible_facts['os_family'] == 'Debian' else 'sshd' }}"
     ssh_dropin: /etc/ssh/sshd_config.d/70-ansible-lab.conf
+    # SSH_CONNECTION holds the client address and port, then this host's address and port,
+    # so the policy is read for exactly the connection the controller uses.
+    bootstrap_sshd_context: >-
+      {% set c = bootstrap_ssh_connection.stdout.split() %}user=svc_ansible,host={{ c[0] }},addr={{ c[0] }},laddr={{ c[2] }},lport={{ c[3] }}
   pre_tasks:
     - name: Require a limit that selects exactly one host
       ansible.builtin.assert:
@@ -66,6 +70,52 @@
       become: false
       register: bootstrap_ssh_connection
       changed_when: false
+
+    - name: Read which keys this SSH server accepts for svc_ansible
+      ansible.builtin.command: /usr/sbin/sshd -T -C {{ bootstrap_sshd_context }}
+      register: bootstrap_sshd_before
+      changed_when: false
+
+    - name: Measure each listed key on the controller
+      ansible.builtin.command: ssh-keygen -lf -
+      args:
+        stdin: "{{ item }}"
+      loop: "{{ automation_public_keys }}"
+      loop_control:
+        label: "{{ item.split()[0] }}"
+      register: bootstrap_key_sizes
+      changed_when: false
+      delegate_to: localhost
+      become: false
+
+    # A FIPS or STIG crypto policy refuses Ed25519 keys, and servers set a minimum RSA
+    # size; replacing the list with keys the server rejects would lock svc_ansible out.
+    - name: Require at least one listed key that can log in
+      ansible.builtin.assert:
+        that:
+          - bootstrap_usable_other | length + (bootstrap_usable_rsa | length if bootstrap_rsa_accepted else 0) > 0
+        fail_msg: >-
+          None of the listed keys can log in: this server accepts
+          {{ bootstrap_accepted | join(', ') }}, and RSA keys of at least
+          {{ bootstrap_min_rsa }} bits. Use an RSA 4096 key.
+        quiet: true
+      vars:
+        bootstrap_policy_before: "{{ bootstrap_sshd_before.stdout_lines }}"
+        bootstrap_accepted: >-
+          {{ (bootstrap_policy_before | select('match', '^pubkeyacceptedalgorithms ')
+              | first | default('pubkeyacceptedalgorithms none')).split()[1].split(',') }}
+        # OpenSSH 9.1 and later report RequiredRSASize; the guide never accepts less than 2048 bits.
+        bootstrap_min_rsa: >-
+          {{ ([2048] + (bootstrap_policy_before | select('match', '^requiredrsasize ')
+              | map('split') | map('last') | map('int') | list)) | max }}
+        bootstrap_rsa_accepted: "{{ ['rsa-sha2-512', 'rsa-sha2-256', 'ssh-rsa'] | intersect(bootstrap_accepted) | length > 0 }}"
+        bootstrap_usable_rsa: >-
+          {{ bootstrap_key_sizes.results | selectattr('item', 'match', '^ssh-rsa ')
+             | map(attribute='stdout') | map('split') | map('first') | map('int')
+             | select('ge', bootstrap_min_rsa | int) | list }}
+        bootstrap_usable_other: >-
+          {{ automation_public_keys | map('split') | map('first') | reject('eq', 'ssh-rsa')
+             | select('in', bootstrap_accepted) | list }}
 
   tasks:
     - name: Ensure the Ubuntu prerequisites
@@ -152,10 +202,7 @@
           changed_when: false
 
         - name: Read the effective SSH policy for svc_ansible from this controller
-          ansible.builtin.command: >-
-            /usr/sbin/sshd -T -C user=svc_ansible,host={{ bootstrap_controller_addr }},addr={{ bootstrap_controller_addr }}
-          vars:
-            bootstrap_controller_addr: "{{ bootstrap_ssh_connection.stdout.split()[0] }}"
+          ansible.builtin.command: /usr/sbin/sshd -T -C {{ bootstrap_sshd_context }}
           register: bootstrap_sshd_policy
           changed_when: false
 
@@ -165,8 +212,17 @@
               - "'authenticationmethods publickey' in bootstrap_sshd_policy.stdout_lines"
               - "'passwordauthentication no' in bootstrap_sshd_policy.stdout_lines"
               - "'kbdinteractiveauthentication no' in bootstrap_sshd_policy.stdout_lines"
+              - "'pubkeyauthentication yes' in bootstrap_sshd_policy.stdout_lines"
+              - "'/home/svc_ansible/.ssh/authorized_keys' in bootstrap_key_paths"
             fail_msg: Another SSH setting overrides the svc_ansible policy; resolve it before reloading SSH.
             quiet: true
+          vars:
+            # AuthorizedKeysFile entries with their tokens resolved; relative ones are in the home.
+            bootstrap_key_paths: >-
+              {{ (bootstrap_sshd_policy.stdout_lines | select('match', '^authorizedkeysfile ')
+                  | first | default('authorizedkeysfile none')).split()[1:]
+                 | map('replace', '%h', '/home/svc_ansible') | map('replace', '%u', 'svc_ansible')
+                 | map('regex_replace', '^([^/])', '/home/svc_ansible/\\1') | list }}
 
         - name: Schedule the SSH reload only after every check has passed
           ansible.builtin.debug:
@@ -216,10 +272,14 @@
       ansible.builtin.assert:
         that:
           - "'(ALL : ALL) ALL' in bootstrap_sudo_rights.stdout"
+          - "'NOPASSWD' not in bootstrap_sudo_rights.stdout"
+          - "'!authenticate' not in bootstrap_sudo_rights.stdout"
+          - bootstrap_sudo_rights.stdout is not search('(^|[\\s,])(rootpw|targetpw|runaspw)([\\s,]|$)', multiline=True)
           - bootstrap_sudo_nopass.rc != 0
         fail_msg: >-
-          svc_ansible can use sudo without its password; another sudoers rule (for example NOPASSWD)
-          overrides 90-ansible-lab. Review "sudo -l -U svc_ansible" on the host.
+          svc_ansible can use sudo without its password (a NOPASSWD or !authenticate rule), or sudo
+          asks for another account's password (rootpw, targetpw or runaspw). Review
+          "sudo -l -U svc_ansible" on the host.
         success_msg: svc_ansible is ready; continue with chapter 4, step 5.
 
   handlers:

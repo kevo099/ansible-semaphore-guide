@@ -4,16 +4,18 @@
 
 ## Goal
 
-Create Linux target VMs in Azure through Ansible, use cloud-init to install the
-automation public key, finish access with the same sudo and SSH rules as
+Create Linux target VMs in Azure through Ansible, use cloud-init to prepare
+the automation account with the same sudo and SSH rules as
 [chapter 4](04-access.md), and then run the lessons against them. Also prepare
-a VM that already exists, and stop and remove the lab's compute deliberately.
+a VM that already exists, over SSH or with Run Command and no SSH at all, run
+the vendor STIG lessons on Azure targets, and stop and remove the lab's
+compute deliberately.
 
 | Edition and evidence | Scope |
 | --- | --- |
-| Tested with | `azure.azcollection` 4.0.0, ansible-core 2.21.4, `Standard_D2als_v6` in `eastus2`; targets Ubuntu 24.04, AlmaLinux 9.8 and RHEL 9.8 (pay-as-you-go image); controller Ubuntu 24.04 in the same VNet |
-| Files | [`examples/azure/`](../examples/azure/) and [`examples/bootstrap-existing-vm.yml`](../examples/bootstrap-existing-vm.yml) |
-| Evidence | [Azure validation record](validation/2026-09-azure.md) |
+| Tested with | `azure.azcollection` 4.0.0, ansible-core 2.21.4, `Standard_D2als_v6` in `eastus2`; targets Ubuntu 24.04 (plain and Ubuntu Pro images), AlmaLinux 9.8 and RHEL 9.8 (pay-as-you-go image); controllers Ubuntu 24.04 and AlmaLinux 9.8 in the same VNet |
+| Files | [`examples/azure/`](../examples/azure/), [`examples/onboard/`](../examples/onboard/) and [`examples/bootstrap-existing-vm.yml`](../examples/bootstrap-existing-vm.yml) |
+| Evidence | [Azure validation record](validation/2026-09-azure.md) and [onboarding and STIG record](validation/2026-09-onboard-stig.md) |
 | Known limits | One region and VM size; no Trusted Launch; targets reached inside one VNet, not across a VPN |
 
 The playbooks create billable resources. Nothing in the starter lab calls
@@ -144,15 +146,49 @@ Continue only when the two fingerprints match. Then install the controller as
 ```
 
 Each target gets a network interface with a private static address and the
-targets' security group, then a VM whose cloud-init data comes from
-[`templates/cloud-init-ubuntu.yaml.j2`](../examples/azure/templates/cloud-init-ubuntu.yaml.j2)
-or [`templates/cloud-init-el.yaml.j2`](../examples/azure/templates/cloud-init-el.yaml.j2).
-Both create `svc_ansible` with the automation public key and no password, and
-install the Python package bindings the lessons need: `python3-apt` on Ubuntu;
-`python3-dnf` and `python3-libselinux` on AlmaLinux, Rocky Linux or RHEL 9.
-`python3-apt` does not exist in Enterprise Linux 9 repositories, and one
-unknown package name makes cloud-init report an error. The playbook refuses an
-automation key file that is not a single-line public key.
+targets' security group, then a VM whose custom data is
+[`examples/onboard/cloud-init.yaml`](../examples/onboard/cloud-init.yaml), with
+the placeholder replaced by the automation public key. The same file works on
+Ubuntu 24.04 and on AlmaLinux, Rocky Linux or RHEL 9, and you can paste it
+into the portal yourself, as the next section shows. At first boot it:
+
+- creates `svc_ansible` with the automation public key and no password;
+- writes chapter 4's sudoers rule and SSH drop-in;
+- installs the Python package bindings the lessons need: `python3-apt` on
+  Ubuntu; `python3-dnf` and `python3-libselinux` on Enterprise Linux;
+- checks the sudo configuration and the effective SSH policy for
+  `svc_ansible`, including that an authorized key is of a type and RSA size
+  the server accepts and that `AuthorizedKeysFile` reads the file it wrote;
+  it removes a sudoers rule that does not parse, sets the SSH drop-in aside
+  only if the drop-in is what breaks `sshd -t`, and starts SSH if neither its
+  service nor, on Ubuntu, its socket is running;
+- makes cloud-init report an error when anything failed, including a key that
+  is missing because the placeholder was not replaced. It checks the SSH
+  policy from loopback, because the controller's address is unknown at first
+  boot, and reports an error if a `Match` rule depends on the client's address.
+
+It sets no password: Azure advises against secrets in custom data. Until you
+set one, as [finish access](#do-finish-access-with-one-playbook) or
+[Run Command](#set-the-sudo-password-without-ssh) shows, the account can log
+in but not use sudo. `targets.yml` renders the key as a quoted string, so any
+key comment is safe. It also refuses `svc_ansible` as `azure_admin_user`,
+because cloud-init gives the administrator passwordless sudo.
+
+**Check:** `sudo grep onboard /var/log/cloud-init-output.log` on a target
+shows `onboard: svc_ansible is ready; set its sudo password next`. Run it
+through Run Command if you have no SSH path yet.
+
+### Paste it into the portal instead
+
+For a VM you create by hand, copy the file, replace
+`REPLACE_WITH_AUTOMATION_PUBLIC_KEY` with the line of the controller's public
+key and keep the double quotes around it. If the key's comment (the text after
+the base64 part) contains a `"` or a `\`, leave the comment out. Paste the
+result into **Advanced → Custom data** when you create the VM, or pass the file
+with `az vm create --custom-data`. The test created an Ubuntu and an AlmaLinux
+VM this way; both reported `svc_ansible is ready`. A third VM whose placeholder
+was left in reported `status: error` with the missing-key message, and
+`svc_ansible` there had no authorized key.
 
 Azure's pay-as-you-go RHEL image already has working repositories through
 Red Hat's cloud update service, so it needs no `subscription-manager`
@@ -163,13 +199,16 @@ The playbooks always pass their own network interface. Without one,
 `azure_rm_virtualmachine` creates a public address and a security group itself.
 
 cloud-init runs at first boot only. Updating a VM's custom data later does not
-rerun it. For a VM that exists already, use the next section's playbook.
+rerun it. For a VM that exists already, use
+[Run Command](#do-onboard-an-existing-vm-with-run-command) or the
+[bootstrap playbook](#when-the-vm-already-exists).
 
 ## Do: pin the targets' host keys
 
 **Where: the controller, as your administrator account.** Read each target's
-fingerprint through the control plane, as above, then scan it over the private
-network and compare before trusting it:
+fingerprint through the control plane, as above or from the output of the
+[Run Command script](#do-onboard-an-existing-vm-with-run-command), then scan it
+over the private network and compare before trusting it:
 
 ```bash
 ssh-keyscan -t rsa TARGET_PRIVATE_ADDRESS | ssh-keygen -lf -
@@ -182,7 +221,8 @@ see [chapter 4, step 6](04-access.md#step-6-install-target-trust-for-semaphore).
 
 [`examples/bootstrap-existing-vm.yml`](../examples/bootstrap-existing-vm.yml)
 is the automated form of chapter 4, steps 3 and 4. On a VM that cloud-init
-prepared, it completes the account; on any other VM, it does the whole job.
+prepared, it sets the sudo password and checks what cloud-init wrote; on any
+other VM, it does the whole job.
 It needs what any Ansible run needs: SSH from the controller as an
 administrator whose sudo works, and Python 3 on the VM, which mainstream cloud
 images have. It then:
@@ -199,10 +239,11 @@ images have. It then:
 - runs `sudo -k -n` as `svc_ansible` and fails if that succeeds, which catches
   a `NOPASSWD` rule elsewhere that would override the password requirement.
 
-By default it authorizes `~/.ssh/ansible_lab.pub`. On the
-[seeded Enterprise Linux controller](03-controller-el9.md), list the exported
-service key instead, and your CLI key too if you use one, or the run replaces
-the key Semaphore logs in with:
+By default it authorizes `~/.ssh/ansible_lab.pub`. On a controller made by
+either installer ([Ubuntu](03-controller.md) or
+[Enterprise Linux](03-controller-el9.md)), list the exported service key
+instead, and your CLI key too if you use one, or the run replaces the key
+Semaphore logs in with:
 
 ```bash
 /opt/ansible-venv/bin/ansible-playbook -i inventories/bootstrap.ini \
@@ -240,18 +281,125 @@ repeat run with the same password reports no changes.
 ### When the VM already exists
 
 This covers a VM created in the portal, with the Azure CLI, by another tool, or
-before you used cloud-init. You do not need `network.yml` or `targets.yml`:
+before you used cloud-init. You do not need `network.yml` or `targets.yml`.
+Choose one of two ways:
 
-1. Make sure the controller can reach the VM's SSH port as its administrator,
-   that the administrator's sudo works, and that the VM has Python 3. Pin its
-   host key as above.
-2. Add the VM to the bootstrap inventory with its address.
-3. Run `bootstrap-existing-vm.yml` for that host, as its administrator.
-4. Continue with [chapter 4, step 5](04-access.md#step-5-test-all-three-layers).
+- **No SSH needed:** run
+  [`examples/onboard/onboard-linux.sh`](../examples/onboard/onboard-linux.sh)
+  through Azure Run Command, as the [next section](#do-onboard-an-existing-vm-with-run-command)
+  shows. It needs only the Azure role that may run commands on the VM.
+- **Over SSH:** make sure the controller can reach the VM's SSH port as its
+  administrator, that the administrator's sudo works, and that the VM has
+  Python 3. Pin its host key as above, add the VM to the bootstrap inventory
+  with its address, and run `bootstrap-existing-vm.yml` for that host as its
+  administrator.
 
-The test created the RHEL target with a plain `az vm create` and no custom data,
-so `svc_ansible` did not exist. This playbook alone prepared it, and a repeat
-run reported `changed=0`.
+Then continue with [chapter 4, step 5](04-access.md#step-5-test-all-three-layers).
+In the first test the RHEL target, made with a plain `az vm create` and no
+custom data, was prepared by the playbook alone, and a repeat run reported
+`changed=0`. In the second, a plain Ubuntu and a RHEL VM were prepared by Run
+Command alone.
+
+## Do: onboard an existing VM with Run Command
+
+**Where: the Azure portal, or any machine with the Azure CLI.** Run Command
+runs a script as root through the VM agent, so it works before any SSH path
+exists. [`examples/onboard/onboard-linux.sh`](../examples/onboard/onboard-linux.sh)
+does what `bootstrap-existing-vm.yml` does, and is safe to run again:
+
+- creates or completes `svc_ansible` and authorizes exactly the keys you give
+  it, writing the key file as that account so a link it planted cannot
+  redirect root; SELinux labels are restored on Enterprise Linux;
+- installs the Python bindings, `sudo` and the SSH server where missing;
+- refuses before any change when no given key can log in under the VM's SSH
+  crypto policy, for example an Ed25519 key on a host hardened to `FIPS:STIG`,
+  or an RSA key shorter than 2048 bits or than the server's `RequiredRSASize`;
+- enforces the modes of the home directory, `.ssh` and the key file on every
+  run, because SSH ignores keys in a writable location;
+- writes and enforces the sudoers rule and the SSH drop-in, checks the whole
+  sudo configuration and rejects any `NOPASSWD` or `!authenticate` rule for the
+  account, or a `rootpw`, `targetpw` or `runaspw` default;
+- checks `sshd -t` and the effective SSH policy before reloading, and restores
+  the previous drop-in and leaves SSH alone when a check fails;
+- prints each change, the authorized key fingerprints and the host-key
+  fingerprints, with `RESULT: OK` or `RESULT: FAILED: reason` as the last line.
+
+Edit the copy you run: replace `REPLACE_WITH_AUTOMATION_PUBLIC_KEY` with the
+controller's public key, one key per line, between the two `END_OF_KEYS`
+lines. Use `~/.ssh/ansible_lab.pub` from
+[chapter 4, step 1](04-access.md#step-1-generate-the-automation-key), and on a
+seeded controller also the service key from
+`sudo cat /etc/semaphore/svc_ansible.pub`. The script reads the keys through a
+quoted here-document, so a key comment with quotes or `$(...)` is stored as
+text and never run. Optionally set `CONTROLLER_ADDRESS` to the controller's
+address as the VM sees it, so the SSH check evaluates the policy for that
+address arriving on each of the VM's addresses and SSH ports. Empty, it checks
+from loopback, which gives the same answer unless a `Match` rule, in any file
+the configuration includes, depends on the client's address; the script then
+stops and asks for `CONTROLLER_ADDRESS`.
+
+In the portal: open the VM, then **Operations → Run command → RunShellScript**,
+paste the edited script and select **Run**. With the Azure CLI:
+
+```bash
+az vm run-command invoke -g RESOURCE_GROUP -n VM_NAME \
+  --command-id RunShellScript --scripts @onboard-linux.sh \
+  --query 'value[0].message' -o tsv
+```
+
+Run Command returns only the last 4 KB of output, so the script sends package
+output to `/var/log/ansible-lab-onboard.log` on the VM and prints the result
+line last. Compare the host-key fingerprints it prints with `ssh-keyscan` from
+the controller, as [pin the host keys](#do-pin-the-targets-host-keys) shows;
+this output comes through the authenticated control plane. On a seeded
+controller, it is the fingerprint `add-target.sh --fingerprint` asks for.
+
+### Set the sudo password without SSH
+
+The script never takes the password itself. Make a SHA-512 hash of it on
+the controller; `openssl` prompts twice and shows nothing:
+
+```bash
+openssl passwd -6
+```
+
+Then either:
+
+- **Paste it:** put the hash between the quotes of `PASSWORD_HASH=''` in your
+  copy and run it as above. Azure sends the script to the VM encrypted, and the
+  VM agent keeps a root-only copy under `/var/lib/waagent/run-command/download/`.
+  The script deletes its own copy when a hash was pasted into it; copies from
+  earlier runs remain until you delete them.
+- **Pass it as a protected parameter** of a managed Run Command. The script
+  file stays unedited, and the parameters reach it as environment variables.
+  Azure shows the public keys when the command is read back, but never the
+  protected hash. `ONBOARD_PUBLIC_KEYS` replaces the whole key list, so pass
+  every key the account needs, one per line; on a seeded controller that
+  includes the service key you copied to `~/svc_ansible.pub`:
+
+```bash
+az vm run-command create -g RESOURCE_GROUP --vm-name VM_NAME --name onboard \
+  --script @examples/onboard/onboard-linux.sh \
+  --parameters ONBOARD_PUBLIC_KEYS="$(cat ~/.ssh/ansible_lab.pub ~/svc_ansible.pub)" \
+    ONBOARD_CONTROLLER_ADDRESS=CONTROLLER_PRIVATE_ADDRESS \
+  --protected-parameters ONBOARD_PASSWORD_HASH="$(openssl passwd -6)" \
+  --timeout-in-seconds 900
+az vm run-command show -g RESOURCE_GROUP --vm-name VM_NAME --name onboard \
+  --instance-view --query instanceView.output -o tsv
+az vm run-command delete -g RESOURCE_GROUP --vm-name VM_NAME --name onboard --yes
+```
+
+Leave out `~/svc_ansible.pub` when Semaphore does not use a key of its own.
+Pass each parameter as `NAME=value`; in the test the form `name=X value=Y`
+created parameters literally called `name` and `value`, and the script saw
+none. Two keys in one parameter arrived intact. While `az` runs, other accounts on your workstation can see the hash in
+its process list. Delete the managed command afterwards; it otherwise stays
+on the VM's resource. A hash from `openssl passwd -6` is accepted; a malformed
+one, such as `rounds=0`, is refused before the account changes.
+
+Without a hash the script keeps an existing password, and a new account has
+none: its output then says `password: NOT SET`, and sudo waits until you set
+one this way or with the bootstrap playbook.
 
 ## Check: the same three layers, then the lessons
 
@@ -269,10 +417,80 @@ their sudo passwords differ. What the test saw on all three targets:
 - Through Semaphore, with the host keys installed as chapter 4, step 6 shows,
   Ping and a Baseline preview succeeded against each target from a repository
   cloned over HTTPS.
+- In the second test, seeded controllers ran the same way on Azure: the Ubuntu
+  installer on the Azure controller and the Enterprise Linux installer on an
+  AlmaLinux 9.8 VM in the same subnet each installed and seeded in about a
+  minute, and after `add-target.sh`, Ping, Baseline preview, the STIG audit and
+  a STIG apply with the approved reboot ran from the local lab folder with no
+  clone step.
 
 Repeat the provisioning playbooks, too: in the test, `network.yml`,
 `controller.yml` and `targets.yml` reported `changed=0` on a second run, and the
 resource group held the same resources before and after.
+
+## Optional Do: the vendor STIG lessons on Azure targets
+
+[Chapter 9](09-security-benchmarks.md#the-seeded-stig-templates) describes the
+two STIG playbooks, and they run unchanged against Azure targets. Four things
+are specific to Azure.
+
+**Ubuntu needs the Ubuntu Pro image.** The Ubuntu Security Guide ships only
+through Ubuntu Pro. Azure's Ubuntu Pro image attaches Pro by itself and adds
+Pro's charge to the VM's hourly price. Use it for an Ubuntu STIG target:
+
+```yaml
+image: {publisher: Canonical, offer: ubuntu-24_04-lts, sku: ubuntu-pro, version: latest}
+```
+
+Then enable the tool once, through Run Command or SSH:
+`sudo pro enable usg && sudo apt-get install -y usg`. On the plain `server`
+image, the audit stops for that host with the explanation chapter 9 describes.
+
+**Take the recovery point as a disk snapshot.** An incremental snapshot of
+the OS disk costs little and is quick to take:
+
+```bash
+disk=$(az vm show -g RESOURCE_GROUP -n lab-alma \
+  --query storageProfile.osDisk.managedDisk.id -o tsv)
+az snapshot create -g RESOURCE_GROUP -n snap-lab-alma-pre-stig \
+  --source "$disk" --incremental true
+```
+
+It is in the same resource group. `remove.yml` then removes the lab's own
+resources, lists the snapshot as left over and keeps the group; delete the
+snapshot when you no longer need it and run `remove.yml` again, as the test did.
+
+**The Azure administrator loses sudo.** cloud-init gives the administrator
+passwordless sudo in `/etc/sudoers.d/90-cloud-init-users`, and the
+administrator has no password. The vendor STIG comments that rule out, so after
+remediation the administrator can log in but not use sudo. `svc_ansible`, with
+its own password, keeps working. The Azure VM agent kept reporting `Ready` and
+Run Command still ran as root on every hardened target, so Run Command is the
+way back in: to set an administrator password, to change `svc_ansible`'s, or to
+rerun the onboarding script.
+
+**Passwords expire on Enterprise Linux.** On AlmaLinux and RHEL the STIG sets a
+60-day maximum password age on existing accounts, `svc_ansible` included. Change
+its sudo password within that time, with the bootstrap playbook or a new hash
+through Run Command, and update the copy Ansible or Semaphore uses; otherwise
+every task that uses sudo fails after the password expires. The Ubuntu STIG
+left the account's password age unchanged in the test.
+
+What the test saw, with the reboot approved:
+
+| Target | Failing rules before → after | Passing before → after |
+| --- | --- | --- |
+| Ubuntu 24.04, Ubuntu Pro image, `disa_stig` | 67 → 8 | 54 → 209 |
+| AlmaLinux 9.8, `stig` | 268 → 22 | 155 → 406 |
+| RHEL 9.8 pay-as-you-go, `stig` | 262 → 15 | 170 → 420 |
+
+After remediation, `svc_ansible` still logged in with its RSA key and used
+sudo with its password, and Ping, Baseline and Webserver applied and then
+repeated with `changed=0` on all three. The targets print the DoD login banner
+and, on Enterprise Linux, use the `FIPS:STIG` crypto policy without FIPS mode.
+A second remediation pass on RHEL, run from Semaphore, went from 16 failing
+rules to 13, so a first pass leaves a short list for manual decisions rather
+than converging with repetition.
 
 ## Do: stop compute, and remove the lab
 

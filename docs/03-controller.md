@@ -9,16 +9,18 @@ account.** The controller is separate from the two managed targets.
 
 Install Ansible, PostgreSQL and Semaphore with private application access and
 locally generated credentials. The Ansible environment and the Semaphore binary
-are pinned to the tested versions.
+are pinned to the tested versions. The installer also creates a practice project
+that runs the local playbooks, including the STIG lessons, without a Git remote.
 
 ## Choose one installation path
 
 On RHEL, AlmaLinux or Rocky Linux 9.4 or later, use the
-[Enterprise Linux installer](03-controller-el9.md) instead; it also seeds a
-local-folder practice project.
+[Enterprise Linux installer](03-controller-el9.md) instead; both installers
+seed the same local-folder practice project.
 
 - **Manual path:** follow the numbered sections below to see what each layer does.
-- **Installer path:** read the script, view its plan, then apply it on the fresh VM.
+- **Installer path:** read the script, view its plan, then apply it on the fresh VM
+  to get the stack and twelve ready-configured task templates.
 
 Both paths use the files in this repository. Do not execute the manual path
 and then run the fresh installer over it. The installer intentionally refuses
@@ -42,7 +44,60 @@ sudo bash scripts/install-controller.sh --apply
 
 It changes this controller VM only. It does not create VMs, discover your
 hypervisor, configure targets or schedule Ansible jobs. When it succeeds,
-continue at **Check controller readiness** below.
+continue at [Check controller readiness](#check-controller-readiness), then
+[add targets and run the first lesson](#installer-path-add-targets-and-run-the-first-lesson).
+
+## What the installer creates
+
+| Layer | Result |
+| --- | --- |
+| Runtime | Python 3.12, Git and `/opt/ansible-venv` with ansible-core 2.21.4 and the pinned dependencies |
+| Database | PostgreSQL 16 from Ubuntu's repositories, loopback only, SCRAM login |
+| Application | Semaphore Community 2.19.12, checksum-verified, `127.0.0.1:3000`, hardened `semaphore.service` |
+| Secrets | Protected files in `/etc/semaphore`: application configuration, the root-only initial admin password and `svc_ansible` RSA 4096 private key, plus its public key; no secret values are printed |
+| Lab folder | `/opt/ansible-lab`, owned by the editor and readable by the service: `ansible.cfg`, seven playbooks and their supporting files, the report summarizer, an empty `inventories/lab.ini`, an empty `content/` folder for SCAP files you supply, and local Git history; `.gitignore` excludes inventories and host/group variables |
+| Semaphore objects | Project **Ansible Practice**; keys **None** and **Practice target SSH**; repository **Local lab folder**; inventory **Lab inventory file**; variable groups **Practice defaults**, **Allow required reboot** and **Local SCAP content** |
+| Twelve task templates | **Ping**; **Baseline preview**; **Baseline apply**; **Users**; **Webserver**; **Patch preview**; **Patch, no reboot**; **Patch, allow required reboot**; **STIG audit (vendor scan only)**; **STIG apply (vendor fixes, approval required)**; **STIG apply, allow required reboot**; **STIG audit, local SCAP content** |
+
+The lesson templates limit runs to the `lab` group. The two STIG apply
+templates instead ask for exactly one host and a recovery-point approval when
+you run them, and the local SCAP content template asks for the hosts its
+content file is written for. The preview templates use `--check --diff`. Only the templates
+named “allow required reboot” enable reboots. The four optional STIG templates
+run the playbooks from this local folder; see
+[the seeded STIG lessons](09-security-benchmarks.md#the-seeded-stig-templates)
+for vendor-content prerequisites and the recovery preparation required before
+remediation.
+
+The folder belongs to the account that ran `sudo`. Use `--editor USER` to
+choose another existing administrator, or specify it when invoking the
+installer directly as root. Use `--lab-dir DIR` to choose a different absolute
+path, such as `/srv/ansible-lab`. The installer refuses `/` and paths under
+`/home`, `/root`, `/run/user`, `/tmp`, `/var/tmp` or `/var/lib/semaphore`, which
+the hardened service cannot read. Parent folders must permit traversal by the
+service. The installer checks access to the inventory before seeding.
+
+For example, after reviewing the plan:
+
+```bash
+sudo bash scripts/install-controller.sh --apply --editor "$USER" \
+  --lab-dir /srv/ansible-lab --expose https
+```
+
+Choose this command **or** the earlier default apply command, once on a fresh
+VM. Existing controller state or an existing lab folder is refused. With
+`--expose https`, the installer uses the shared exposure helper to publish nginx
+on port 443 with a self-signed certificate. `--expose http` publishes plain HTTP
+on port 3000. Without either option, application access stays on loopback. See
+[browser access](appendices/browser-access.md#https-on-the-vms-address) for the
+firewall checks and how to return to loopback.
+
+This chapter uses `/opt/ansible-lab` below. If you choose another folder, use
+that path and pass the same `--lab-dir DIR` to `scripts/add-target.sh`.
+
+The seeded Ubuntu installer, its target addition, template runs and all three
+exposure modes were tested live on Azure; see the
+[onboarding and STIG record](validation/2026-09-onboard-stig.md).
 
 ## Manual step 1: inspect the fresh host
 
@@ -124,9 +179,10 @@ existing files and prints no credential values. The access-key encryption key
 must be backed up with the database to recover Key Store credentials.
 
 Git refuses to let the service read a repository owned by another account
-unless the service's Git configuration lists it. The entry above, the same one
-the installer writes, lists only the optional local repository in
+unless the service's Git configuration lists it. The manual entry above
+lists only the optional local repository in
 [chapter 7](07-git-and-vscode.md#optional-a-reviewed-local-repository-on-the-controller).
+The installer instead lists the lab folder selected by `--lab-dir`.
 Appending with `tee -a` keeps the file's `root:semaphore` ownership.
 
 **Check permissions without displaying configuration contents:**
@@ -236,8 +292,10 @@ curl --fail http://127.0.0.1:3000/api/ping
 ```
 
 Expect `passed: true`, active services and HTTP success. This proves application
-readiness, not target access or a successful authenticated job. Complete those
-checks in the next guides.
+readiness, not target access or a successful authenticated job. The installer
+also prints a seeding summary naming the project, inventory file and twelve
+template identifiers. Complete the target checks below for the installer path,
+or in [chapter 4](04-access.md) for the manual path.
 
 ## Open the browser privately
 
@@ -262,7 +320,69 @@ your password manager. The initial password file does not update automatically.
 To reach the UI on the controller's own address instead of through a tunnel,
 see [browser access](appendices/browser-access.md#https-on-the-vms-address):
 `scripts/expose-semaphore.sh --mode https` works after either installation
-path, and `--mode loopback` takes the UI off the network again.
+path, the installer also accepts `--expose https`, and `--mode loopback` takes
+the UI off the network again.
+
+## Installer path: add targets and run the first lesson
+
+The **Ansible Practice** project already exists. Its inventory is the local
+file `/opt/ansible-lab/inventories/lab.ini`, initially empty. Do not recreate
+the project or configure a Git host to run these templates.
+
+Prepare each target's `svc_ansible` account, sudo rule and SSH drop-in using
+steps 2 to 4 of [chapter 4](04-access.md). In step 3, authorize the installer's
+public key, `/etc/semaphore/svc_ansible.pub`. Copy it out on the controller
+first, since your administrator account is deliberately not in the group that
+can read `/etc/semaphore`:
+
+```bash
+sudo cat /etc/semaphore/svc_ansible.pub > ~/svc_ansible.pub
+scp ~/svc_ansible.pub YOUR_ADMIN@ubuntu.example.test:ansible_lab.pub
+```
+
+Chapter 4's key-install command uses that destination name. If you also use
+the chapter's separate terminal key, authorize both public keys on the target;
+the chapter 3b [target setup](03-controller-el9.md#do-add-a-target-without-leaving-the-terminal)
+shows how. Keep the installer's private key in its protected file and Key Store.
+
+On each target's trusted console, read its RSA host-key fingerprint:
+
+```bash
+sudo ssh-keygen -lf /etc/ssh/ssh_host_rsa_key.pub
+```
+
+Then run the helper from the guide checkout on the controller, substituting
+that target's address and fingerprint:
+
+```bash
+sudo bash scripts/add-target.sh --name lab-ubuntu --address ubuntu.example.test \
+  --group ubuntu --fingerprint 'SHA256:REPLACE_WITH_CONSOLE_VALUE'
+```
+
+Use `--group enterprise_linux` for an EL9 target and include `--lab-dir DIR`
+if you chose a custom folder. The helper adds the inventory entry and its
+verified key to `/etc/semaphore/known_hosts`. A fingerprint mismatch or a
+duplicate host is refused without changing either file. Skip chapter 4's step
+6 on this path: it replaces the known-hosts file the helper maintains. RSA host
+keys also support the EL9 vendor STIG's later crypto-policy change.
+
+In Semaphore, run **Ping**. Expect every added target to report its
+distribution, no failed hosts, and job paths under the lab folder without a
+Git clone step. Before running **Baseline preview** or any other template
+using sudo, add the target sudo credential using
+[the seeded project's sudo setup](03-controller-el9.md#do-give-the-templates-the-targets-sudo-password).
+That section covers one shared lab sudo password or encrypted per-target
+passwords, including the service's file permissions. Then run **Baseline
+preview**, inspect it, run **Baseline apply** and repeat the apply to check for
+`changed=0`. Continue with [the lesson checks](06-semaphore.md#step-7-qualify-a-complete-job).
+
+The service reads the current folder contents, including uncommitted edits.
+Back up the inventory before editing it: Git ignores it. Edit playbooks as the
+selected editor account and retain the service's read permissions. To move to
+a real Git repository later, follow
+[chapter 3b's migration section](03-controller-el9.md#do-move-to-a-real-repository-later).
+It explains code promotion and why the inventory stays bound to the local
+folder.
 
 ## Concept
 

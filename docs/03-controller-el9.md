@@ -8,14 +8,14 @@ the `postgresql:16` module stream, which Enterprise Linux 9 provides from
 release 9.4. Run `sudo dnf -y upgrade` and reboot an older image first. RHEL
 must be registered with its BaseOS and AppStream repositories enabled.
 
-This is the Enterprise Linux alternative to the Ubuntu installer. It goes one
-step further: after installing, it seeds Semaphore with a practice project
+This is the Enterprise Linux alternative to the Ubuntu installer. Both
+installers seed Semaphore with a practice project
 whose playbooks live in a **local folder on the controller**, so you can run
 the first lessons before choosing a Git host.
 
 ## Goal
 
-Get from a fresh VM to a Semaphore project with eleven scoped task templates in
+Get from a fresh VM to a Semaphore project with twelve scoped task templates in
 one reviewed run, and understand what the installer decided for you.
 
 ## What the installer creates
@@ -27,11 +27,13 @@ one reviewed run, and understand what the installer decided for you.
 | Application | Semaphore Community 2.19.12, checksum-verified, `127.0.0.1:3000`, hardened `semaphore.service` |
 | Secrets | In `/etc/semaphore` (0750, root and the `semaphore` group): `config.json` (0640, readable by the service), the initial admin password and the `svc_ansible` RSA 4096 private key (root-only), and its public key (0644); no value is printed |
 | Lab folder | `/opt/ansible-lab` owned by you, readable by the service: `ansible.cfg`, the seven playbooks, the report summarizer, an empty `inventories/lab.ini`, a local Git history with a `.gitignore` that keeps `inventories/`, `host_vars/` and `group_vars/` untracked |
-| Semaphore objects | Project **Ansible Practice**; keys **None** and **Practice target SSH**; repository **Local lab folder**; inventory **Lab inventory file**; variable groups **Practice defaults** and **Allow required reboot**; eleven templates: Ping; Baseline preview; Baseline apply; Users; Webserver; Patch preview; Patch, no reboot; Patch, allow required reboot; STIG audit (vendor scan only); STIG apply (vendor fixes, approval required); STIG apply, allow required reboot |
+| Semaphore objects | Project **Ansible Practice**; keys **None** and **Practice target SSH**; repository **Local lab folder**; inventory **Lab inventory file**; variable groups **Practice defaults**, **Allow required reboot** and **Local SCAP content**; twelve templates: Ping; Baseline preview; Baseline apply; Users; Webserver; Patch preview; Patch, no reboot; Patch, allow required reboot; STIG audit (vendor scan only); STIG apply (vendor fixes, approval required); STIG apply, allow required reboot; STIG audit, local SCAP content |
 
 Every lesson template sets its **Ansible options → Limit** to `lab`, the
 explicit limit the playbooks' preflight requires. The two STIG apply templates
-have no default limit: their Run dialog asks for exactly one host. The two
+have no default limit: their Run dialog asks for exactly one host. The local
+SCAP content audit has none either: its Run dialog asks for the hosts its
+content file is written for. The two
 preview templates add `--check --diff` as CLI arguments. Only the templates
 whose names end in “allow required reboot” receive `allow_reboot: true`. The
 patch template then reboots only when the operating system reports that it
@@ -71,7 +73,7 @@ The rest of this chapter uses the default `/opt/ansible-lab`. If you chose
 
 **Check:** the run ends with the readiness JSON from `check-controller.py`
 reporting `"passed": true`, followed by the seeding summary naming the project,
-the inventory file and eleven template identifiers. Then:
+the inventory file and twelve template identifiers. Then:
 
 ```bash
 sudo systemctl is-active postgresql semaphore
@@ -256,7 +258,7 @@ shown above before Semaphore can read them.
 
 ## Do: the vendor STIG lessons
 
-The three seeded STIG templates are optional. The audit changes no security
+The four seeded STIG templates are optional. The audit changes no security
 policy; the two apply templates do. Do not run them while learning the
 installation. They are
 described in [chapter 9](09-security-benchmarks.md#the-seeded-stig-templates),
