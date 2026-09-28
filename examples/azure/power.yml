@@ -1,0 +1,55 @@
+---
+# Deallocate or start the targets (and the controller with include_controller=true).
+# Usage: -e azure_power=deallocated  or  -e azure_power=running
+- name: Change and verify the power state of the lab VMs
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars.yml
+  vars:
+    # Use the virtual environment that holds the Azure SDK, not the system Python.
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+    azure_required_vars: [azure_subscription_id, azure_targets]
+    include_controller: false
+    lab_vm_names: "{{ (azure_targets | map(attribute='name') | list) + ([azure_controller.name] if include_controller | bool else []) }}"
+  module_defaults:
+    group/azure.azcollection.all:
+      subscription_id: "{{ azure_subscription_id }}"
+      auth_source: cli
+  tasks:
+    - name: Check the variables
+      ansible.builtin.import_tasks: tasks-preflight.yml
+
+    - name: Require an explicit target state
+      ansible.builtin.assert:
+        that:
+          - azure_power is defined
+          - azure_power in ['deallocated', 'running']
+        fail_msg: Pass -e azure_power=deallocated or -e azure_power=running.
+        quiet: true
+
+    - name: Deallocate or start each VM
+      azure.azcollection.azure_rm_virtualmachine:
+        resource_group: "{{ azure_resource_group }}"
+        name: "{{ item }}"
+        allocated: "{{ azure_power == 'running' }}"
+        started: "{{ azure_power == 'running' }}"
+      loop: "{{ lab_vm_names }}"
+
+    - name: Read the power state Azure reports
+      azure.azcollection.azure_rm_virtualmachine_info:
+        resource_group: "{{ azure_resource_group }}"
+        name: "{{ item }}"
+      loop: "{{ lab_vm_names }}"
+      register: azure_power_info
+
+    - name: Check that every VM reached the requested state
+      ansible.builtin.assert:
+        that:
+          - item.vms[0].power_state == azure_power
+        fail_msg: "{{ item.item }} reports {{ item.vms[0].power_state }}, not {{ azure_power }}."
+        success_msg: "{{ item.item }}: {{ item.vms[0].power_state }}"
+      loop: "{{ azure_power_info.results }}"
+      loop_control:
+        label: "{{ item.item }}"

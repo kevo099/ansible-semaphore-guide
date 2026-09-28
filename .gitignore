@@ -32,3 +32,7 @@ backups/
 *.log
 *.retry
 .DS_Store
+
+# Private values for the Azure examples.
+examples/azure/vars.yml
+examples/azure/files/

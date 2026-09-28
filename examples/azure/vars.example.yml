@@ -1,0 +1,41 @@
+---
+# Copy to vars.yml, which Git ignores, and replace every REPLACE_ value.
+# The playbooks refuse to run while any REPLACE_ value remains.
+azure_subscription_id: REPLACE_WITH_SUBSCRIPTION_ID
+azure_location: eastus2
+azure_resource_group: rg-ansible-lab
+azure_tags:
+  purpose: ansible-semaphore-guide
+  owner: REPLACE_WITH_YOUR_NAME
+  expires: REPLACE_WITH_DATE
+
+azure_vnet_name: vnet-ansible-lab
+azure_vnet_prefix: REPLACE_WITH_PRIVATE_PREFIX         # for example a /16 you do not use elsewhere
+azure_subnet_name: snet-ansible-lab
+azure_subnet_prefix: REPLACE_WITH_SUBNET_PREFIX        # a /24 inside azure_vnet_prefix
+
+# Where SSH to the targets may come from: your controller's address or prefix.
+azure_target_ssh_source: REPLACE_WITH_CONTROLLER_PREFIX
+
+azure_vm_size: Standard_D2als_v6
+azure_admin_user: azadmin
+azure_admin_public_key_file: ~/.ssh/azure_bootstrap.pub   # bootstrap administrator, your workstation key
+azure_automation_public_key_file: files/ansible_lab.pub     # copy of the controller's ~/.ssh/ansible_lab.pub
+
+azure_targets:
+  - name: lab-ubuntu
+    private_ip: REPLACE_WITH_ADDRESS_IN_SUBNET
+    family: ubuntu
+    image: {publisher: Canonical, offer: ubuntu-24_04-lts, sku: server, version: latest}
+  - name: lab-alma
+    private_ip: REPLACE_WITH_ADDRESS_IN_SUBNET
+    family: el
+    image: {publisher: almalinux, offer: almalinux-x86_64, sku: 9-gen2, version: latest}
+
+# Optional: a controller VM in Azure (controller.yml). It is the only VM with a
+# public address, and its SSH is open to operator_cidr alone.
+azure_controller:
+  name: lab-controller
+  private_ip: REPLACE_WITH_ADDRESS_IN_SUBNET
+  operator_cidr: REPLACE_WITH_YOUR_PUBLIC_ADDRESS_PREFIX
+  image: {publisher: Canonical, offer: ubuntu-24_04-lts, sku: server, version: latest}

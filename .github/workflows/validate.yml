@@ -22,9 +22,12 @@ jobs:
         run: python scripts/validate.py
       - name: Run the offline unit tests
         run: python -m unittest discover -s tests -v
+      - name: Install the pinned Azure collection for the Azure examples (no SDK needed to check them)
+        run: ansible-galaxy collection install -r examples/azure/requirements.yml
       - name: Check all lesson and example playbooks
         run: |
-          for playbook in playbooks/*.yml examples/semaphore/*.yml; do
+          for playbook in playbooks/*.yml examples/*.yml examples/semaphore/*.yml \
+              examples/azure/{network,controller,targets,power,remove}.yml; do
             ansible-playbook -i inventories/lab.ini.example --syntax-check "$playbook"
           done
           ansible-lint --offline playbooks/ examples/
