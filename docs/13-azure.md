@@ -401,6 +401,50 @@ Without a hash the script keeps an existing password, and a new account has
 none: its output then says `password: NOT SET`, and sudo waits until you set
 one this way or with the bootstrap playbook.
 
+## Do: generate the controller inventory command
+
+**Where: the target VM's Azure Run Command → RunShellScript.** After preparing
+the target, paste the whole
+[`examples/onboard/inventory-info.sh`](../examples/onboard/inventory-info.sh)
+file into Run Command. It only reads the VM's hostname, OS, local IPv4 addresses,
+RSA host public key, account status and sudo validation result.
+
+Set `CONTROLLER_ADDRESS` at the top to the controller's IP. The collector selects
+the target's source address for that route; this does not send a network probe.
+If you leave it empty, the VM must have exactly one global-scope IPv4 address.
+For multiple addresses you can instead set `TARGET_ADDRESS` explicitly; it must
+belong to this VM. `INVENTORY_NAME` defaults to the short hostname, and `LAB_DIR`
+is the controller's seeded lab folder, `/opt/ansible-lab` by default.
+
+The output ends with a complete block beginning with `sudo python3` and ending
+with `ADD_ANSIBLE_TARGET`. Copy that entire block into the **controller's**
+terminal. It needs no guide checkout. It:
+
+- checks that the existing inventory has the target's OS group and includes
+  that group under `[lab:children]`;
+- connects to target SSH on port 22, compares its RSA fingerprint with the one
+  read through authenticated Run Command, and refuses a mismatch;
+- refuses conflicting inventory entries or an existing different RSA host key;
+- backs up each file it changes with a `.before-add-TIMESTAMP` suffix, adds
+  the inventory entry, and records the verified key in
+  `/etc/semaphore/known_hosts`, preserving the original files' permissions.
+
+Repeating an unchanged successful add does not add duplicates or new backups.
+This updates the seeded **local file inventory**; a Static inventory saved in
+Semaphore or an inventory fetched from Git is a separate source.
+
+The collector prints warnings if the automation account, password, authorized
+keys or sudo validation is incomplete. Generating an inventory command does not
+prove onboarding or connectivity. Resolve those warnings, select the SSH and
+sudo credentials in Semaphore, and run **Ping** and **Baseline preview** with
+the template's Limit set to this host. The script prints no password, password
+hash or private key.
+
+The output is capped below Azure action Run Command's last 4 KB limit.
+The collector and generated command have offline tests with temporary inventory
+files and simulated SSH scans; a live Azure/controller run of this helper has
+not been established.
+
 ## Check: the same three layers, then the lessons
 
 Run [chapter 4, step 5](04-access.md#step-5-test-all-three-layers) against each
