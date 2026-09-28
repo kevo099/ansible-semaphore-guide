@@ -499,6 +499,36 @@ class LabFolderTests(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in self.outside.iterdir()), ["private.yml"])
 
 
+class ReadinessTests(unittest.TestCase):
+    def test_only_new_failures_are_errors(self):
+        nginx = "nginx_listens_only_where_expected"
+        cases = [
+            ([], [], ("passed", [])),
+            ([nginx], [nginx], ("unchanged", [nginx])),
+            ([nginx, "x"], [nginx], ("unchanged", [nginx])),
+            ([], ["x"], ("new", ["x"])),
+            ([nginx], [nginx, "x"], ("new", ["x"])),
+        ]
+        for before, after, expected in cases:
+            with self.subTest(before=before, after=after):
+                self.assertEqual(updater.readiness_outcome(before, after), expected)
+
+    def test_known_failures_come_with_their_fix(self):
+        self.assertIn("expose-semaphore.sh --mode https", updater.readiness_hint("nginx_listens_only_where_expected"))
+        self.assertIn("chmod 0640", updater.readiness_hint("service_can_read_known_hosts"))
+        self.assertEqual(updater.readiness_hint("semaphore_bind_matches_exposure_https"), updater.EXPOSURE_HINT)
+        self.assertIn("check-controller.py", updater.readiness_hint("http_ping"))
+
+    def test_the_report_is_read_from_the_check_output(self):
+        report = json.dumps({"passed": False, "checks": {"http_ping": True, "port_443_listening": False}})
+        with mock.patch.object(updater, "run_check",
+                               return_value=subprocess.CompletedProcess([], 1, stdout=report, stderr="")):
+            self.assertEqual(updater.failing_readiness(), ["port_443_listening"])
+        with mock.patch.object(updater, "run_check",
+                               return_value=subprocess.CompletedProcess([], 1, stdout="Traceback", stderr="")):
+            self.assertEqual(updater.failing_readiness(), ["readiness_check_did_not_report"])
+
+
 class UpdateScriptTests(unittest.TestCase):
     def run_script(self, *arguments):
         return subprocess.run(["/bin/bash", str(ROOT / "scripts" / "update-controller.sh"), *arguments],

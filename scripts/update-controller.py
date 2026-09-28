@@ -375,6 +375,51 @@ def manifest_for(repo, files, version):
                        indent=2, sort_keys=True) + "\n").encode()
 
 
+# How to fix readiness checks that fail for reasons the update does not touch.
+READINESS_HINTS = {
+    "nginx_listens_only_where_expected": (
+        "nginx also listens on a port other than 443, usually the package's default site on port 80, "
+        "which the exposure script left in place before 24 September 2026. Fix it with: "
+        "sudo bash scripts/expose-semaphore.sh --mode https (it keeps your certificate)"),
+    "service_can_read_known_hosts": (
+        "the semaphore account cannot read /etc/semaphore/known_hosts. Fix it with: "
+        "sudo chown root:semaphore /etc/semaphore/known_hosts; sudo chmod 0640 /etc/semaphore/known_hosts"),
+}
+EXPOSURE_HINT = ("Semaphore's address or proxy does not match /etc/semaphore/exposure. Run "
+                 "sudo bash scripts/expose-semaphore.sh --mode MODE with the mode you use: https, http or loopback")
+
+
+def readiness_hint(name):
+    if name in READINESS_HINTS:
+        return READINESS_HINTS[name]
+    if name.startswith(("semaphore_bind_matches_exposure_", "port_3000_", "port_443_", "nginx_tls_")):
+        return EXPOSURE_HINT
+    return "see the full report: sudo python3.12 scripts/check-controller.py"
+
+
+def failing_readiness():
+    """Names of the readiness checks that fail now."""
+    result = run_check(["python3.12", str(HERE / "check-controller.py")])
+    try:
+        checks = json.loads(result.stdout)["checks"]
+        return sorted(name for name, passed in checks.items() if not passed)
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return ["readiness_check_did_not_report"]
+
+
+def readiness_outcome(before, after):
+    """'new' failures stop with an error; failures the update found already are only reported."""
+    new = [name for name in after if name not in before]
+    if new:
+        return "new", new
+    return ("unchanged", after) if after else ("passed", [])
+
+
+def show_readiness(names):
+    for name in names:
+        print(f"    {name}: {readiness_hint(name)}")
+
+
 def show(title, items):
     print(f"  {title}: {len(items)}")
     for item in items:
@@ -454,6 +499,13 @@ def main():
         print(f"  Problem: {problem}")
     if args.apply and problems:
         raise SystemExit("Nothing was changed. Resolve the problems above and run again.")
+    readiness_before = failing_readiness()
+    if readiness_before:
+        print(f"Readiness before the update: {len(readiness_before)} check(s) fail already. "
+              "The update does not change them; fix them separately:")
+        show_readiness(readiness_before)
+    else:
+        print("Readiness before the update: every check passes.")
 
     seeder = load_seeder()
     client = seeder.Client(seeder.API, os.environ.get("SEMAPHORE_API_TOKEN") or None)
@@ -516,9 +568,16 @@ def main():
                              f"git commit -m \"Update the guide's files to {version}\" -- " + " ".join(changed))
         print(f"Committed {len(changed)} file(s) in {root}; git revert HEAD there undoes them.")
 
-    check = run_check(["python3.12", str(HERE / "check-controller.py")])
-    if check.returncode != 0:
-        raise SystemExit("The readiness check failed; run sudo python3.12 scripts/check-controller.py to see why.")
+    outcome, names = readiness_outcome(readiness_before, failing_readiness())
+    if outcome == "new":
+        print(f"The update to {version} finished, but these readiness checks fail now and did not before:")
+        show_readiness(names)
+        raise SystemExit("To see the full report, run this command: sudo python3.12 scripts/check-controller.py")
+    if outcome == "unchanged":
+        print(f"Updated to {version}. These readiness checks failed before the update too; the update did "
+              "not cause them:")
+        show_readiness(names)
+        return 0
     print(f"Updated to {version}. The readiness check passed.")
     return 0
 
