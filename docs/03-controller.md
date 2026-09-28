@@ -403,11 +403,14 @@ Without options it only shows its plan. For each guide file in the lab folder
 (`playbooks/`, `ansible.cfg` and the report summarizer) it compares three
 versions: yours, the guide's version you last installed, and the new one.
 
-- A file only the new release changed is updated.
+- A file only the new release changed is updated, and a file it no longer
+  ships is removed if you never changed it.
 - A file only you changed is kept as it is.
-- A file both changed stops the update; compare the two and decide.
-  `--replace-edited` replaces your version, and the folder's Git history keeps it.
-- Files you added are never touched.
+- Anything both changed stops the update: a file you and the release both
+  changed, a file you changed that the release removes, or a file of yours at a
+  path the release now uses. Compare them and decide; `--replace-edited` takes
+  the release's version, and the folder's Git history keeps yours.
+- Other files you added are never touched.
 
 The plan also lists whether `content/` would be created for SCAP files you
 supply, and the Semaphore variable groups, template tabs and templates it would
@@ -419,17 +422,22 @@ sudo bash scripts/update-controller.sh --apply
 ```
 
 It changes nothing when the lab folder has staged changes, uncommitted changes
-to guide files, a link where a guide file or folder belongs, or files that both
-changed. It then logs in to Semaphore and checks the project before changing
-anything. In Semaphore it only adds what the project lacks, and puts a seeded
+to guide files, a link where a guide file or folder belongs, files that both
+changed, or no `.guide-files.json` after an earlier update removed it; it then
+says how to restore that file from Git. It also refuses to run twice at once.
+It then logs in to Semaphore and checks the project before changing anything;
+only templates bound to the lab folder's repository and inventory count as
+seeded, so a template of yours with the same name is left alone. In Semaphore it only adds what the project lacks, and puts a seeded
 template that has no tab on its tab. Before that it saves every template to a
 root-only file under `/root/ansible-lab-update/`, and it checks each template
 afterwards, putting it back if Semaphore changed any other setting. It never
 changes Semaphore itself, the database, Ansible, the inventory or keys, and a
 template you put on another tab keeps it.
 
-Last, it writes the files as the lab folder's owner, so the `semaphore` group
-can still read them, restores SELinux labels on Enterprise Linux, and commits
+Last, it checks that the lab folder is exactly as planned; if you edited a
+guide file meanwhile, it stops without touching the folder, and a second run
+picks up from there. It writes the files as the lab folder's owner, so the
+`semaphore` group can still read them, restores SELinux labels on Enterprise Linux, and commits
 them in the folder's Git history with `.guide-files.json`, the record of the
 guide's own versions that the next update compares with; `git revert HEAD` in
 the folder undoes that commit. It finishes with the readiness check, and a
