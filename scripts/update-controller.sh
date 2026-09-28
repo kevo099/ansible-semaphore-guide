@@ -23,8 +23,9 @@ did not commit; commit or discard that edit first.
 
   --lab-dir DIR   The lab folder (default: /opt/ansible-lab).
 
-The default is a read-only plan. If the installer's admin password no longer
-logs in, export SEMAPHORE_API_TOKEN with an API token and run it with
+The default is a read-only plan. If the installer's admin password was changed
+in the UI, it asks for a Semaphore administrator's login and password. Without a
+terminal, export SEMAPHORE_API_TOKEN with an API token instead and run it with
 sudo --preserve-env=SEMAPHORE_API_TOKEN.
 USAGE
 }

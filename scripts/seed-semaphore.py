@@ -14,6 +14,7 @@ their tab. It changes nothing else. --plan shows what an update would do.
 
 import argparse
 import copy
+import getpass
 import http.cookiejar
 import json
 import os
@@ -210,18 +211,34 @@ def wait_ready(client):
     raise SystemExit("Semaphore did not answer /api/ping")
 
 
-def log_in(client, admin_login):
-    """Use SEMAPHORE_API_TOKEN when set; otherwise the installer's admin password."""
+def log_in(client, admin_login, ask=False):
+    """Use SEMAPHORE_API_TOKEN when set, otherwise the installer's admin password.
+
+    With ask, a password that no longer works (changed in the UI) is asked for at
+    the terminal, without echo; it is sent only to Semaphore on loopback.
+    """
     if client.token:
         client.call("GET", "/user")
         return
     password = Path("/etc/semaphore/initial-admin-password").read_text().strip()
     try:
         client.call("POST", "/auth/login", {"auth": admin_login, "password": password})
+        return
     except SystemExit:
-        raise SystemExit("The installer's admin password no longer logs in. Create an API token "
-                         "in the UI (your account menu, API Tokens) and run again with "
-                         "SEMAPHORE_API_TOKEN set to it.") from None
+        if not (ask and sys.stdin.isatty()):
+            raise SystemExit("The installer's admin password no longer logs in. Run this from a terminal "
+                             "to be asked for a Semaphore administrator's login and password, or set "
+                             "SEMAPHORE_API_TOKEN to an API token.") from None
+    print("The installer's admin password no longer logs in (it was changed in the UI).", file=sys.stderr)
+    try:
+        login = input(f"Semaphore administrator login [{admin_login}]: ").strip() or admin_login
+        password = getpass.getpass("Password: ")
+    except (EOFError, KeyboardInterrupt):
+        raise SystemExit("\nNo login given; nothing was changed.") from None
+    try:
+        client.call("POST", "/auth/login", {"auth": login, "password": password})
+    except SystemExit:
+        raise SystemExit("That login and password did not work; nothing was changed.") from None
 
 
 def by_name(items, field="name"):
@@ -292,7 +309,7 @@ def main():
             raise SystemExit("This controller was not seeded by the installer; there is no project to update")
         client = Client(API, os.environ.get("SEMAPHORE_API_TOKEN") or None)
         wait_ready(client)
-        log_in(client, args.admin_login)
+        log_in(client, args.admin_login, ask=True)
         update(client, args)
         return 0
     if args.plan:
