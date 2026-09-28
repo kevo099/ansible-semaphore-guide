@@ -1,5 +1,6 @@
 """Offline controller workflow tests: SSH is simulated; ssh-keygen is real."""
 
+import base64
 import contextlib
 import importlib.util
 import io
@@ -39,7 +40,8 @@ class InteractiveTests(unittest.TestCase):
         self.key = self.root / 'service_key'
         self.key.write_text('fixture: SSH is mocked, this is not a private key\n')
         self.key.chmod(0o600)
-        self.args = SimpleNamespace(lab_dir=self.root, known_hosts=self.trust, key=self.key)
+        self.args = SimpleNamespace(lab_dir=self.root, known_hosts=self.trust, key=self.key,
+                                    trust_on_first_use=False)
         self.scan = f'{ADDRESS} {PUB1}\n'
         self.info = {'hostname': 'new-host', 'id': 'ubuntu', 'version': '24.04'}
         self.ssh_status = 0
@@ -100,6 +102,48 @@ class InteractiveTests(unittest.TestCase):
         self.assertEqual(len(list(self.root.rglob('*.before-add-*'))), 2)
         self.assertEqual(self.inventory.read_text().count('new-host '), 1)
         self.assertEqual(len(self.ssh_calls), 2)
+
+    def test_first_use_mode_adds_without_a_fingerprint_prompt(self):
+        self.args.trust_on_first_use = True
+        output = self.execute([ADDRESS, '', 'y'])
+        self.assertIn('trust on first use', output)
+        self.assertIn(FP1, output)
+        self.assertNotIn('Paste that', output)
+        self.assertIn(f'new-host ansible_host={ADDRESS}', self.inventory.read_text())
+        self.assertTrue(self.trust.read_text().endswith(self.scan))
+        self.assertEqual(len(self.ssh_calls), 1)
+
+    def test_first_use_mode_still_refuses_existing_changed_keys(self):
+        self.args.trust_on_first_use = True
+        self.trust.write_text(self.trust.read_text() + f'{ADDRESS} {PUB2}\n')
+        self.original[self.trust] = self.trust.read_bytes()
+        with self.assertRaisesRegex(HELPER.Stop, 'differs from existing trust'):
+            self.execute([ADDRESS])
+        self.assertFalse(self.ssh_calls)
+        self.unchanged()
+
+    def test_first_use_mode_does_not_bypass_existing_other_key_type(self):
+        self.args.trust_on_first_use = True
+        blob = b'\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20' + bytes([1]) * 32
+        public = 'ssh-ed25519 ' + base64.b64encode(blob).decode()
+        self.trust.write_text(f'{ADDRESS} {public}\n')
+        self.original[self.trust] = self.trust.read_bytes()
+        with self.assertRaisesRegex(HELPER.Stop, 'another host-key type'):
+            self.execute([ADDRESS])
+        self.assertFalse(self.ssh_calls)
+        self.unchanged()
+
+    def test_first_use_mode_failed_login_saves_nothing(self):
+        self.args.trust_on_first_use = True
+        self.ssh_status = 255
+        with self.assertRaisesRegex(HELPER.Stop, 'SSH probe failed'):
+            self.execute([ADDRESS])
+        self.unchanged()
+
+    def test_first_use_mode_cancel_saves_nothing(self):
+        self.args.trust_on_first_use = True
+        self.execute([ADDRESS, '', 'n'])
+        self.unchanged()
 
     def test_enterprise_linux_and_operator_alias(self):
         self.info.update(id='rhel', version='9.8')

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Add one prepared target to a seeded controller's local inventory over verified SSH."""
+"""Add one prepared target to a seeded controller's local inventory over SSH with saved host trust."""
 
 import argparse
 from contextlib import ExitStack
@@ -81,7 +81,7 @@ def fingerprint(line):
     return result.stdout.split()[1]
 
 
-def verified_key(address, trust):
+def select_host_key(address, trust, trust_on_first_use=False):
     print(f'Checking SSH on {address}:22 ...')
     scan = run(['ssh-keyscan', '-T', '5', '-t', 'rsa', '--', address])
     keys = set()
@@ -106,6 +106,13 @@ def verified_key(address, trust):
             trusted = True
     if trusted:
         print('RSA host key matches the controller\'s existing trusted entry.')
+    elif trust_on_first_use:
+        require(not existing,
+                'Existing trust uses another host-key type. Run without --trust-on-first-use '
+                'to verify the RSA fingerprint through the target console.')
+        print('First connection: accepting the RSA host key received from this IP (trust on first use).')
+        print(f'RSA fingerprint: {scanned}')
+        print('This key will be saved only after SSH succeeds and you confirm the inventory entry.')
     else:
         print('First connection: read the RSA fingerprint through the target console or Azure Run Command:')
         print('  ssh-keygen -l -E sha256 -f /etc/ssh/ssh_host_rsa_key.pub')
@@ -117,7 +124,7 @@ def verified_key(address, trust):
 
 
 def inspect_target(address, key, private_key):
-    # Pin the verified key in an isolated file while probing. Permanent trust is
+    # Pin the selected key in an isolated file while probing. Permanent trust is
     # updated only after both SSH authentication and the inventory checks pass.
     with tempfile.TemporaryDirectory(prefix='ansible-target-') as folder:
         pinned = Path(folder) / 'known_hosts'
@@ -238,7 +245,7 @@ def add_target(args):
         handles = {path: lock_file(stack, path) for path in (inventory, trust)}
         original = {path: handle.read() for path, handle in handles.items()}
         address = ipv4(input('Target IPv4 address: ').strip())
-        key, already_trusted = verified_key(address, trust)
+        key, already_trusted = select_host_key(address, trust, args.trust_on_first_use)
         name, group = inspect_target(address, key, private_key)
         print(f'SSH login succeeded. Detected {name} in group [{group}].')
         name = hostname(input(f'Inventory name [{name}]: ').strip() or name)
@@ -264,6 +271,8 @@ def main(argv=None):
     parser.add_argument('--lab-dir', type=Path, default=Path('/opt/ansible-lab'))
     parser.add_argument('--known-hosts', type=Path, default=Path('/etc/semaphore/known_hosts'))
     parser.add_argument('--key', type=Path, default=Path('/etc/semaphore/svc_ansible'))
+    parser.add_argument('--trust-on-first-use', action='store_true',
+                        help='accept a new RSA host key without a console fingerprint; still reject changed keys')
     args = parser.parse_args(argv)
     try:
         require(os.geteuid() == 0, 'Run with sudo python3: the controller service files are root-owned.')

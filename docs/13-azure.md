@@ -417,9 +417,25 @@ packages beyond the standard library:
 curl -fsSL -o ~/add-ansible-target.py https://raw.githubusercontent.com/kevo099/ansible-semaphore-guide/main/scripts/add-target-interactive.py && sudo python3 ~/add-ansible-target.py
 ```
 
+For an already-onboarded VM on a network you trust, you can instead accept its
+first RSA key automatically and complete the controller setup without another
+visit to the target console:
+
+```bash
+sudo python3 ~/add-ansible-target.py --trust-on-first-use
+```
+
+In this mode, enter the IP, accept or change the detected name, and confirm the
+entry. The helper displays the received fingerprint for reference but does not
+ask you to copy one. It still tests SSH login before saving anything, and an
+existing different RSA key is always refused. Existing trust using another
+host-key type requires the default console-verification mode. First-use trust accepts the key
+received from the network; it does not independently establish the target's
+identity. The default mode above keeps the console fingerprint check.
+
 1. Enter the target's reachable **IPv4 address**. It connects only to that IP on
    SSH port 22; it does not scan the subnet.
-2. If the controller does not already trust its RSA host key, the helper asks
+2. In default mode, if the controller does not already trust its RSA host key, the helper asks
    for the `SHA256:...` fingerprint. Read it on the **target** using its console
    or Azure Run Command and paste just the fingerprint:
 
@@ -465,7 +481,7 @@ check: select the appropriate sudo credential (Username empty) and run
 **Baseline preview**. No sudo password, credential, policy or template is
 changed by this helper.
 
-The interactive flow, strict SSH options, trust matching, failures, backups,
+The interactive flow, strict SSH options, both first-connection trust modes, failures, backups,
 repeat runs and rollback are covered by offline tests. SSH scans and remote
 responses are simulated; a live controller/target run has not been established.
 
