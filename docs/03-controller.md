@@ -399,34 +399,43 @@ cd ~/guide-new
 sudo bash scripts/update-controller.sh
 ```
 
-Without options it only shows its plan. The plan lists:
+Without options it only shows its plan. For each guide file in the lab folder
+(`playbooks/`, `ansible.cfg` and the report summarizer) it compares three
+versions: yours, the guide's version you last installed, and the new one.
 
-- the guide files in the lab folder it would add or replace (`playbooks/`,
-  `ansible.cfg` and the report summarizer);
-- the files you added under `playbooks/`, which it keeps;
-- whether `content/` would be created for SCAP files you supply;
-- the Semaphore variable groups, template tabs and templates it would add, and
-  the seeded templates it would put on a tab.
+- A file only the new release changed is updated.
+- A file only you changed is kept as it is.
+- A file both changed stops the update; compare the two and decide.
+  `--replace-edited` replaces your version, and the folder's Git history keeps it.
+- Files you added are never touched.
 
-When the plan is what you expect, apply it:
+The plan also lists whether `content/` would be created for SCAP files you
+supply, and the Semaphore variable groups, template tabs and templates it would
+add, with the seeded templates it would put on a tab. When the plan is what you
+expect, apply it:
 
 ```bash
 sudo bash scripts/update-controller.sh --apply
 ```
 
-It writes each file as the lab folder's owner, so the `semaphore` group can
-still read it, restores SELinux labels on Enterprise Linux, and records the
-file changes as one commit in the folder's Git history; `git revert` in the
-folder undoes them. In Semaphore it only adds what the project lacks: it never
-changes Semaphore itself, the database, Ansible, the inventory, keys, or a
-template that exists, apart from putting a seeded template that has no tab on
-its tab. A template you put on another tab keeps it. It finishes with the
-readiness check, and a second run reports nothing to do. With a different lab
-folder, add the same `--lab-dir DIR` the installer used.
+It changes nothing when the lab folder has staged changes, uncommitted changes
+to guide files, a link where a guide file or folder belongs, or files that both
+changed. It then logs in to Semaphore and checks the project before changing
+anything. In Semaphore it only adds what the project lacks, and puts a seeded
+template that has no tab on its tab. Before that it saves every template to a
+root-only file under `/root/ansible-lab-update/`, and it checks each template
+afterwards, putting it back if Semaphore changed any other setting. It never
+changes Semaphore itself, the database, Ansible, the inventory or keys, and a
+template you put on another tab keeps it.
 
-It refuses to overwrite a guide file you edited and did not commit. Commit that
-edit in the lab folder, or discard it with `git restore`, and run it again. A
-committed edit is replaced, and stays in the folder's history.
+Last, it writes the files as the lab folder's owner, so the `semaphore` group
+can still read them, restores SELinux labels on Enterprise Linux, and commits
+them in the folder's Git history with `.guide-files.json`, the record of the
+guide's own versions that the next update compares with; `git revert HEAD` in
+the folder undoes that commit. It finishes with the readiness check, and a
+second run reports nothing to do. With a different lab folder, add the same
+`--lab-dir DIR` the installer used. If several projects share the seeded
+project's name, pass `--project-id` with its ID.
 
 If you changed the administrator's password in the UI, the stored installer
 password no longer works, and it asks for a Semaphore administrator's login and
