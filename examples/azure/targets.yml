@@ -1,6 +1,7 @@
 ---
-# Target VMs with private addresses only. cloud-init creates svc_ansible with the
-# controller's automation public key; sudo is configured later (chapter 4).
+# Target VMs with private addresses only. At first boot, ../onboard/cloud-init.yaml
+# creates svc_ansible with the controller's automation public key, its sudoers
+# rule and SSH drop-in; its sudo password is set afterwards (chapter 13).
 - name: Create Azure target VMs
   hosts: localhost
   connection: local
@@ -12,6 +13,11 @@
     ansible_python_interpreter: "{{ ansible_playbook_python }}"
     azure_required_vars: [azure_subscription_id, azure_tags, azure_targets]
     automation_public_key: "{{ lookup('ansible.builtin.file', azure_automation_public_key_file) }}"
+    # The same file you would paste into the portal, with its quoted placeholder
+    # replaced by the key as a JSON string, which is valid YAML whatever the key's comment holds.
+    cloud_init_template: "{{ lookup('ansible.builtin.file', '../onboard/cloud-init.yaml') }}"
+    cloud_init_data: >-
+      {{ cloud_init_template | replace('"REPLACE_WITH_AUTOMATION_PUBLIC_KEY"', automation_public_key | to_json) }}
   module_defaults:
     group/azure.azcollection.all:
       subscription_id: "{{ azure_subscription_id }}"
@@ -26,6 +32,24 @@
           - automation_public_key is match('^(ssh-rsa|ssh-ed25519|ecdsa-sha2-nistp[0-9]+) [A-Za-z0-9+/=]+( .*)?$')
           - "'PRIVATE KEY' not in automation_public_key"
         fail_msg: azure_automation_public_key_file must be the automation key's .pub file.
+        quiet: true
+
+    - name: Keep svc_ansible for automation only
+      ansible.builtin.assert:
+        that:
+          - azure_admin_user != 'svc_ansible'
+        fail_msg: >-
+          Choose another azure_admin_user. cloud-init gives the administrator
+          passwordless sudo, which would bypass svc_ansible's password.
+        quiet: true
+
+    - name: Check that the key replaced the cloud-init placeholder
+      ansible.builtin.assert:
+        that:
+          - cloud_init_template.count('"REPLACE_WITH_AUTOMATION_PUBLIC_KEY"') == 1
+          - "'\"REPLACE_WITH_AUTOMATION_PUBLIC_KEY\"' not in cloud_init_data"
+          - (cloud_init_data | from_yaml)['users'][1]['ssh_authorized_keys'] == [automation_public_key]
+        fail_msg: ../onboard/cloud-init.yaml must contain the quoted key placeholder exactly once.
         quiet: true
 
     - name: Target network interfaces (no public address)
@@ -45,7 +69,7 @@
       loop_control:
         label: "{{ item.name }}"
 
-    - name: Target VMs with cloud-init
+    - name: Target VMs with the onboarding cloud-init
       azure.azcollection.azure_rm_virtualmachine:
         resource_group: "{{ azure_resource_group }}"
         name: "{{ item.name }}"
@@ -61,7 +85,7 @@
         managed_disk_type: StandardSSD_LRS
         os_disk_size_gb: 40
         os_disk_delete_option: Delete
-        custom_data: "{{ lookup('ansible.builtin.template', 'templates/cloud-init-' ~ item.family ~ '.yaml.j2') }}"
+        custom_data: "{{ cloud_init_data }}"
         tags: "{{ azure_tags }}"
       loop: "{{ azure_targets }}"
       loop_control:

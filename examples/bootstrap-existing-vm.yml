@@ -165,6 +165,9 @@
               - "'authenticationmethods publickey' in bootstrap_sshd_policy.stdout_lines"
               - "'passwordauthentication no' in bootstrap_sshd_policy.stdout_lines"
               - "'kbdinteractiveauthentication no' in bootstrap_sshd_policy.stdout_lines"
+              - "'pubkeyauthentication yes' in bootstrap_sshd_policy.stdout_lines"
+              - >-
+                bootstrap_sshd_policy.stdout is search('(?m)^authorizedkeysfile (.* )?(%h/)?\\.ssh/authorized_keys( |$)')
             fail_msg: Another SSH setting overrides the svc_ansible policy; resolve it before reloading SSH.
             quiet: true
 
@@ -216,10 +219,14 @@
       ansible.builtin.assert:
         that:
           - "'(ALL : ALL) ALL' in bootstrap_sudo_rights.stdout"
+          - "'NOPASSWD' not in bootstrap_sudo_rights.stdout"
+          - "'!authenticate' not in bootstrap_sudo_rights.stdout"
+          - bootstrap_sudo_rights.stdout is not search('(^|[\\s,])(rootpw|targetpw|runaspw)([\\s,]|$)', multiline=True)
           - bootstrap_sudo_nopass.rc != 0
         fail_msg: >-
-          svc_ansible can use sudo without its password; another sudoers rule (for example NOPASSWD)
-          overrides 90-ansible-lab. Review "sudo -l -U svc_ansible" on the host.
+          svc_ansible can use sudo without its password (a NOPASSWD or !authenticate rule), or sudo
+          asks for another account's password (rootpw, targetpw or runaspw). Review
+          "sudo -l -U svc_ansible" on the host.
         success_msg: svc_ansible is ready; continue with chapter 4, step 5.
 
   handlers:

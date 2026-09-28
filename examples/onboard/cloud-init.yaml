@@ -1,0 +1,100 @@
+#cloud-config
+# Prepare a new Linux VM for the guide's automation account at first boot:
+# svc_ansible with the controller's public key and no password, the sudoers
+# rule and SSH drop-in from chapter 4, and the Python bindings the lessons need.
+# One file for Ubuntu 24.04 and AlmaLinux, Rocky Linux or RHEL 9.
+#
+# Replace REPLACE_WITH_AUTOMATION_PUBLIC_KEY with the one line of the
+# controller's ~/.ssh/ansible_lab.pub, keeping the double quotes. If the key's
+# comment (after the base64 part) contains a " or a \, leave the comment out.
+# Paste the result into the portal's Custom data field (Advanced tab), or pass
+# it with az vm create --custom-data. cloud-init reads it at first boot only; for a VM
+# that already exists, use onboard-linux.sh instead.
+#
+# The sudo password is set afterwards, never here: Azure advises against
+# secrets in custom data. Chapter 13 lists the ways. Do not name the VM's
+# administrator svc_ansible: cloud-init gives that account passwordless sudo.
+users:
+  - default
+  - name: svc_ansible
+    shell: /bin/bash
+    lock_passwd: true
+    ssh_authorized_keys:
+      - "REPLACE_WITH_AUTOMATION_PUBLIC_KEY"
+
+write_files:
+  - path: /etc/sudoers.d/90-ansible-lab
+    owner: root:root
+    permissions: "0440"
+    content: |
+      Defaults:svc_ansible !requiretty
+      svc_ansible ALL=(ALL:ALL) ALL
+  - path: /etc/ssh/sshd_config.d/70-ansible-lab.conf
+    owner: root:root
+    permissions: "0644"
+    content: |
+      Match User svc_ansible
+          AuthenticationMethods publickey
+          PasswordAuthentication no
+          KbdInteractiveAuthentication no
+      Match all
+
+# Package names differ by family, so install them here rather than in packages:.
+# Every check reports to the console log (/var/log/cloud-init-output.log), and
+# any failure makes cloud-init report an error.
+runcmd:
+  - - /bin/bash
+    - -c
+    - |
+      set -u
+      failed=
+      problem() { echo "onboard: ERROR: $*" >&2; failed=yes; }
+      keys=/home/svc_ansible/.ssh/authorized_keys
+      # cloud-init drops a key it cannot parse, such as the unreplaced placeholder.
+      if ! [ -s "$keys" ] || ! ssh-keygen -lf "$keys" >/dev/null 2>&1; then
+        problem "svc_ansible has no valid public key; was the placeholder replaced?"
+      fi
+      if command -v apt-get >/dev/null; then
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get -o DPkg::Lock::Timeout=600 install -y -q python3 python3-apt ||
+          { apt-get -o DPkg::Lock::Timeout=600 update -q &&
+            apt-get -o DPkg::Lock::Timeout=600 install -y -q python3 python3-apt; } ||
+          problem "python3-apt installation failed"
+        # ssh.service starts on the first connection; sshd -t needs its runtime directory.
+        install -d -m 0755 /run/sshd
+        ssh_unit=ssh
+      else
+        dnf -y -q install python3 python3-dnf python3-libselinux ||
+          problem "python3-dnf installation failed"
+        ssh_unit=sshd
+      fi
+      if ! visudo -cq; then
+        rm -f /etc/sudoers.d/90-ansible-lab
+        problem "the sudo configuration did not parse; the rule was removed"
+      elif sudo -l -U svc_ansible | grep -Eq 'NOPASSWD|!authenticate'; then
+        problem "svc_ansible can sudo without its password; is it also the VM's administrator name?"
+      fi
+      if command -v selinuxenabled >/dev/null && selinuxenabled; then
+        restorecon -RF /home/svc_ansible/.ssh || problem "restorecon failed"
+      fi
+      # The controller's address is not known here; loopback is checked, and
+      # onboard-linux.sh or bootstrap-existing-vm.yml can check the real one.
+      policy=$(/usr/sbin/sshd -T -C user=svc_ansible,host=localhost,addr=127.0.0.1) || policy=
+      ssh_ok=yes
+      /usr/sbin/sshd -t || ssh_ok=
+      for line in 'authenticationmethods publickey' 'passwordauthentication no' \
+                  'kbdinteractiveauthentication no' 'pubkeyauthentication yes'; do
+        grep -qx "$line" <<<"$policy" || ssh_ok=
+      done
+      if [ -z "$ssh_ok" ]; then
+        rm -f /etc/ssh/sshd_config.d/70-ansible-lab.conf
+        problem "the SSH policy check failed; the drop-in was removed"
+      fi
+      if systemctl is-active --quiet "$ssh_unit"; then
+        systemctl reload "$ssh_unit" || problem "SSH did not reload"
+      fi
+      if [ -n "$failed" ]; then
+        echo "onboard: FAILED; see the errors above" >&2
+        exit 1
+      fi
+      echo "onboard: svc_ansible is ready; set its sudo password next"
