@@ -67,6 +67,32 @@
       register: bootstrap_ssh_connection
       changed_when: false
 
+    - name: Read the key types this SSH server accepts for svc_ansible
+      ansible.builtin.command: >-
+        /usr/sbin/sshd -T -C user=svc_ansible,host={{ bootstrap_controller_addr }},addr={{ bootstrap_controller_addr }}
+      vars:
+        bootstrap_controller_addr: "{{ bootstrap_ssh_connection.stdout.split()[0] }}"
+      register: bootstrap_sshd_before
+      changed_when: false
+
+    # A FIPS or STIG crypto policy refuses Ed25519 keys; replacing the list with
+    # keys the server rejects would lock svc_ansible out.
+    - name: Require at least one listed key that this server accepts
+      ansible.builtin.assert:
+        that:
+          - bootstrap_usable_keys | length > 0
+        fail_msg: >-
+          This SSH server accepts none of the listed key types
+          ({{ bootstrap_accepted | join(', ') }}). Use an RSA 4096 key.
+        quiet: true
+      vars:
+        bootstrap_accepted: >-
+          {{ (bootstrap_sshd_before.stdout_lines | select('match', '^pubkeyacceptedalgorithms ')
+              | first | default('pubkeyacceptedalgorithms none')).split()[1].split(',') }}
+        bootstrap_usable_keys: >-
+          {{ automation_public_keys | map('split') | map('first')
+             | map('regex_replace', '^ssh-rsa$', 'rsa-sha2-512') | select('in', bootstrap_accepted) | list }}
+
   tasks:
     - name: Ensure the Ubuntu prerequisites
       ansible.builtin.apt:

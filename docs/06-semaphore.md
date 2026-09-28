@@ -21,7 +21,8 @@ credential as
 [3b describes](03-controller-el9.md#do-give-the-templates-the-targets-sudo-password).
 Then qualify the seeded lesson templates with step 7's sequence. Their names
 have no `Ubuntu —` prefix, and their limit is the whole `lab` group, so one run
-covers every target you added; read each host's recap. Keep their local-folder
+covers every target you added; read each host's recap. The STIG apply and local
+SCAP content templates instead ask for their hosts when you run them. Keep their local-folder
 repository and file inventory; the Git repository and static inventories below
 are for the manual setup.
 
@@ -207,7 +208,7 @@ Launch a template with its run (▶) button, then **Run** in the dialog. The
 dialog's **Dry Run** (`--check`) and **Diff** (`--diff`) switches apply to that
 one run only; the preview templates keep those arguments fixed so a preview is
 repeatable. Templates for the STIG playbooks, such as
-[the three that 3b seeds](09-security-benchmarks.md#the-seeded-stig-templates), refuse Dry Run
+[the four that both installers seed](09-security-benchmarks.md#the-seeded-stig-templates), refuse Dry Run
 because the scanner does not run in check mode.
 
 1. Run **Ubuntu — Ping**. Verify target identity, `changed=0`, and no failures.

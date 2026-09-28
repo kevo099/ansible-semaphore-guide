@@ -362,13 +362,21 @@ both placeholders in its extra variables:
 
 Then run **STIG audit, local SCAP content** and enter the hosts the file is
 written for in **Limit**, for example `lab-rhel`. While the placeholders
-remain, the run stops with an explanation before scanning. From the CLI, pass
-the same two variables:
+remain, the run stops with an explanation before scanning. From the CLI, run
+from the lab folder with your own key and the targets' sudo password, as
+[chapter 5](05-cli-lessons.md) does, and pass the same two variables:
 
 ```bash
+cd /opt/ansible-lab
 /opt/ansible-venv/bin/ansible-playbook playbooks/stig-audit.yml --limit lab-rhel \
+  --private-key ~/.ssh/ansible_lab -K \
   -e '{"stig_content_file": "content/U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.xml", "stig_content_profile": "xccdf_mil.disa.stig_profile_MAC-1_Classified"}'
 ```
+
+On a seeded controller that key must be authorized on the targets beside the
+service key; [chapter 3b](03-controller-el9.md#do-add-a-target-without-leaving-the-terminal)
+shows how. With the Vault option for sudo passwords, use `--ask-vault-pass`
+instead of `-K`.
 
 A relative path is read from the lab folder; an absolute path works too. The
 content is for audits only: `stig-apply.yml` refuses `stig_content_file`,

@@ -157,9 +157,13 @@ into the portal yourself, as the next section shows. At first boot it:
 - installs the Python package bindings the lessons need: `python3-apt` on
   Ubuntu; `python3-dnf` and `python3-libselinux` on Enterprise Linux;
 - checks the sudo configuration and the effective SSH policy for
-  `svc_ansible`, removes a rule or drop-in that fails its check, and makes
-  cloud-init report an error when anything failed, including a key that is
-  missing because the placeholder was not replaced.
+  `svc_ansible`, including that an authorized key is of a type and RSA size
+  the server accepts, removes a rule or drop-in that fails its check, and
+  starts SSH if neither its service nor, on Ubuntu, its socket is running;
+- makes cloud-init report an error when anything failed, including a key that
+  is missing because the placeholder was not replaced. It checks the SSH
+  policy from loopback, because the controller's address is unknown at first
+  boot, and reports an error if a `Match` rule depends on the client's address.
 
 It sets no password: Azure advises against secrets in custom data. Until you
 set one, as [finish access](#do-finish-access-with-one-playbook) or
@@ -233,10 +237,11 @@ images have. It then:
 - runs `sudo -k -n` as `svc_ansible` and fails if that succeeds, which catches
   a `NOPASSWD` rule elsewhere that would override the password requirement.
 
-By default it authorizes `~/.ssh/ansible_lab.pub`. On the
-[seeded Enterprise Linux controller](03-controller-el9.md), list the exported
-service key instead, and your CLI key too if you use one, or the run replaces
-the key Semaphore logs in with:
+By default it authorizes `~/.ssh/ansible_lab.pub`. On a controller made by
+either installer ([Ubuntu](03-controller.md) or
+[Enterprise Linux](03-controller-el9.md)), list the exported service key
+instead, and your CLI key too if you use one, or the run replaces the key
+Semaphore logs in with:
 
 ```bash
 /opt/ansible-venv/bin/ansible-playbook -i inventories/bootstrap.ini \
@@ -304,8 +309,11 @@ does what `bootstrap-existing-vm.yml` does, and is safe to run again:
   it, writing the key file as that account so a link it planted cannot
   redirect root; SELinux labels are restored on Enterprise Linux;
 - installs the Python bindings, `sudo` and the SSH server where missing;
-- refuses before any change when no given key is accepted by the VM's SSH
-  crypto policy, for example an Ed25519 key on a host hardened to `FIPS:STIG`;
+- refuses before any change when no given key can log in under the VM's SSH
+  crypto policy, for example an Ed25519 key on a host hardened to `FIPS:STIG`
+  or an RSA key shorter than 2048 bits;
+- enforces the modes of the home directory, `.ssh` and the key file on every
+  run, because SSH ignores keys in a writable location;
 - writes and enforces the sudoers rule and the SSH drop-in, checks the whole
   sudo configuration and rejects any `NOPASSWD` or `!authenticate` rule for the
   account, or a `rootpw`, `targetpw` or `runaspw` default;
@@ -322,8 +330,10 @@ seeded controller also the service key from
 `sudo cat /etc/semaphore/svc_ansible.pub`. The script reads the keys through a
 quoted here-document, so a key comment with quotes or `$(...)` is stored as
 text and never run. Optionally set `CONTROLLER_ADDRESS` to the controller's
-address as the VM sees it, so the SSH check also evaluates `Match Address`
-rules for that address; empty, it checks from loopback.
+address as the VM sees it, so the SSH check evaluates the policy for that
+address. Empty, it checks from loopback, which gives the same answer unless a
+`Match` rule depends on the client's address; the script then stops and asks
+for `CONTROLLER_ADDRESS`.
 
 In the portal: open the VM, then **Operations → Run command → RunShellScript**,
 paste the edited script and select **Run**. With the Azure CLI:
@@ -359,13 +369,16 @@ Then either:
   earlier runs remain until you delete them.
 - **Pass it as a protected parameter** of a managed Run Command. The script
   file stays unedited, and the parameters reach it as environment variables.
-  Azure shows the public key when the command is read back, but never the
-  protected hash:
+  Azure shows the public keys when the command is read back, but never the
+  protected hash. `ONBOARD_PUBLIC_KEYS` replaces the whole key list, so pass
+  every key the account needs, one per line; on a seeded controller that
+  includes the service key you copied to `~/svc_ansible.pub`:
 
 ```bash
 az vm run-command create -g RESOURCE_GROUP --vm-name VM_NAME --name onboard \
   --script @examples/onboard/onboard-linux.sh \
-  --parameters ONBOARD_PUBLIC_KEYS="$(cat ~/.ssh/ansible_lab.pub)" \
+  --parameters ONBOARD_PUBLIC_KEYS="$(cat ~/.ssh/ansible_lab.pub ~/svc_ansible.pub)" \
+    ONBOARD_CONTROLLER_ADDRESS=CONTROLLER_PRIVATE_ADDRESS \
   --protected-parameters ONBOARD_PASSWORD_HASH="$(openssl passwd -6)" \
   --timeout-in-seconds 900
 az vm run-command show -g RESOURCE_GROUP --vm-name VM_NAME --name onboard \
@@ -373,9 +386,10 @@ az vm run-command show -g RESOURCE_GROUP --vm-name VM_NAME --name onboard \
 az vm run-command delete -g RESOURCE_GROUP --vm-name VM_NAME --name onboard --yes
 ```
 
+Leave out `~/svc_ansible.pub` when Semaphore does not use a key of its own.
 Pass each parameter as `NAME=value`; in the test the form `name=X value=Y`
 created parameters literally called `name` and `value`, and the script saw
-none. While `az` runs, other accounts on your workstation can see the hash in
+none. Two keys in one parameter arrived intact. While `az` runs, other accounts on your workstation can see the hash in
 its process list. Delete the managed command afterwards; it otherwise stays
 on the VM's resource. A hash from `openssl passwd -6` is accepted; a malformed
 one, such as `rounds=0`, is refused before the account changes.

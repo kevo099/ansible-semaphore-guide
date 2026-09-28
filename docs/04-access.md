@@ -2,7 +2,7 @@
 
 [Previous: controller](03-controller.md) or [Enterprise Linux controller](03-controller-el9.md) · [Next: command-line lessons](05-cli-lessons.md)
 
-**Coming from the seeded Enterprise Linux controller (3b)?** Semaphore already
+**Coming from a controller made by either installer (chapter 3 or 3b)?** Semaphore already
 has its own key pair, and `add-target.sh` pinned each target's host key in
 `/etc/semaphore/known_hosts`. Do steps 2 to 4 on each target, but in step 3
 copy the service's public key, which `sudo cat /etc/semaphore/svc_ansible.pub`
@@ -250,10 +250,10 @@ in the public inventory; see [Git and Vault](07-git-and-vscode.md).
 
 ## Step 6: install target trust for Semaphore
 
-The service uses a separate known-hosts file. Skip this step on the seeded
-Enterprise Linux controller: `add-target.sh` already maintains that file, and
-the block below replaces it. Otherwise, on the controller, copy only the
-already verified entries for the addresses your inventory uses:
+The service uses a separate known-hosts file. Skip this step on a controller
+made by either installer: `add-target.sh` already maintains that file, and the
+block below replaces it. After chapter 3's manual path, on the controller, copy
+only the already verified entries for the addresses your inventory uses:
 
 ```bash
 (

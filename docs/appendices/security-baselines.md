@@ -222,21 +222,27 @@ publisher's Ubuntu 24.04 benchmark 2.0.0 listed above.
 ### Run a vendor audit
 
 **Where: controller, in `/opt/ansible-lab`, with the prepared inventory and
-connection credentials.** Select a host that exists in your inventory. These
-examples choose RHEL CIS Level 1, AlmaLinux CIS Level 2 and Ubuntu CIS Level 1.
+connection credentials.** Select a host that exists in your inventory. The
+examples use your own key from [chapter 4](../04-access.md#step-1-generate-the-automation-key)
+and ask for the targets' sudo password, as [chapter 5](../05-cli-lessons.md)
+does; with the Vault option, use `--ask-vault-pass` instead of `-K`. They
+choose RHEL CIS Level 1, AlmaLinux CIS Level 2 and Ubuntu CIS Level 1.
 
 ```bash
 cd /opt/ansible-lab
 /opt/ansible-venv/bin/ansible-playbook -i inventories/lab.ini playbooks/stig-audit.yml \
   --limit lab-rhel \
+  --private-key ~/.ssh/ansible_lab -K \
   -e '{"stig_profile_el": "xccdf_org.ssgproject.content_profile_cis_server_l1"}'
 
 /opt/ansible-venv/bin/ansible-playbook -i inventories/lab.ini playbooks/stig-audit.yml \
   --limit lab-alma \
+  --private-key ~/.ssh/ansible_lab -K \
   -e '{"stig_profile_el": "xccdf_org.ssgproject.content_profile_cis"}'
 
 /opt/ansible-venv/bin/ansible-playbook -i inventories/lab.ini playbooks/stig-audit.yml \
   --limit lab-ubuntu \
+  --private-key ~/.ssh/ansible_lab -K \
   -e '{"stig_usg_profile": "cis_level1_server-v1.0.0"}'
 ```
 
@@ -291,6 +297,7 @@ that file with `oscap info` and selecting its MAC-1 Public profile:
 cd /opt/ansible-lab
 /opt/ansible-venv/bin/ansible-playbook -i inventories/lab.ini playbooks/stig-audit.yml \
   --limit lab-rhel \
+  --private-key ~/.ssh/ansible_lab -K \
   -e '{"stig_content_file": "content/U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.xml", "stig_content_profile": "xccdf_mil.disa.stig_profile_MAC-1_Public"}'
 ```
 

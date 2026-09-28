@@ -120,25 +120,44 @@ fi
 packages="present${missing[0]:+, installed ${missing[*]}}"
 
 # --- Keys: readable, and at least one accepted by this SSH server -----------------
+# Match rules that depend on where a client connects from are evaluated for one
+# address only. Without the controller's, the check could not speak for it.
+address_rules=$(grep -hEi '^[[:space:]]*Match[[:space:]].*\b(Address|Host|LocalAddress|LocalPort|RDomain)\b' \
+  /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null) || address_rules=
+if [ -n "$address_rules" ] && [ -z "$CONTROLLER_ADDRESS" ]; then
+  fail "the SSH configuration has Match rules that depend on the client's address; set CONTROLLER_ADDRESS to the controller's address as this VM sees it"
+fi
 # The effective SSH settings for the account connecting from the controller.
 addr=${CONTROLLER_ADDRESS:-127.0.0.1}
 laddr=$(hostname -I 2>/dev/null | awk '{print $1}') || laddr=
 lport=$(/usr/sbin/sshd -T 2>/dev/null | awk '$1 == "port" && !p {print $2; p = 1}') || lport=
 sshd_context="user=$account,host=$addr,addr=$addr,laddr=${laddr:-127.0.0.1},lport=${lport:-22}"
-accepted=$(/usr/sbin/sshd -T -C "$sshd_context" 2>/dev/null | awk '$1 == "pubkeyacceptedalgorithms" {print $2}') ||
-  fail "sshd -T could not read the SSH configuration"
+policy_before=$(/usr/sbin/sshd -T -C "$sshd_context" 2>/dev/null) || fail "sshd -T could not read the SSH configuration"
+accepted=$(awk '$1 == "pubkeyacceptedalgorithms" {print $2}' <<<"$policy_before")
+# OpenSSH 9.1 and later report RequiredRSASize; the guide never accepts less than 2048 bits.
+min_rsa=$(awk '$1 == "requiredrsasize" {print $2}' <<<"$policy_before")
+[ "${min_rsa:-0}" -ge 2048 ] || min_rsa=2048
 usable=0
 while IFS= read -r key; do
   printf '%s\n' "$key" > "$work/one.pub"
-  ssh-keygen -lf "$work/one.pub" >/dev/null 2>&1 || fail "ssh-keygen cannot read key: ${key:0:30}..."
+  bits=$(ssh-keygen -lf "$work/one.pub" 2>/dev/null | awk '{print $1}') || fail "ssh-keygen cannot read key: ${key:0:30}..."
+  [ -n "$bits" ] || fail "ssh-keygen cannot read key: ${key:0:30}..."
   type=${key%% *}
-  if [ "$type" = ssh-rsa ]; then algorithms='rsa-sha2-512 rsa-sha2-256 ssh-rsa'; else algorithms=$type; fi
+  if [ "$type" = ssh-rsa ]; then
+    algorithms='rsa-sha2-512 rsa-sha2-256 ssh-rsa'
+    if [ "$bits" -lt "$min_rsa" ]; then
+      note "warning: a $bits-bit RSA key is below this server's $min_rsa-bit minimum and cannot log in"
+      continue
+    fi
+  else
+    algorithms=$type
+  fi
   for algorithm in $algorithms; do
     if [[ ,$accepted, == *,"$algorithm",* ]]; then usable=$((usable + 1)); continue 2; fi
   done
   note "warning: this SSH server does not accept $type keys (a FIPS or STIG crypto policy refuses Ed25519)"
 done < "$work/keys"
-[ "$usable" -gt 0 ] || fail "none of the keys is accepted by this SSH server; use an RSA 4096 key"
+[ "$usable" -gt 0 ] || fail "none of the keys can log in to this SSH server; use an RSA 4096 key"
 
 # --- Account and keys --------------------------------------------------------
 if getent passwd "$account" >/dev/null; then
@@ -170,6 +189,17 @@ else
     mv -f "$staged" "$1/.ssh/authorized_keys"' _ "$home" < "$work/keys" ||
     fail "could not write $home/.ssh/authorized_keys as $account"
   keys_state=replaced
+fi
+# SSH's StrictModes ignores keys in a writable home, .ssh or key file, so
+# enforce the modes even when the keys were already right.
+chmod go-w "$home"
+if ! { runuser -u "$account" -- chmod 0700 "$home/.ssh" &&
+        runuser -u "$account" -- chmod 0600 "$home/.ssh/authorized_keys"; }; then
+  fail "could not set the modes of $home/.ssh as $account; check who owns it"
+fi
+if [ "$(stat -Lc '%U %a' "$home/.ssh")" != "$account 700" ] ||
+   [ "$(stat -Lc '%U %a' "$home/.ssh/authorized_keys")" != "$account 600" ]; then
+  fail "$home/.ssh or its authorized_keys is not owned by $account; resolve that by hand"
 fi
 if command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled; then
   restorecon -RF "$home/.ssh"

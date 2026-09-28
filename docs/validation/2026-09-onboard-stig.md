@@ -42,7 +42,10 @@ resource group, which was then deleted.
 | Host keys | The fingerprints the script printed matched `ssh-keyscan` from the controller on all four targets, and `add-target.sh` accepted them. |
 | `cloud-init.yaml` through `targets.yml` | Ubuntu Pro and AlmaLinux: `status: done`, drop-in effective (`authenticationmethods publickey`). |
 | `cloud-init.yaml` pasted by hand | Ubuntu and AlmaLinux: `svc_ansible is ready`. Placeholder left in: `status: error`, the missing-key message, and no authorized key. |
-| `bootstrap-existing-vm.yml` with the tightened checks | Passed on `lab-ubuntu2` as the Azure administrator. |
+| `bootstrap-existing-vm.yml` with the tightened checks | Passed on `lab-ubuntu2` as the Azure administrator. With an RSA-only server policy and an Ed25519-only key list, it stopped before replacing any key. |
+| After the final review, `onboard-linux.sh` | Stopped and asked for `CONTROLLER_ADDRESS` when a `Match ... Address` rule existed and none was given; refused a 1024-bit RSA key and an Ed25519 key under an RSA-only policy; with the same keys, reset a `.ssh` of mode 0777 and a key file of 0666 to 0700 and 0600. |
+| After the final review, the cloud-init checks | Run as root on existing VMs: a wrong `AuthorizedKeysFile` and `Defaults rootpw` each ended in an error; with `ssh.service` and `ssh.socket` stopped on Ubuntu, and `sshd` stopped on RHEL, it started SSH and finished. Two fresh VMs, Ubuntu 24.04 and AlmaLinux 9.8, then reported `svc_ansible is ready`. |
+| Managed Run Command with two keys | The unedited script, with both keys in one parameter, the controller address as a parameter and the hash protected, reported every part unchanged. |
 
 ## Results: vendor STIG on Azure
 
@@ -77,8 +80,8 @@ run, from a workstation through the controller:
 
 | Step | Result |
 | --- | --- |
-| Ubuntu installer, seeded | Installed and seeded in 58 seconds on the Azure controller; all 13 readiness checks passed; project, local lab folder repository and eleven templates, before the local content template was added. |
-| Enterprise Linux installer, seeded | Installed and seeded in 56 seconds on AlmaLinux 9.8 with the shared installer code; all 13 readiness checks passed; twelve templates. |
+| Ubuntu installer, seeded | Installed and seeded in 58 seconds on the Azure controller; all 12 readiness checks passed; project, local lab folder repository and eleven templates, before the local content template was added. |
+| Enterprise Linux installer, seeded | Installed and seeded in 56 seconds on AlmaLinux 9.8 with the shared installer code; all 12 readiness checks passed; twelve templates. |
 | `add-target.sh` | Added four targets on the Ubuntu controller and three on the Enterprise Linux one, each with the fingerprint Run Command had printed. |
 | Ubuntu controller, through the API | Ping succeeded on four targets; the STIG audit completed on three and stopped on the plain Ubuntu target as designed; Baseline preview succeeded; STIG apply with the approved reboot on `lab-rhel` succeeded. No run cloned anything; paths were under the lab folder. |
 | Local content template, placeholders | Stopped before scanning with the explanation. |
@@ -100,26 +103,26 @@ run, from a workstation through the controller:
 
 ## Review and retest
 
-An adversarial review of the onboarding files found seventeen problems. All
-were fixed and retested above:
+Two adversarial reviews examined the onboarding files. The first found
+seventeen problems. The second, run on the branch before publishing, found
+that four of those were only partly fixed and raised eight more. All are
+fixed; the table says how each was retested.
 
-- a key comment could break out of the shell string and run code as root;
-- root wrote into the account's own `.ssh` directory, where a planted link
-  could redirect the write;
-- the sudo check missed command-specific `NOPASSWD` rules and `rootpw`-style
-  defaults (also fixed in `bootstrap-existing-vm.yml`);
-- the SSH check used only the loopback address and did not require
-  `pubkeyauthentication yes` or the expected authorized-keys file (also fixed
-  in the playbook);
-- a failed reload could look like success on a later run;
-- a malformed `rounds=` value would have been installed as an unusable password;
-- file ownership and mode were not enforced when the content already matched;
-- an Ed25519-only key could lock the account out on a hardened host;
-- the cloud-init run reported success after failures and did not notice a
-  missing key;
-- the Azure administrator could not safely be named `svc_ansible`;
-- and smaller issues with the order of checks, key comments in YAML and
-  output length.
+| Problem | Fix | Retest |
+| --- | --- | --- |
+| A key comment could break out of the shell string and run code as root | Keys are read through a quoted here-document | Live: a comment with quotes and `$(touch ...)` was stored as text; nothing ran |
+| Root wrote into the account's own `.ssh`, where a planted link could redirect it | The account writes its own key file | Offline review; live runs wrote the file as `svc_ansible` |
+| Only `sudo -n true` was tested, missing command-specific `NOPASSWD` rules and `rootpw`-style defaults | The full `sudo -l` listing is checked, in the script, the playbook and cloud-init | Live: a command-specific `NOPASSWD` rule and `Defaults rootpw` were refused |
+| The SSH check used loopback, which can differ from the controller's address | `CONTROLLER_ADDRESS`; without it, a `Match` rule on the client's address stops the script, and cloud-init reports an error | Live: a `Match User ... Address` block was refused with and without the address |
+| `pubkeyauthentication` and the authorized-keys path were not checked | Both are required, in all three paths | Live: a wrong `AuthorizedKeysFile` ended cloud-init's check in an error |
+| A failed reload could look like success on a later run, and an inactive server went unnoticed | Every check after the drop-in is guarded; SSH is reloaded when running and started when neither it nor its socket is | Live: stopped SSH units were started on Ubuntu and RHEL |
+| A malformed `rounds=` value would have been installed | Rounds must be 1000 to 999999999 without leading zeros | Live: `rounds=0` was refused |
+| Ownership and modes were not enforced when the content already matched | Enforced on every run, as the account for its own files | Live: modes 0777 and 0666 were reset |
+| A key the server rejects could replace every working key | At least one key must match the accepted algorithms and a 2048-bit RSA minimum, in all three paths | Live: Ed25519-only and 1024-bit RSA key lists were refused |
+| cloud-init reported success after failures and missed a missing key | Failures are collected and end in an error | Live: the placeholder VM reported `status: error` |
+| The Azure administrator named `svc_ansible` would keep passwordless sudo | `targets.yml` refuses that name, and cloud-init reports it | Offline: the assertion; not provisioned |
+| Smaller issues: check order, YAML-breaking key comments, the 4 KB output limit | Checks reordered, the portal instructions updated, the result line printed last | Live runs above |
+| Documentation: the local-content command ran from the wrong folder without credentials; the managed example dropped the service key; seeded exceptions named only Enterprise Linux; template limits and counts were out of date | Corrected in chapters 4, 6, 9, 13 and 3b and in the catalog | Offline checks |
 
 ## Not established
 

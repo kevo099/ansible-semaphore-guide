@@ -31,7 +31,9 @@ one reviewed run, and understand what the installer decided for you.
 
 Every lesson template sets its **Ansible options → Limit** to `lab`, the
 explicit limit the playbooks' preflight requires. The two STIG apply templates
-have no default limit: their Run dialog asks for exactly one host. The two
+have no default limit: their Run dialog asks for exactly one host. The local
+SCAP content audit has none either: its Run dialog asks for the hosts its
+content file is written for. The two
 preview templates add `--check --diff` as CLI arguments. Only the templates
 whose names end in “allow required reboot” receive `allow_reboot: true`. The
 patch template then reboots only when the operating system reports that it
