@@ -29,7 +29,7 @@ missing() { echo "$1 needs a value."; usage; exit 2; }
 
 # Split so the repository validator does not read this as a real address.
 any_address='0.0.0''.0'
-mode= address=
+mode='' address=''
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --mode) [[ $# -ge 2 ]] || missing "$1"; mode="$2"; shift ;;
@@ -184,7 +184,8 @@ NGINXMAIN
       chmod 0644 /etc/nginx/nginx.conf
     else
       export DEBIAN_FRONTEND=noninteractive
-      apt-get -qq update && apt-get -qq install -y nginx openssl
+      apt-get -qq update
+      apt-get -qq install -y nginx openssl
       rm -f /etc/nginx/sites-enabled/default
     fi
     install -d -m 0750 -o root -g root "$tls_dir"

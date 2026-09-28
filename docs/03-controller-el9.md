@@ -8,8 +8,8 @@ the `postgresql:16` module stream, which Enterprise Linux 9 provides from
 release 9.4. Run `sudo dnf -y upgrade` and reboot an older image first. RHEL
 must be registered with its BaseOS and AppStream repositories enabled.
 
-This is the Enterprise Linux alternative to the Ubuntu installer. It goes one
-step further: after installing, it seeds Semaphore with a practice project
+This is the Enterprise Linux alternative to the Ubuntu installer. Both
+installers seed Semaphore with a practice project
 whose playbooks live in a **local folder on the controller**, so you can run
 the first lessons before choosing a Git host.
 

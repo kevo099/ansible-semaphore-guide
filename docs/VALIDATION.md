@@ -12,7 +12,7 @@ run; this page only summarizes them.
 | --- | --- |
 | Semaphore | Community 2.19.12, checksum-verified native binary |
 | Ansible Core | 2.21.4, with every Python dependency pinned in [`requirements-controller.txt`](../requirements-controller.txt) |
-| Controller | Ubuntu Server 24.04; RHEL, AlmaLinux and Rocky Linux 9.8 (seeded installer) |
+| Controller | Ubuntu Server 24.04 (stack installation; new seeding flow not yet live-tested); RHEL, AlmaLinux and Rocky Linux 9.8 (seeded installer) |
 | Database | PostgreSQL 16 |
 | Targets | Ubuntu 24.04, AlmaLinux 9.8, Rocky Linux 9.8 and registered RHEL 9.8 |
 
@@ -29,6 +29,11 @@ run; this page only summarizes them.
 
 ## Not established
 
+- The Ubuntu 24.04 installer's new seeding flow is **NOT yet live-tested**.
+  Earlier Ubuntu records cover the stack installation without seeding. The
+  planned Azure Ubuntu 24.04 live run must check the local-folder project,
+  service permissions, target addition, authenticated template runs and the
+  exposure modes before this limit can be removed.
 - FIPS mode. On RHEL, AlmaLinux and Rocky Linux the vendor STIG sets the
   `FIPS:STIG` crypto policy. On RHEL and AlmaLinux `fips-mode-setup --check`
   then reported that FIPS mode is not enabled; Rocky Linux's FIPS mode and
