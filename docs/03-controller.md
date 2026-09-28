@@ -450,8 +450,21 @@ as the lab folder's owner, so the `semaphore` group can still read them,
 restores SELinux labels on Enterprise Linux, and commits them in the folder's
 Git history with `.guide-files.json`, the record of the guide's own versions
 that the next update compares with. `git revert HEAD` in the folder undoes that
-commit; running the update again applies it again. It finishes with
-the readiness check, and a second run reports nothing to do. With a different
+commit; running the update again applies it again. A second run reports
+nothing to do.
+
+It runs the readiness check before and after the update. A check that already
+failed before is listed with its fix, and the update still completes; only a
+check that newly fails ends it with an error. On a controller whose UI was
+exposed over HTTPS before 24 September 2026, expect
+`nginx_listens_only_where_expected`: the exposure script then left nginx's
+default site on port 80. Run it again from the new copy, which removes that site
+and keeps your certificate, so the browser's fingerprint does not change:
+
+```bash
+sudo bash scripts/expose-semaphore.sh --mode https
+```
+ With a different
 lab folder, add the same `--lab-dir DIR` the installer used. If several projects
 share the seeded project's name, pass `--project-id` with its ID.
 
