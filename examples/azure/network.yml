@@ -1,0 +1,62 @@
+---
+# Resource group, private network and the targets' network security group.
+- name: Create the lab network in Azure
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars.yml
+  vars:
+    # Use the virtual environment that holds the Azure SDK, not the system Python.
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+    azure_required_vars: [azure_subscription_id, azure_tags, azure_vnet_prefix, azure_subnet_prefix, azure_target_ssh_source]
+  module_defaults:
+    group/azure.azcollection.all:
+      subscription_id: "{{ azure_subscription_id }}"
+      auth_source: cli
+  tasks:
+    - name: Check the variables
+      ansible.builtin.import_tasks: tasks-preflight.yml
+
+    - name: Resource group with owner and expiry tags
+      azure.azcollection.azure_rm_resourcegroup:
+        name: "{{ azure_resource_group }}"
+        location: "{{ azure_location }}"
+        tags: "{{ azure_tags }}"
+
+    - name: Network security group for the targets (SSH from the controller only)
+      azure.azcollection.azure_rm_securitygroup:
+        resource_group: "{{ azure_resource_group }}"
+        name: nsg-lab-targets
+        purge_rules: true
+        rules:
+          - name: ssh-from-controller
+            protocol: Tcp
+            source_address_prefix: "{{ azure_target_ssh_source }}"
+            destination_port_range: 22
+            access: Allow
+            priority: 100
+            direction: Inbound
+          - name: deny-other-vnet-inbound
+            protocol: "*"
+            source_address_prefix: VirtualNetwork
+            destination_port_range: "*"
+            access: Deny
+            priority: 4000
+            direction: Inbound
+        tags: "{{ azure_tags }}"
+
+    - name: Virtual network
+      azure.azcollection.azure_rm_virtualnetwork:
+        resource_group: "{{ azure_resource_group }}"
+        name: "{{ azure_vnet_name }}"
+        address_prefixes_cidr:
+          - "{{ azure_vnet_prefix }}"
+        tags: "{{ azure_tags }}"
+
+    - name: Subnet
+      azure.azcollection.azure_rm_subnet:
+        resource_group: "{{ azure_resource_group }}"
+        virtual_network_name: "{{ azure_vnet_name }}"
+        name: "{{ azure_subnet_name }}"
+        address_prefix_cidr: "{{ azure_subnet_prefix }}"

@@ -1,0 +1,6 @@
+---
+# Pin the collection; install its Python SDK set from the collection's own
+# requirements.txt into a separate virtual environment (chapter 13).
+collections:
+  - name: azure.azcollection
+    version: 4.0.0

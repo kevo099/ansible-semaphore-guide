@@ -1,0 +1,69 @@
+---
+# Remove exactly the lab's VMs (with their NICs, disks and public address), then
+# its network objects, then the resource group if nothing else is left in it.
+# Usage: -e remove_confirm=<the resource group name>
+- name: Remove the Azure lab
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars.yml
+  vars:
+    # Use the virtual environment that holds the Azure SDK, not the system Python.
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+    azure_required_vars: [azure_subscription_id, azure_targets]
+    include_controller: true
+    lab_vm_names: "{{ (azure_targets | map(attribute='name') | list) + ([azure_controller.name] if include_controller | bool else []) }}"
+  module_defaults:
+    group/azure.azcollection.all:
+      subscription_id: "{{ azure_subscription_id }}"
+      auth_source: cli
+  tasks:
+    - name: Check the variables
+      ansible.builtin.import_tasks: tasks-preflight.yml
+
+    - name: Require the resource group name as confirmation
+      ansible.builtin.assert:
+        that:
+          - remove_confirm is defined
+          - remove_confirm == azure_resource_group
+        fail_msg: Pass -e remove_confirm={{ azure_resource_group }} to remove this lab.
+        quiet: true
+
+    - name: Remove each VM with its NIC, disks and public address
+      azure.azcollection.azure_rm_virtualmachine:
+        resource_group: "{{ azure_resource_group }}"
+        name: "{{ item }}"
+        state: absent
+        remove_on_absent: [all]
+      loop: "{{ lab_vm_names }}"
+
+    - name: Remove the network security groups
+      azure.azcollection.azure_rm_securitygroup:
+        resource_group: "{{ azure_resource_group }}"
+        name: "{{ item }}"
+        state: absent
+      loop: [nsg-lab-targets, nsg-lab-controller]
+
+    - name: Remove the virtual network
+      azure.azcollection.azure_rm_virtualnetwork:
+        resource_group: "{{ azure_resource_group }}"
+        name: "{{ azure_vnet_name }}"
+        state: absent
+
+    - name: List anything still in the resource group
+      azure.azcollection.azure_rm_resourcegroup_info:
+        name: "{{ azure_resource_group }}"
+        list_resources: true
+      register: azure_leftovers
+
+    - name: Show what remains
+      ansible.builtin.debug:
+        msg: "{{ azure_leftovers.resourcegroups[0].resources | default([]) | map(attribute='name') | list }}"
+
+    - name: Remove the resource group only when it is empty
+      azure.azcollection.azure_rm_resourcegroup:
+        name: "{{ azure_resource_group }}"
+        state: absent
+        force_delete_nonempty: false
+      when: azure_leftovers.resourcegroups[0].resources | default([]) | length == 0

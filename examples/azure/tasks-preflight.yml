@@ -1,0 +1,16 @@
+---
+- name: Refuse placeholder values
+  ansible.builtin.assert:
+    that:
+      - (lookup('ansible.builtin.vars', item) | string) is not search('REPLACE_')
+    fail_msg: "{{ item }} still holds a REPLACE_ placeholder; edit vars.yml first."
+    quiet: true
+  loop: "{{ azure_required_vars }}"
+
+- name: Refuse an expiry-free or owner-free tag set
+  ansible.builtin.assert:
+    that:
+      - azure_tags.owner is defined and azure_tags.owner | length > 0
+      - azure_tags.expires is defined and azure_tags.expires | length > 0
+    fail_msg: Tag every resource with an owner and an expiry date.
+    quiet: true

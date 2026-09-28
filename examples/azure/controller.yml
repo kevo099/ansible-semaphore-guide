@@ -1,0 +1,81 @@
+---
+# Optional: a controller VM in Azure. It is the only VM with a public address,
+# and its SSH is open to your own address prefix alone. Run network.yml first.
+- name: Create an Azure controller VM
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars.yml
+  vars:
+    # Use the virtual environment that holds the Azure SDK, not the system Python.
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+    azure_required_vars: [azure_subscription_id, azure_tags, azure_controller]
+  module_defaults:
+    group/azure.azcollection.all:
+      subscription_id: "{{ azure_subscription_id }}"
+      auth_source: cli
+  tasks:
+    - name: Check the variables
+      ansible.builtin.import_tasks: tasks-preflight.yml
+
+    - name: Network security group for the controller (SSH from your prefix only)
+      azure.azcollection.azure_rm_securitygroup:
+        resource_group: "{{ azure_resource_group }}"
+        name: nsg-lab-controller
+        purge_rules: true
+        rules:
+          - name: ssh-from-operator
+            protocol: Tcp
+            source_address_prefix: "{{ azure_controller.operator_cidr }}"
+            destination_port_range: 22
+            access: Allow
+            priority: 100
+            direction: Inbound
+        tags: "{{ azure_tags }}"
+
+    - name: Static public address for the controller
+      azure.azcollection.azure_rm_publicipaddress:
+        resource_group: "{{ azure_resource_group }}"
+        name: "pip-{{ azure_controller.name }}"
+        sku: standard
+        allocation_method: static
+        tags: "{{ azure_tags }}"
+      register: azure_controller_pip
+
+    - name: Controller network interface
+      azure.azcollection.azure_rm_networkinterface:
+        resource_group: "{{ azure_resource_group }}"
+        name: "nic-{{ azure_controller.name }}"
+        virtual_network: "{{ azure_vnet_name }}"
+        subnet_name: "{{ azure_subnet_name }}"
+        security_group: nsg-lab-controller
+        ip_configurations:
+          - name: ipconfig1
+            primary: true
+            private_ip_allocation_method: Static
+            private_ip_address: "{{ azure_controller.private_ip }}"
+            public_ip_address_name: "pip-{{ azure_controller.name }}"
+        tags: "{{ azure_tags }}"
+
+    - name: Controller VM (Ubuntu 24.04, bootstrap administrator key only)
+      azure.azcollection.azure_rm_virtualmachine:
+        resource_group: "{{ azure_resource_group }}"
+        name: "{{ azure_controller.name }}"
+        vm_size: "{{ azure_vm_size }}"
+        admin_username: "{{ azure_admin_user }}"
+        ssh_password_enabled: false
+        ssh_public_keys:
+          - path: "/home/{{ azure_admin_user }}/.ssh/authorized_keys"
+            key_data: "{{ lookup('ansible.builtin.file', azure_admin_public_key_file) }}"
+        network_interface_names:
+          - "nic-{{ azure_controller.name }}"
+        image: "{{ azure_controller.image }}"
+        managed_disk_type: StandardSSD_LRS
+        os_disk_size_gb: 32
+        os_disk_delete_option: Delete
+        tags: "{{ azure_tags }}"
+
+    - name: Report the controller's public address
+      ansible.builtin.debug:
+        msg: "Controller {{ azure_controller.name }} public address: {{ azure_controller_pip.state.ip_address }}"

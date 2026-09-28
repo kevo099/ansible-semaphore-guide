@@ -24,6 +24,7 @@ run; this page only summarizes them.
 | ansible-core 2.21.4 | Both installers resolved exactly the pinned set and passed readiness. A seeded RHEL 9.8 controller then seeded eleven templates and ran ten of them against an Ubuntu 24.04 Ubuntu Pro target, including `changed=0` repeats and a STIG apply with the approved reboot. | [2.21.4 requalification](validation/2026-09-community.md#ansible-core-2214-requalification) |
 | Semaphore Community features (chapters 14 to 18 and the appendices) | Each capability is classified as working, paid only or not present in 2.19.12, with its live result and limits. | [Community coverage](COMMUNITY-COVERAGE.md) and [the campaign record](validation/2026-09-community.md) |
 | New chapters as written | Each new chapter's example files and command blocks were run as written on the campaign controller: inputs, other apps, identity, operations, API and webhooks, task identity, runners, export and syslog. Key rotation, identity providers and the upgrade drill rely on the feature tests. | [Rehearsal](validation/2026-09-community.md#rehearsal-of-the-new-chapters) |
+| Azure (chapter 13) | The example playbooks created a controller and two cloud-init targets; a one-shot playbook prepared a third VM created outside Ansible; all lessons, a Semaphore run, reboots, stop and start, and removal passed, with `changed=0` repeats. | [Azure record](validation/2026-09-azure.md) |
 | Reorganized chapters | Chapter 3b's exposure, STIG and repository-migration sections moved to [browser access](appendices/browser-access.md), [chapter 9](09-security-benchmarks.md#the-seeded-stig-templates) and [the Git migration appendix](appendices/git-migration.md) with their commands unchanged. The moves passed the offline checks. | This page |
 
 ## Not established
@@ -51,9 +52,10 @@ run; this page only summarizes them.
 - Clicking every UI form. The feature campaign drove Semaphore through its API
   and command line, with the same request bodies the UI sends; the chapters name
   the UI labels of 2.19.12.
-- The optional Azure chapter, chapter 2's manual ISO installation, editing
-  through VS Code Remote SSH in chapter 7, and the troubleshooting chapter's
-  diagnostics as a separate exercise.
+- Chapter 2's manual ISO installation, editing through VS Code Remote SSH in
+  chapter 7, and the troubleshooting chapter's diagnostics as a separate
+  exercise. The Azure chapter's own limits are in
+  [its record](validation/2026-09-azure.md#not-established).
 
 ## Repeat the offline checks
 
@@ -65,7 +67,9 @@ python3.12 -m venv .venv
 .venv/bin/python -m pip install -r requirements-dev.txt
 .venv/bin/python scripts/validate.py
 .venv/bin/python -m unittest discover -s tests -v
-for playbook in playbooks/*.yml examples/semaphore/*.yml; do
+.venv/bin/ansible-galaxy collection install -r examples/azure/requirements.yml
+for playbook in playbooks/*.yml examples/*.yml examples/semaphore/*.yml \
+    examples/azure/{network,controller,targets,power,remove}.yml; do
   .venv/bin/ansible-playbook -i inventories/lab.ini.example --syntax-check "$playbook"
 done
 .venv/bin/ansible-lint --offline playbooks/ examples/

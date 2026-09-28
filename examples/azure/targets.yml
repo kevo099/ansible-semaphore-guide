@@ -1,0 +1,68 @@
+---
+# Target VMs with private addresses only. cloud-init creates svc_ansible with the
+# controller's automation public key; sudo is configured later (chapter 4).
+- name: Create Azure target VMs
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars.yml
+  vars:
+    # Use the virtual environment that holds the Azure SDK, not the system Python.
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+    azure_required_vars: [azure_subscription_id, azure_tags, azure_targets]
+    automation_public_key: "{{ lookup('ansible.builtin.file', azure_automation_public_key_file) }}"
+  module_defaults:
+    group/azure.azcollection.all:
+      subscription_id: "{{ azure_subscription_id }}"
+      auth_source: cli
+  tasks:
+    - name: Check the variables
+      ansible.builtin.import_tasks: tasks-preflight.yml
+
+    - name: Accept only a single-line public key
+      ansible.builtin.assert:
+        that:
+          - automation_public_key is match('^(ssh-rsa|ssh-ed25519|ecdsa-sha2-nistp[0-9]+) [A-Za-z0-9+/=]+( .*)?$')
+          - "'PRIVATE KEY' not in automation_public_key"
+        fail_msg: azure_automation_public_key_file must be the automation key's .pub file.
+        quiet: true
+
+    - name: Target network interfaces (no public address)
+      azure.azcollection.azure_rm_networkinterface:
+        resource_group: "{{ azure_resource_group }}"
+        name: "nic-{{ item.name }}"
+        virtual_network: "{{ azure_vnet_name }}"
+        subnet_name: "{{ azure_subnet_name }}"
+        security_group: nsg-lab-targets
+        ip_configurations:
+          - name: ipconfig1
+            primary: true
+            private_ip_allocation_method: Static
+            private_ip_address: "{{ item.private_ip }}"
+        tags: "{{ azure_tags }}"
+      loop: "{{ azure_targets }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Target VMs with cloud-init
+      azure.azcollection.azure_rm_virtualmachine:
+        resource_group: "{{ azure_resource_group }}"
+        name: "{{ item.name }}"
+        vm_size: "{{ azure_vm_size }}"
+        admin_username: "{{ azure_admin_user }}"
+        ssh_password_enabled: false
+        ssh_public_keys:
+          - path: "/home/{{ azure_admin_user }}/.ssh/authorized_keys"
+            key_data: "{{ lookup('ansible.builtin.file', azure_admin_public_key_file) }}"
+        network_interface_names:
+          - "nic-{{ item.name }}"
+        image: "{{ item.image }}"
+        managed_disk_type: StandardSSD_LRS
+        os_disk_size_gb: 40
+        os_disk_delete_option: Delete
+        custom_data: "{{ lookup('ansible.builtin.template', 'templates/cloud-init-' ~ item.family ~ '.yaml.j2') }}"
+        tags: "{{ azure_tags }}"
+      loop: "{{ azure_targets }}"
+      loop_control:
+        label: "{{ item.name }}"

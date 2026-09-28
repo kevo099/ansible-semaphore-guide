@@ -83,6 +83,13 @@ requires independent verification. Do not turn off host checking to bypass it.
 
 ## Step 3: prepare a dedicated target account
 
+Steps 3 and 4 are also available as one playbook,
+[`examples/bootstrap-existing-vm.yml`](../examples/bootstrap-existing-vm.yml),
+run from the controller as the target's own administrator. It is useful for a
+VM that already exists, such as a cloud VM created in a portal;
+[chapter 13](13-azure.md#do-finish-access-with-one-playbook) shows it end to
+end. The manual steps below explain what it does.
+
 First copy the public key from the controller to each target administrator's
 home directory. This `scp`, like step 2's first connection, logs in to the
 target as your administrator. A cloud-image build usually accepts only the
