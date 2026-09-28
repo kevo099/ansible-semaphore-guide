@@ -313,6 +313,11 @@ if ! apply_ssh >"$work/apply" 2>&1; then
   apply_ssh >/dev/null 2>&1 || true
   fail "SSH did not apply the configuration: $(head -c 200 "$work/apply"); the previous drop-in was restored"
 fi
+# Report the settled state, not the moment of the reload.
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  [ "$(systemctl is-active "$ssh_unit" || true)" != reloading ] && break
+  sleep 1
+done
 if [ "$family" = debian ]; then
   ssh_running="ssh.service $(systemctl is-active ssh.service || true), ssh.socket $(systemctl is-active ssh.socket || true)"
 else
