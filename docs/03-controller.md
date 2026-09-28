@@ -386,12 +386,15 @@ folder.
 
 ## Update a controller to a newer guide release
 
-**Where: the controller, as its administrator.** A controller made by either
-installer can take a newer release of the guide without being reinstalled.
-[`scripts/update-controller.sh`](../scripts/update-controller.sh) works on
-both, and the installers refuse to run a second time, so use it instead of
-installing again. Get the newer copy of the guide first; replace `v1.6.0` with
-the release you want:
+**Where: the controller, as its administrator.** A controller whose installer
+seeded the practice project can take a newer release of the guide without being
+reinstalled: any Enterprise Linux controller, and an Ubuntu controller installed
+from release `v1.5.0` on. An Ubuntu controller from an earlier release has no
+seeded project, so the script refuses it; build its project by hand as
+[chapter 6](06-semaphore.md) describes. The installers refuse to run a second
+time, so use [`scripts/update-controller.sh`](../scripts/update-controller.sh)
+instead of installing again. Get the newer copy of the guide first; replace
+`v1.6.0` with the release you want:
 
 ```bash
 git clone --branch v1.6.0 https://github.com/kevo099/ansible-semaphore-guide.git ~/guide-new
@@ -423,27 +426,34 @@ sudo bash scripts/update-controller.sh --apply
 
 It changes nothing when the lab folder has staged changes, uncommitted changes
 to guide files, a link where a guide file or folder belongs, files that both
-changed, or no `.guide-files.json` after an earlier update removed it; it then
-says how to restore that file from Git. It also refuses to run twice at once.
-It then logs in to Semaphore and checks the project before changing anything;
-only templates bound to the lab folder's repository and inventory count as
-seeded, so a template of yours with the same name is left alone. In Semaphore it only adds what the project lacks, and puts a seeded
-template that has no tab on its tab. Before that it saves every template to a
-root-only file under `/root/ansible-lab-update/`, and it checks each template
-afterwards, putting it back if Semaphore changed any other setting. It never
-changes Semaphore itself, the database, Ansible, the inventory or keys, and a
-template you put on another tab keeps it.
+changed, or no `.guide-files.json` after an earlier update; it then says how to
+restore that file from Git, or how to apply a reverted update again. It also
+refuses to run twice at once.
+
+It then logs in to Semaphore and checks the project before changing anything.
+Only templates bound to the lab folder's repository and inventory count as
+seeded, so a template of yours with the same name is left alone. In Semaphore it
+only adds what the project lacks, and puts a seeded template that has no tab on
+its tab. Before that it saves every template to a root-only file under
+`/root/ansible-lab-update/`, and it confirms each template it edits, putting it
+back if Semaphore changed any other setting. If it cannot confirm an edit, it
+leaves a `pending-template-ID.json` record there, and later runs stop until you
+have checked that template in the UI and deleted the record. It never changes
+Semaphore itself, the database, Ansible, the inventory, keys, a template's
+variable groups, or a tab you chose.
 
 Last, it checks that the lab folder is exactly as planned; if you edited a
 guide file meanwhile, it stops without touching the folder, and a second run
-picks up from there. It writes the files as the lab folder's owner, so the
-`semaphore` group can still read them, restores SELinux labels on Enterprise Linux, and commits
-them in the folder's Git history with `.guide-files.json`, the record of the
-guide's own versions that the next update compares with; `git revert HEAD` in
-the folder undoes that commit. It finishes with the readiness check, and a
-second run reports nothing to do. With a different lab folder, add the same
-`--lab-dir DIR` the installer used. If several projects share the seeded
-project's name, pass `--project-id` with its ID.
+picks up from there. If you save a file in the very moment it is replaced, the
+swap is undone, your version stays, and the update stops. It writes the files
+as the lab folder's owner, so the `semaphore` group can still read them,
+restores SELinux labels on Enterprise Linux, and commits them in the folder's
+Git history with `.guide-files.json`, the record of the guide's own versions
+that the next update compares with. `git revert HEAD` in the folder undoes that
+commit; to apply the update again later, revert the revert. It finishes with
+the readiness check, and a second run reports nothing to do. With a different
+lab folder, add the same `--lab-dir DIR` the installer used. If several projects
+share the seeded project's name, pass `--project-id` with its ID.
 
 If you changed the administrator's password in the UI, the stored installer
 password no longer works, and it asks for a Semaphore administrator's login and
