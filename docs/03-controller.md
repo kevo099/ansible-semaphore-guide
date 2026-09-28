@@ -450,7 +450,7 @@ as the lab folder's owner, so the `semaphore` group can still read them,
 restores SELinux labels on Enterprise Linux, and commits them in the folder's
 Git history with `.guide-files.json`, the record of the guide's own versions
 that the next update compares with. `git revert HEAD` in the folder undoes that
-commit; to apply the update again later, revert the revert. It finishes with
+commit; running the update again applies it again. It finishes with
 the readiness check, and a second run reports nothing to do. With a different
 lab folder, add the same `--lab-dir DIR` the installer used. If several projects
 share the seeded project's name, pass `--project-id` with its ID.
