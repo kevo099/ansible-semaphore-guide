@@ -54,7 +54,7 @@ class InstallerPlanTests(unittest.TestCase):
                     result = self.run_installer(installer, *arguments)
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                     self.assertRegex(result.stdout, r"(?m)^Plan:")
-                    self.assertIn("eleven", result.stdout)
+                    self.assertIn("twelve", result.stdout)
                     self.assertIn("local folder", result.stdout)
                     self.assertFalse((self.work / "unused-lab").exists())
 

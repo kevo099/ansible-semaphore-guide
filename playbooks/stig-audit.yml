@@ -10,6 +10,10 @@
     stig_profile_el: xccdf_org.ssgproject.content_profile_stig
     stig_usg_profile: disa_stig
     stig_fetch_remote_resources: false
+    # Optional: scan with a SCAP data stream you supply, such as a DISA SCAP
+    # benchmark in the lab folder's content/ directory, and one of its profile IDs.
+    stig_content_file: ''
+    stig_content_profile: ''
     stig_stamp: "{{ ansible_facts['date_time']['iso8601_basic_short'] }}"
     stig_remote_dir: "/var/log/stig-practice/{{ stig_stamp }}"
     stig_fetch_dir: "{{ lookup('env', 'HOME') }}/stig-reports/{{ stig_stamp }}"

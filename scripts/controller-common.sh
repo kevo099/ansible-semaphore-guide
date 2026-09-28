@@ -153,7 +153,7 @@ controller_seed_lab() {
 
   # 11. Local lab folder owned by the editor, readable by the service
   (umask 022; mkdir -p -- "$(dirname -- "$lab_dir")")
-  install -d -o "$editor" -g semaphore -m 2750 "$lab_dir" "$lab_dir/inventories"
+  install -d -o "$editor" -g semaphore -m 2750 "$lab_dir" "$lab_dir/inventories" "$lab_dir/content"
   cp -r "$repo_dir/playbooks" "$lab_dir/playbooks"
   install -o "$editor" -g semaphore -m 0640 "$repo_dir/ansible.cfg" "$lab_dir/ansible.cfg"
   install -d -o "$editor" -g semaphore -m 2750 "$lab_dir/scripts"

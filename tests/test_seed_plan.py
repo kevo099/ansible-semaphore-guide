@@ -18,7 +18,7 @@ def load(name):
 
 seed = load("seed-semaphore")
 IDS = {"none_key": 1, "ssh_key": 2, "repository": 3, "inventory": 4,
-       "environments": {"Practice defaults": 5, "Allow required reboot": 6}}
+       "environments": {"Practice defaults": 5, "Allow required reboot": 6, "Local SCAP content": 8}}
 
 
 class SeedPlanTests(unittest.TestCase):
@@ -48,7 +48,8 @@ class SeedPlanTests(unittest.TestCase):
             arguments = json.loads(template["arguments"])
             # The limit lives in the template's Ansible options, never duplicated as an argument.
             self.assertNotIn("--limit", " ".join(arguments))
-            if template["playbook"].endswith("stig-apply.yml"):
+            if (template["playbook"].endswith("stig-apply.yml")
+                    or template["environment_ids"] == [IDS["environments"]["Local SCAP content"]]):
                 self.assertEqual(template["task_params"], {"limit": [], "allow_override_limit": True})
             else:
                 self.assertEqual(template["task_params"], {"limit": ["lab"]})
@@ -95,6 +96,18 @@ class SeedPlanTests(unittest.TestCase):
 
     def test_plan_carries_no_private_key_material(self):
         self.assertNotIn("PRIVATE", json.dumps(self.plan()))
+
+
+    def test_local_content_template_audits_with_placeholders_the_playbook_refuses(self):
+        plan = self.plan()
+        local = [t for t in plan["templates"]
+                 if t["environment_ids"] == [IDS["environments"]["Local SCAP content"]]]
+        self.assertEqual([t["name"] for t in local], ["STIG audit, local SCAP content"])
+        self.assertEqual(local[0]["playbook"], "playbooks/stig-audit.yml")
+        self.assertEqual(local[0]["survey_vars"], [])
+        values = json.loads(plan["environments"]["Local SCAP content"]["json"])
+        self.assertEqual(set(values), {"stig_content_file", "stig_content_profile"})
+        self.assertTrue(all("REPLACE_WITH" in value for value in values.values()))
 
 
 if __name__ == "__main__":

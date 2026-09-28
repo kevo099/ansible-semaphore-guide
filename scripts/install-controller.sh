@@ -61,7 +61,7 @@ Plan:
      keeps inventories/, host_vars/ and group_vars/ out of the folder's Git
      history. Confirm the semaphore account can read the inventory.
  12. Seed Semaphore through its API: project, keys, local folder repository,
-     file inventory, variable groups and eleven scoped task templates.
+     file inventory, variable groups and twelve scoped task templates.
  13. With --expose, publish the UI on this VM's address (TLS proxy or plain HTTP).
 PLAN
   exit 0
