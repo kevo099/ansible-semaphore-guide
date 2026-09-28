@@ -122,17 +122,41 @@ packages="present${missing[0]:+, installed ${missing[*]}}"
 # --- Keys: readable, and at least one accepted by this SSH server -----------------
 # Match rules that depend on where a client connects from are evaluated for one
 # address only. Without the controller's, the check could not speak for it.
+# The main file and every file it includes, as sshd reads them.
+sshd_files() {
+  local depth=$1 file pattern
+  shift
+  [ "$depth" -le 16 ] || return 0
+  for file in "$@"; do
+    [ -f "$file" ] || continue
+    printf '%s\n' "$file"
+    while read -r pattern; do
+      [[ $pattern == /* ]] || pattern=/etc/ssh/$pattern
+      # shellcheck disable=SC2086  # the Include pattern is a glob to expand
+      sshd_files $((depth + 1)) $pattern
+    done < <(awk 'tolower($1) == "include" {for (i = 2; i <= NF; i++) print $i}' "$file")
+  done
+}
+mapfile -t config_files < <(sshd_files 1 /etc/ssh/sshd_config | sort -u)
 address_rules=$(grep -hEi '^[[:space:]]*Match[[:space:]].*\b(Address|Host|LocalAddress|LocalPort|RDomain)\b' \
-  /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null) || address_rules=
+  "${config_files[@]}" 2>/dev/null) || address_rules=
 if [ -n "$address_rules" ] && [ -z "$CONTROLLER_ADDRESS" ]; then
   fail "the SSH configuration has Match rules that depend on the client's address; set CONTROLLER_ADDRESS to the controller's address as this VM sees it"
 fi
 # The effective SSH settings for the account connecting from the controller.
+# Every way the controller can arrive: each of this VM's addresses and SSH ports.
 addr=${CONTROLLER_ADDRESS:-127.0.0.1}
-laddr=$(hostname -I 2>/dev/null | awk '{print $1}') || laddr=
-lport=$(/usr/sbin/sshd -T 2>/dev/null | awk '$1 == "port" && !p {print $2; p = 1}') || lport=
-sshd_context="user=$account,host=$addr,addr=$addr,laddr=${laddr:-127.0.0.1},lport=${lport:-22}"
-policy_before=$(/usr/sbin/sshd -T -C "$sshd_context" 2>/dev/null) || fail "sshd -T could not read the SSH configuration"
+read -r -a local_addresses <<<"$(hostname -I 2>/dev/null || true)"
+[ "${#local_addresses[@]}" -gt 0 ] || local_addresses=(127.0.0.1)
+mapfile -t ports < <(/usr/sbin/sshd -T 2>/dev/null | awk '$1 == "port" {print $2}')
+[ "${#ports[@]}" -gt 0 ] || ports=(22)
+contexts=()
+for laddr in "${local_addresses[@]}"; do
+  for lport in "${ports[@]}"; do
+    contexts+=("user=$account,host=$addr,addr=$addr,laddr=$laddr,lport=$lport")
+  done
+done
+policy_before=$(/usr/sbin/sshd -T -C "${contexts[0]}" 2>/dev/null) || fail "sshd -T could not read the SSH configuration"
 accepted=$(awk '$1 == "pubkeyacceptedalgorithms" {print $2}' <<<"$policy_before")
 # OpenSSH 9.1 and later report RequiredRSASize; the guide never accepts less than 2048 bits.
 min_rsa=$(awk '$1 == "requiredrsasize" {print $2}' <<<"$policy_before")
@@ -169,6 +193,7 @@ else
   useradd --create-home --shell /bin/bash "$account"
   account_state=created
 fi
+uid=$(id -u "$account")
 home=$(getent passwd "$account" | cut -d: -f6)
 [ -d "$home" ] || fail "$account has no home directory $home"
 
@@ -280,16 +305,32 @@ chmod 0644 "$ssh_dropin"
 restore_dropin() {
   if [ -e "$work/dropin.before" ]; then cp -p "$work/dropin.before" "$ssh_dropin"; else rm -f "$ssh_dropin"; fi
 }
+# Does the effective AuthorizedKeysFile include the file this script wrote?
+reads_key_file() {
+  local entry path entries
+  read -r -a entries <<<"$(awk '$1 == "authorizedkeysfile" {$1 = ""; print}' <<<"$1")"
+  for entry in "${entries[@]}"; do
+    path=${entry//%%/$'\001'}
+    path=${path//%h/$home}
+    path=${path//%u/$account}
+    path=${path//%U/$uid}
+    path=${path//$'\001'/%}
+    [[ $path == /* ]] || path=$home/$path
+    [ "$path" = "$home/.ssh/authorized_keys" ] && return 0
+  done
+  return 1
+}
 ssh_problem() {
   /usr/sbin/sshd -t >"$work/sshd-t" 2>&1 || { echo "sshd -t: $(head -c 300 "$work/sshd-t")"; return; }
-  local policy line
-  policy=$(/usr/sbin/sshd -T -C "$sshd_context" 2>&1) || { echo "sshd -T: ${policy:0:300}"; return; }
-  for line in 'authenticationmethods publickey' 'passwordauthentication no' \
-              'kbdinteractiveauthentication no' 'pubkeyauthentication yes'; do
-    grep -qx "$line" <<<"$policy" || { echo "another setting overrides '$line' for $account"; return; }
+  local context policy line
+  for context in "${contexts[@]}"; do
+    policy=$(/usr/sbin/sshd -T -C "$context" 2>&1) || { echo "sshd -T: ${policy:0:300}"; return; }
+    for line in 'authenticationmethods publickey' 'passwordauthentication no' \
+                'kbdinteractiveauthentication no' 'pubkeyauthentication yes'; do
+      grep -qx "$line" <<<"$policy" || { echo "another setting overrides '$line' for $account (${context#*,})"; return; }
+    done
+    reads_key_file "$policy" || { echo "AuthorizedKeysFile does not include $home/.ssh/authorized_keys"; return; }
   done
-  grep -Eq '^authorizedkeysfile (.* )?(\.ssh/authorized_keys|%h/\.ssh/authorized_keys)( |$)' <<<"$policy" ||
-    echo "AuthorizedKeysFile does not include .ssh/authorized_keys for $account"
 }
 problem=$(ssh_problem)
 if [ -n "$problem" ]; then
@@ -331,7 +372,7 @@ note "account: $account $account_state; authorized keys $keys_state:"
 ssh-keygen -lf "$home/.ssh/authorized_keys" | cut -c1-110 | sed 's/^/  /'
 note "password: $password_state"
 note "sudo: $sudoers_file $sudo_state; $account's own password is required"
-note "ssh: $ssh_dropin $ssh_state; $ssh_running; key only for $account, checked from $addr"
+note "ssh: $ssh_dropin $ssh_state; $ssh_running; key only for $account, checked from $addr to ${#contexts[@]} local address and port pair(s)"
 note "host keys to compare with ssh-keyscan from the controller:"
 for pub in /etc/ssh/ssh_host_*_key.pub; do
   ssh-keygen -lf "$pub" | awk '{print "  " $1, $2, $NF}'

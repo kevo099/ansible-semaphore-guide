@@ -158,8 +158,10 @@ into the portal yourself, as the next section shows. At first boot it:
   Ubuntu; `python3-dnf` and `python3-libselinux` on Enterprise Linux;
 - checks the sudo configuration and the effective SSH policy for
   `svc_ansible`, including that an authorized key is of a type and RSA size
-  the server accepts, removes a rule or drop-in that fails its check, and
-  starts SSH if neither its service nor, on Ubuntu, its socket is running;
+  the server accepts and that `AuthorizedKeysFile` reads the file it wrote;
+  it removes a sudoers rule that does not parse, sets the SSH drop-in aside
+  only if the drop-in is what breaks `sshd -t`, and starts SSH if neither its
+  service nor, on Ubuntu, its socket is running;
 - makes cloud-init report an error when anything failed, including a key that
   is missing because the placeholder was not replaced. It checks the SSH
   policy from loopback, because the controller's address is unknown at first
@@ -310,8 +312,8 @@ does what `bootstrap-existing-vm.yml` does, and is safe to run again:
   redirect root; SELinux labels are restored on Enterprise Linux;
 - installs the Python bindings, `sudo` and the SSH server where missing;
 - refuses before any change when no given key can log in under the VM's SSH
-  crypto policy, for example an Ed25519 key on a host hardened to `FIPS:STIG`
-  or an RSA key shorter than 2048 bits;
+  crypto policy, for example an Ed25519 key on a host hardened to `FIPS:STIG`,
+  or an RSA key shorter than 2048 bits or than the server's `RequiredRSASize`;
 - enforces the modes of the home directory, `.ssh` and the key file on every
   run, because SSH ignores keys in a writable location;
 - writes and enforces the sudoers rule and the SSH drop-in, checks the whole
@@ -331,9 +333,10 @@ seeded controller also the service key from
 quoted here-document, so a key comment with quotes or `$(...)` is stored as
 text and never run. Optionally set `CONTROLLER_ADDRESS` to the controller's
 address as the VM sees it, so the SSH check evaluates the policy for that
-address. Empty, it checks from loopback, which gives the same answer unless a
-`Match` rule depends on the client's address; the script then stops and asks
-for `CONTROLLER_ADDRESS`.
+address arriving on each of the VM's addresses and SSH ports. Empty, it checks
+from loopback, which gives the same answer unless a `Match` rule, in any file
+the configuration includes, depends on the client's address; the script then
+stops and asks for `CONTROLLER_ADDRESS`.
 
 In the portal: open the VM, then **Operations → Run command → RunShellScript**,
 paste the edited script and select **Run**. With the Azure CLI:

@@ -46,6 +46,7 @@ resource group, which was then deleted.
 | After the final review, `onboard-linux.sh` | Stopped and asked for `CONTROLLER_ADDRESS` when a `Match ... Address` rule existed and none was given; refused a 1024-bit RSA key and an Ed25519 key under an RSA-only policy; with the same keys, reset a `.ssh` of mode 0777 and a key file of 0666 to 0700 and 0600. |
 | After the final review, the cloud-init checks | Run as root on existing VMs: a wrong `AuthorizedKeysFile` and `Defaults rootpw` each ended in an error; with `ssh.service` and `ssh.socket` stopped on Ubuntu, and `sshd` stopped on RHEL, it started SSH and finished. Two fresh VMs, Ubuntu 24.04 and AlmaLinux 9.8, then reported `svc_ansible is ready`. |
 | Managed Run Command with two keys | The unedited script, with both keys in one parameter, the controller address as a parameter and the hash protected, reported every part unchanged. |
+| Final cloud-init file on fresh VMs | Ubuntu 24.04 and AlmaLinux 9.8 created with the final file reported `status: done` and `svc_ansible is ready`. |
 
 ## Results: vendor STIG on Azure
 
@@ -103,23 +104,27 @@ run, from a workstation through the controller:
 
 ## Review and retest
 
-Two adversarial reviews examined the onboarding files. The first found
+Three adversarial reviews examined the onboarding files. The first found
 seventeen problems. The second, run on the branch before publishing, found
-that four of those were only partly fixed and raised eight more. All are
-fixed; the table says how each was retested.
+that four of those were only partly fixed and raised eight more. A third pass
+verified those fixes: nine held, three were still partial, and two fixes had
+introduced new bugs (the playbook refused RSA keys on a server that allows only
+`rsa-sha2-256`, and an absolute `AuthorizedKeysFile` was rejected). Those five
+were then fixed and retested live. The table gives each problem's final fix
+and the retest behind it.
 
 | Problem | Fix | Retest |
 | --- | --- | --- |
 | A key comment could break out of the shell string and run code as root | Keys are read through a quoted here-document | Live: a comment with quotes and `$(touch ...)` was stored as text; nothing ran |
 | Root wrote into the account's own `.ssh`, where a planted link could redirect it | The account writes its own key file | Offline review; live runs wrote the file as `svc_ansible` |
 | Only `sudo -n true` was tested, missing command-specific `NOPASSWD` rules and `rootpw`-style defaults | The full `sudo -l` listing is checked, in the script, the playbook and cloud-init | Live: a command-specific `NOPASSWD` rule and `Defaults rootpw` were refused |
-| The SSH check used loopback, which can differ from the controller's address | `CONTROLLER_ADDRESS`; without it, a `Match` rule on the client's address stops the script, and cloud-init reports an error | Live: a `Match User ... Address` block was refused with and without the address |
-| `pubkeyauthentication` and the authorized-keys path were not checked | Both are required, in all three paths | Live: a wrong `AuthorizedKeysFile` ended cloud-init's check in an error |
+| The SSH check used loopback, which can differ from the controller's address | `CONTROLLER_ADDRESS`, checked for each of the VM's addresses and SSH ports; without it, a `Match` rule on the client's address, found by following every `Include`, stops the script and makes cloud-init report an error; the playbook uses its own connection's addresses and ports | Live: a `Match User ... Address` block, directly and in a nested `Include`, was refused with and without the address |
+| `pubkeyauthentication` and the authorized-keys path were not checked | Both are required in all three paths, with `%h`, `%u` and relative paths resolved | Live: a wrong `AuthorizedKeysFile` ended in an error; `/home/%u/.ssh/authorized_keys` was accepted by all three |
 | A failed reload could look like success on a later run, and an inactive server went unnoticed | Every check after the drop-in is guarded; SSH is reloaded when running and started when neither it nor its socket is | Live: stopped SSH units were started on Ubuntu and RHEL |
 | A malformed `rounds=` value would have been installed | Rounds must be 1000 to 999999999 without leading zeros | Live: `rounds=0` was refused |
 | Ownership and modes were not enforced when the content already matched | Enforced on every run, as the account for its own files | Live: modes 0777 and 0666 were reset |
-| A key the server rejects could replace every working key | At least one key must match the accepted algorithms and a 2048-bit RSA minimum, in all three paths | Live: Ed25519-only and 1024-bit RSA key lists were refused |
-| cloud-init reported success after failures and missed a missing key | Failures are collected and end in an error | Live: the placeholder VM reported `status: error` |
+| A key the server rejects could replace every working key | At least one key must match an accepted algorithm, any of the RSA ones for an RSA key, and the larger of 2048 bits and `RequiredRSASize`, in all three paths | Live: Ed25519-only and 1024-bit key lists were refused; under `rsa-sha2-256` only and `RequiredRSASize 3072`, the playbook accepted RSA 4096 keys and refused a 1024-bit one |
+| cloud-init reported success after failures and missed a missing key, and removed its drop-in after any failed check | Failures are collected and end in an error; the drop-in is set aside only when it is what makes `sshd -t` fail | Live: the placeholder VM reported `status: error`; with a nested address rule the drop-in stayed in place |
 | The Azure administrator named `svc_ansible` would keep passwordless sudo | `targets.yml` refuses that name, and cloud-init reports it | Offline: the assertion; not provisioned |
 | Smaller issues: check order, YAML-breaking key comments, the 4 KB output limit | Checks reordered, the portal instructions updated, the result line printed last | Live runs above |
 | Documentation: the local-content command ran from the wrong folder without credentials; the managed example dropped the service key; seeded exceptions named only Enterprise Linux; template limits and counts were out of date | Corrected in chapters 4, 6, 9, 13 and 3b and in the catalog | Offline checks |
@@ -129,7 +134,6 @@ fixed; the table says how each was retested.
 - Rocky Linux on Azure, ARM64 sizes, Trusted Launch or confidential VMs, and
   other regions.
 - FIPS mode, Ubuntu FIPS kernels, and STIG applied to the controllers.
-- Several keys passed as one managed Run Command parameter; the test passed one.
 - The per-target Vault option for sudo passwords on a seeded controller; the
   test used one shared sudo credential on the inventory.
 - A comparison with DISA's SCAP Compliance Checker on the same targets.
