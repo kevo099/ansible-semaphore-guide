@@ -1,16 +1,23 @@
 #!/usr/bin/env python3
-"""Seed a fresh Semaphore controller with the guide's practice project.
+"""Seed a fresh Semaphore controller with the guide's practice project, or update one.
 
-Runs on the controller as root after the installer. It logs in with the
-locally generated admin password, creates one project and its dependent
-objects through the HTTP API on loopback, including the vendor STIG lessons,
-and prints only names and numeric identifiers. It refuses to run twice.
+Runs on the controller as root. Without --update, the installer runs it once: it
+logs in with the locally generated admin password, creates one project and its
+dependent objects through the HTTP API on loopback, including the vendor STIG
+lessons, and prints only names and numeric identifiers. It refuses to run twice.
+
+With --update, scripts/update-controller.sh runs it on a controller that is
+already seeded: it adds the variable groups, template tabs and templates this
+release seeds that the project lacks, and puts untabbed seeded templates on
+their tab. It changes nothing else. --plan shows what an update would do.
 """
 
 import argparse
 import copy
+import getpass
 import http.cookiejar
 import json
+import os
 from pathlib import Path
 import sys
 import time
@@ -66,6 +73,16 @@ VARIABLE_GROUPS = {
 }
 
 
+# Template tabs, which Semaphore calls views. Every seeded template belongs to one.
+VIEWS = [
+    ("Lessons", ["Ping", "Baseline preview", "Baseline apply", "Users", "Webserver"]),
+    ("Patching", ["Patch preview", "Patch, no reboot", "Patch, allow required reboot"]),
+    ("STIG", ["STIG audit (vendor scan only)", "STIG apply (vendor fixes, approval required)",
+              "STIG apply, allow required reboot", "STIG audit, local SCAP content"]),
+]
+VIEW_OF = {name: title for title, names in VIEWS for name in names}
+
+
 def lab_dir_path(value):
     """The repository URL must be an absolute directory so Semaphore treats it as local."""
     path = Path(value)
@@ -96,6 +113,8 @@ def template_payload(project_id, ids, lesson):
         "allow_override_args_in_task": False,
         "suppress_success_alerts": False,
         "survey_vars": prompt,
+        # Without a tab, Semaphore lists the template only under All.
+        "view_id": ids.get("views", {}).get(VIEW_OF.get(name)),
     }
 
 
@@ -108,6 +127,11 @@ def inventory_payload(project_id, ids):
     return {"project_id": project_id, "name": "Lab inventory file", "type": "file",
             "inventory": "inventories/lab.ini", "repository_id": ids["repository"],
             "ssh_key_id": ids["ssh_key"]}
+
+
+def view_payloads(project_id, first_position=0):
+    return {title: {"project_id": project_id, "title": title, "position": first_position + index}
+            for index, (title, _names) in enumerate(VIEWS)}
 
 
 def environment_payloads(project_id):
@@ -123,8 +147,58 @@ def seed_plan(project_id, ids, lab_dir, ssh_login):
         "repository": repository_payload(project_id, ids, lab_dir),
         "inventory": inventory_payload(project_id, ids),
         "environments": environment_payloads(project_id),
+        "views": view_payloads(project_id),
         "templates": [template_payload(project_id, ids, lesson) for lesson in LESSONS],
     }
+
+
+def update_plan(existing, repository_id, inventory_id):
+    """Pure description of what an update adds, given the project's current objects.
+
+    existing holds lists as the API returns them: "environments", "views" (id,
+    title, position) and "templates". Only templates bound to the lab folder's
+    repository and inventory count as seeded; a template of yours with a seeded
+    name elsewhere is never touched. Existing objects are never changed, except
+    that a seeded template without a tab is put on its tab. Duplicate names that
+    the update would have to choose between are reported and stop an apply.
+    """
+    env_names = [env["name"] for env in existing["environments"]]
+    view_titles = [view["title"] for view in existing["views"]]
+    seeded = [t for t in existing["templates"] if t["name"] in VIEW_OF
+              and t.get("repository_id") == repository_id and t.get("inventory_id") == inventory_id]
+    seeded_names = [t["name"] for t in seeded]
+    duplicated = sorted({name for name in seeded_names if seeded_names.count(name) > 1})
+    missing_templates = [lesson[0] for lesson in LESSONS if lesson[0] not in seeded_names]
+    tabs = [{"id": t["id"], "name": t["name"]} for t in seeded
+            if not t.get("view_id") and t["name"] not in duplicated]
+    needed_views = {VIEW_OF[name] for name in missing_templates} | {VIEW_OF[t["name"]] for t in tabs}
+    needed_envs = {lesson[3] for lesson in LESSONS if lesson[0] in missing_templates}
+    ambiguous = sorted([f"variable group {name!r}" for name in needed_envs if env_names.count(name) > 1]
+                       + [f"tab {title!r}" for title in needed_views if view_titles.count(title) > 1])
+    return {
+        "environments": [name for name in VARIABLE_GROUPS if name not in env_names],
+        "views": [title for title, _names in VIEWS if title not in view_titles],
+        "templates": missing_templates,
+        "tabs": sorted(tabs, key=lambda t: (t["name"], t["id"])),
+        "duplicates": duplicated,
+        "ambiguous": ambiguous,
+    }
+
+
+def first_free_position(views):
+    return max((view.get("position") or 0 for view in views), default=-1) + 1
+
+
+# The settings an update must never lose when it puts a template on a tab.
+KEPT_FIELDS = ("name", "app", "playbook", "inventory_id", "repository_id", "environment_ids",
+               "arguments", "task_params", "survey_vars", "vaults", "description", "type",
+               "allow_override_args_in_task", "suppress_success_alerts")
+
+
+def kept_settings(template):
+    settings = {field: template.get(field) for field in KEPT_FIELDS}
+    settings["environment_ids"] = sorted(settings["environment_ids"] or [])
+    return settings
 
 
 def parse_body(raw):
@@ -138,8 +212,9 @@ def parse_body(raw):
 
 
 class Client:
-    def __init__(self, base):
+    def __init__(self, base, token=None):
         self.base = base
+        self.token = token
         self.opener = urllib.request.build_opener(
             urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar())
         )
@@ -148,6 +223,8 @@ class Client:
         data = json.dumps(body).encode() if body is not None else None
         request = urllib.request.Request(self.base + path, data=data, method=method)
         request.add_header("Content-Type", "application/json")
+        if self.token:
+            request.add_header("Authorization", f"Bearer {self.token}")
         try:
             with self.opener.open(request, timeout=30) as response:
                 raw = response.read()
@@ -167,15 +244,212 @@ def wait_ready(client):
     raise SystemExit("Semaphore did not answer /api/ping")
 
 
+def log_in(client, admin_login, ask=False):
+    """Use SEMAPHORE_API_TOKEN when set, otherwise the installer's admin password.
+
+    With ask, a password that is missing or no longer works (changed in the UI)
+    is asked for at the terminal, without echo; it goes only to Semaphore on loopback.
+    """
+    if client.token:
+        client.call("GET", "/user")
+        return
+    try:
+        password = Path("/etc/semaphore/initial-admin-password").read_text().strip()
+    except OSError:
+        password = None
+    if password is not None:
+        try:
+            client.call("POST", "/auth/login", {"auth": admin_login, "password": password})
+            return
+        except SystemExit:
+            pass
+    if not (ask and sys.stdin.isatty()):
+        raise SystemExit("The installer's admin password is missing or no longer logs in. Run this "
+                         "from a terminal to be asked for a Semaphore administrator's login and "
+                         "password, or set SEMAPHORE_API_TOKEN to an API token. Nothing was changed.")
+    print("The installer's admin password is missing or no longer logs in (changed in the UI?).",
+          file=sys.stderr)
+    try:
+        login = input(f"Semaphore administrator login [{admin_login}]: ").strip() or admin_login
+        password = getpass.getpass("Password: ")
+    except (EOFError, KeyboardInterrupt):
+        raise SystemExit("\nNo login given; nothing was changed.") from None
+    try:
+        client.call("POST", "/auth/login", {"auth": login, "password": password})
+    except SystemExit:
+        raise SystemExit("That login and password did not work; nothing was changed.") from None
+
+
+def exactly_one(items, what, hint):
+    if len(items) != 1:
+        found = ", ".join(str(item["id"]) for item in items) or "none"
+        raise SystemExit(f"Expected one {what}, found {len(items)} (IDs: {found}). {hint} Nothing was changed.")
+    return items[0]
+
+
+def resolve(client, project_name, lab_dir, project_id=None):
+    """Find the seeded project and its lab folder objects by what they are, not only by name."""
+    projects = client.call("GET", "/projects") or []
+    matches = ([p for p in projects if p["id"] == project_id] if project_id
+               else [p for p in projects if p.get("name") == project_name])
+    project = exactly_one(matches, f"project named {project_name!r}",
+                          "Pass --project-id with the ID of the seeded one.")
+    base = f"/project/{project['id']}"
+    repository = exactly_one(
+        [r for r in client.call("GET", f"{base}/repositories") or []
+         if (r.get("git_url") or "").rstrip("/") == lab_dir.rstrip("/")],
+        f"repository whose URL is the lab folder {lab_dir}", "Check --lab-dir.")
+    inventory = exactly_one(
+        [i for i in client.call("GET", f"{base}/inventory") or []
+         if i.get("type") == "file" and i.get("repository_id") == repository["id"]
+         and i.get("inventory") == "inventories/lab.ini"],
+        "file inventory inventories/lab.ini in that repository", "Add missing templates by hand.")
+    return {
+        "project": project, "base": base, "repository": repository, "inventory": inventory,
+        "environments": client.call("GET", f"{base}/environment") or [],
+        "views": client.call("GET", f"{base}/views") or [],
+        "templates": client.call("GET", f"{base}/templates") or [],
+    }
+
+
+def plan_for(found):
+    return update_plan({key: found[key] for key in ("environments", "views", "templates")},
+                       found["repository"]["id"], found["inventory"]["id"])
+
+
+def pending_edits(backup_dir):
+    """Template edits an earlier update began but could not confirm; each blocks an apply."""
+    found = []
+    for path in sorted(backup_dir.glob("pending-template-*.json")):
+        try:
+            name = json.loads(path.read_text()).get("name", "?")
+        except (OSError, ValueError):
+            name = "?"
+        found.append({"name": name, "record": str(path)})
+    return found
+
+
+def save_verified(client, path, before, desired, backup_dir):
+    """PUT desired and confirm every kept setting; otherwise put before back and stop.
+
+    A record of the template as it was is written first and removed only once the
+    result is confirmed, so an edit that could not be confirmed stops later runs
+    until you have checked that template.
+    """
+    record = backup_dir / f"pending-template-{before['id']}.json"
+    with open(os.open(record, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as handle:
+        json.dump(before, handle, indent=2)
+        handle.flush()
+        os.fsync(handle.fileno())
+    failed = None
+    try:
+        client.call("PUT", path, desired)
+        if kept_settings(client.call("GET", path)) == kept_settings(desired):
+            record.unlink()
+            return
+    except SystemExit as error:
+        failed = error
+    try:
+        client.call("PUT", path, before)
+        restored = kept_settings(client.call("GET", path)) == kept_settings(before)
+    except SystemExit:
+        restored = False
+    if restored:
+        record.unlink()
+        state = "its settings were put back"
+    else:
+        state = f"compare it in the UI with {record}, which holds it as it was, then delete that file"
+    raise SystemExit(f"Semaphore did not save template {desired['name']!r} as intended"
+                     + (f" ({failed})" if failed else "") + f"; {state}. Stopped there; run the update again "
+                     "once the cause is fixed.")
+
+
+def apply_update(client, found, plan, backup_dir, say=print):
+    """Add what the plan lists. Returns the path of the template backup, if one was taken."""
+    if plan["ambiguous"]:
+        raise SystemExit("Several objects share a name the update needs: " + "; ".join(plan["ambiguous"])
+                         + ". Rename or remove the extra ones, then run again. Nothing was changed.")
+    pending = pending_edits(backup_dir)
+    if pending:
+        raise SystemExit("An earlier update could not confirm its edit of " + ", ".join(
+            f"{item['name']!r} (see {item['record']})" for item in pending)
+            + ". Check that template in the UI, delete the record, and run again. Nothing was changed.")
+    base, project_id = found["base"], found["project"]["id"]
+    backup = None
+    if plan["tabs"]:
+        # Semaphore rewrites a template's variable-group links when it saves one; keep
+        # every template as it was, root-only, before changing any of them.
+        backup_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        # Names sort by time, and two runs in one second never share one.
+        stamp = time.time_ns()
+        backup = backup_dir / f"semaphore-templates-{time.strftime('%Y%m%dT%H%M%S', time.localtime(stamp // 10**9))}-{stamp % 10**9:09d}.json"
+        details = [client.call("GET", f"{base}/templates/{t['id']}") for t in found["templates"]]
+        with open(os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as handle:
+            json.dump(details, handle, indent=2)
+        say(f"Templates as they were before: {backup}")
+
+    ids = {"repository": found["repository"]["id"], "inventory": found["inventory"]["id"],
+           "environments": {env["name"]: env["id"] for env in found["environments"]},
+           "views": {view["title"]: view["id"] for view in found["views"]}}
+    for name in plan["environments"]:
+        body = environment_payloads(project_id)[name]
+        ids["environments"][name] = client.call("POST", f"{base}/environment", body)["id"]
+    position = first_free_position(found["views"])
+    for title in plan["views"]:
+        body = {"project_id": project_id, "title": title, "position": position}
+        ids["views"][title] = client.call("POST", f"{base}/views", body)["id"]
+        position += 1
+    for lesson in LESSONS:
+        if lesson[0] in plan["templates"]:
+            client.call("POST", f"{base}/templates", template_payload(project_id, ids, lesson))
+    for tab in plan["tabs"]:
+        path = f"{base}/templates/{tab['id']}"
+        before = client.call("GET", path)
+        if before.get("view_id"):
+            say(f"Kept the tab you gave {tab['name']!r} meanwhile")
+            continue
+        save_verified(client, path, before, dict(before, view_id=ids["views"][VIEW_OF[tab["name"]]]), backup_dir)
+    return backup
+
+
+def update(client, args):
+    """--update for seed-semaphore.py itself; update-controller.py calls the parts directly."""
+    found = resolve(client, args.project_name, args.lab_dir, getattr(args, "project_id", None))
+    plan = plan_for(found)
+    result = {"project": {"name": found["project"]["name"], "id": found["project"]["id"]},
+              "planned" if args.plan else "done": plan}
+    if not args.plan:
+        backup = apply_update(client, found, plan, Path("/root/ansible-lab-update"), say=lambda _text: None)
+        if backup:
+            result["template_backup"] = str(backup)
+    print(json.dumps(result, indent=2))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--lab-dir", type=lab_dir_path, required=True)
-    parser.add_argument("--key-file", type=Path, required=True, help="private automation key, root-only")
-    parser.add_argument("--known-hosts", type=Path, required=True)
+    parser.add_argument("--key-file", type=Path, help="private automation key, root-only (seeding only)")
+    parser.add_argument("--known-hosts", type=Path, help="Semaphore's known_hosts file (seeding only)")
     parser.add_argument("--project-name", default="Ansible Practice")
     parser.add_argument("--ssh-login", default="svc_ansible")
     parser.add_argument("--admin-login", default="admin")
+    parser.add_argument("--update", action="store_true", help="add what this release seeds to a seeded project")
+    parser.add_argument("--plan", action="store_true", help="with --update, only show what would change")
+    parser.add_argument("--project-id", type=int, help="with --update, the seeded project's ID when names repeat")
     args = parser.parse_args()
+
+    if args.update:
+        if not MARKER.exists():
+            raise SystemExit("This controller was not seeded by the installer; there is no project to update")
+        client = Client(API, os.environ.get("SEMAPHORE_API_TOKEN") or None)
+        wait_ready(client)
+        log_in(client, args.admin_login, ask=True)
+        update(client, args)
+        return 0
+    if args.plan:
+        raise SystemExit("--plan applies only to --update")
+    if args.key_file is None or args.known_hosts is None:
+        raise SystemExit("Seeding needs --key-file and --known-hosts")
 
     if MARKER.exists():
         raise SystemExit("Practice project already seeded; manage further changes in the UI")
@@ -185,11 +459,10 @@ def main():
     private_key = args.key_file.read_text()
     if "PRIVATE KEY-----" not in private_key:
         raise SystemExit("The key file does not look like an OpenSSH private key")
-    password = Path("/etc/semaphore/initial-admin-password").read_text().strip()
 
     client = Client(API)
     wait_ready(client)
-    client.call("POST", "/auth/login", {"auth": args.admin_login, "password": password})
+    log_in(client, args.admin_login)
 
     existing = client.call("GET", "/projects") or []
     if any(project.get("name") == args.project_name for project in existing):
@@ -213,6 +486,9 @@ def main():
     ids["environments"] = {}
     for name, body in environment_payloads(project_id).items():
         ids["environments"][name] = client.call("POST", f"/project/{project_id}/environment", body)["id"]
+    ids["views"] = {}
+    for title, body in view_payloads(project_id).items():
+        ids["views"][title] = client.call("POST", f"/project/{project_id}/views", body)["id"]
     ids["inventory"] = client.call("POST", f"/project/{project_id}/inventory", inventory_payload(project_id, ids))["id"]
     templates = {}
     for lesson in LESSONS:
@@ -224,8 +500,10 @@ def main():
         "project": {"name": args.project_name, "id": project_id},
         "repository": {"name": "Local lab folder", "path": args.lab_dir},
         "inventory": {"name": "Lab inventory file", "file": str(Path(args.lab_dir) / "inventories" / "lab.ini")},
+        "views": list(ids["views"]),
         "templates": templates,
     }, indent=2))
+    return 0
 
 
 if __name__ == "__main__":

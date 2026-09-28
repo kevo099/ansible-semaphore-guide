@@ -56,7 +56,7 @@ continue at [Check controller readiness](#check-controller-readiness), then
 | Application | Semaphore Community 2.19.12, checksum-verified, `127.0.0.1:3000`, hardened `semaphore.service` |
 | Secrets | Protected files in `/etc/semaphore`: application configuration, the root-only initial admin password and `svc_ansible` RSA 4096 private key, plus its public key; no secret values are printed |
 | Lab folder | `/opt/ansible-lab`, owned by the editor and readable by the service: `ansible.cfg`, seven playbooks and their supporting files, the report summarizer, an empty `inventories/lab.ini`, an empty `content/` folder for SCAP files you supply, and local Git history; `.gitignore` excludes inventories and host/group variables |
-| Semaphore objects | Project **Ansible Practice**; keys **None** and **Practice target SSH**; repository **Local lab folder**; inventory **Lab inventory file**; variable groups **Practice defaults**, **Allow required reboot** and **Local SCAP content** |
+| Semaphore objects | Project **Ansible Practice**; keys **None** and **Practice target SSH**; repository **Local lab folder**; inventory **Lab inventory file**; variable groups **Practice defaults**, **Allow required reboot** and **Local SCAP content**; template tabs **Lessons**, **Patching** and **STIG** |
 | Twelve task templates | **Ping**; **Baseline preview**; **Baseline apply**; **Users**; **Webserver**; **Patch preview**; **Patch, no reboot**; **Patch, allow required reboot**; **STIG audit (vendor scan only)**; **STIG apply (vendor fixes, approval required)**; **STIG apply, allow required reboot**; **STIG audit, local SCAP content** |
 
 The lesson templates limit runs to the `lab` group. The two STIG apply
@@ -383,6 +383,87 @@ a real Git repository later, follow
 [chapter 3b's migration section](03-controller-el9.md#do-move-to-a-real-repository-later).
 It explains code promotion and why the inventory stays bound to the local
 folder.
+
+## Update a controller to a newer guide release
+
+**Where: the controller, as its administrator.** A controller whose installer
+seeded the practice project can take a newer release of the guide without being
+reinstalled: any Enterprise Linux controller, and an Ubuntu controller installed
+from release `v1.5.0` on. An Ubuntu controller from an earlier release has no
+seeded project, so the script refuses it; build its project by hand as
+[chapter 6](06-semaphore.md) describes. The installers refuse to run a second
+time, so use [`scripts/update-controller.sh`](../scripts/update-controller.sh)
+instead of installing again. Get the newer copy of the guide first; replace
+`v1.6.0` with the release you want:
+
+```bash
+git clone --branch v1.6.0 https://github.com/kevo099/ansible-semaphore-guide.git ~/guide-new
+cd ~/guide-new
+sudo bash scripts/update-controller.sh
+```
+
+Without options it only shows its plan. For each guide file in the lab folder
+(`playbooks/`, `ansible.cfg` and the report summarizer) it compares three
+versions: yours, the guide's version you last installed, and the new one.
+
+- A file only the new release changed is updated, and a file it no longer
+  ships is removed if you never changed it.
+- A file only you changed is kept as it is.
+- Anything both changed stops the update: a file you and the release both
+  changed, a file you changed that the release removes, or a file of yours at a
+  path the release now uses. Compare them and decide; `--replace-edited` takes
+  the release's version, and the folder's Git history keeps yours.
+- Other files you added are never touched.
+
+The plan also lists whether `content/` would be created for SCAP files you
+supply, and the Semaphore variable groups, template tabs and templates it would
+add, with the seeded templates it would put on a tab. When the plan is what you
+expect, apply it:
+
+```bash
+sudo bash scripts/update-controller.sh --apply
+```
+
+It changes nothing when the lab folder has staged changes, uncommitted changes
+to guide files, a link where a guide file or folder belongs, files that both
+changed, or no `.guide-files.json` after an earlier update; it then says how to
+restore that file from Git, or how to apply a reverted update again. It also
+refuses to run twice at once.
+
+It then logs in to Semaphore and checks the project before changing anything.
+Only templates bound to the lab folder's repository and inventory count as
+seeded, so a template of yours with the same name is left alone. In Semaphore it
+only adds what the project lacks, and puts a seeded template that has no tab on
+its tab. Before that it saves every template to a root-only file under
+`/root/ansible-lab-update/`, and it confirms each template it edits, putting it
+back if Semaphore changed any other setting. If it cannot confirm an edit, it
+leaves a `pending-template-ID.json` record there, and later runs stop until you
+have checked that template in the UI and deleted the record. It never changes
+Semaphore itself, the database, Ansible, the inventory, keys, a template's
+variable groups, or a tab you chose.
+
+Last, it checks that the lab folder is exactly as planned; if you edited a
+guide file meanwhile, it stops without touching the folder, and a second run
+picks up from there. If you save a file in the very moment it is replaced, the
+swap is undone, your version stays, and the update stops. It writes the files
+as the lab folder's owner, so the `semaphore` group can still read them,
+restores SELinux labels on Enterprise Linux, and commits them in the folder's
+Git history with `.guide-files.json`, the record of the guide's own versions
+that the next update compares with. `git revert HEAD` in the folder undoes that
+commit; running the update again applies it again. It finishes with
+the readiness check, and a second run reports nothing to do. With a different
+lab folder, add the same `--lab-dir DIR` the installer used. If several projects
+share the seeded project's name, pass `--project-id` with its ID.
+
+If you changed the administrator's password in the UI, the stored installer
+password no longer works, and it asks for a Semaphore administrator's login and
+password at the terminal. For an unattended run, create an API token as
+[chapter 17](17-api-and-integrations.md#do-inspect-swagger-and-token-access)
+shows and pass it as `SEMAPHORE_API_TOKEN` with
+`sudo --preserve-env=SEMAPHORE_API_TOKEN`.
+
+**Check:** the **Task Templates** page shows the tabs **Lessons**, **Patching**
+and **STIG** beside **All**, and **Ping** still succeeds.
 
 ## Concept
 

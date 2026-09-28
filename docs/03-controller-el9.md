@@ -27,7 +27,7 @@ one reviewed run, and understand what the installer decided for you.
 | Application | Semaphore Community 2.19.12, checksum-verified, `127.0.0.1:3000`, hardened `semaphore.service` |
 | Secrets | In `/etc/semaphore` (0750, root and the `semaphore` group): `config.json` (0640, readable by the service), the initial admin password and the `svc_ansible` RSA 4096 private key (root-only), and its public key (0644); no value is printed |
 | Lab folder | `/opt/ansible-lab` owned by you, readable by the service: `ansible.cfg`, the seven playbooks, the report summarizer, an empty `inventories/lab.ini`, a local Git history with a `.gitignore` that keeps `inventories/`, `host_vars/` and `group_vars/` untracked |
-| Semaphore objects | Project **Ansible Practice**; keys **None** and **Practice target SSH**; repository **Local lab folder**; inventory **Lab inventory file**; variable groups **Practice defaults**, **Allow required reboot** and **Local SCAP content**; twelve templates: Ping; Baseline preview; Baseline apply; Users; Webserver; Patch preview; Patch, no reboot; Patch, allow required reboot; STIG audit (vendor scan only); STIG apply (vendor fixes, approval required); STIG apply, allow required reboot; STIG audit, local SCAP content |
+| Semaphore objects | Project **Ansible Practice**; keys **None** and **Practice target SSH**; repository **Local lab folder**; inventory **Lab inventory file**; variable groups **Practice defaults**, **Allow required reboot** and **Local SCAP content**; template tabs **Lessons**, **Patching** and **STIG**; twelve templates: Ping; Baseline preview; Baseline apply; Users; Webserver; Patch preview; Patch, no reboot; Patch, allow required reboot; STIG audit (vendor scan only); STIG apply (vendor fixes, approval required); STIG apply, allow required reboot; STIG audit, local SCAP content |
 
 Every lesson template sets its **Ansible options → Limit** to `lab`, the
 explicit limit the playbooks' preflight requires. The two STIG apply templates
@@ -263,6 +263,13 @@ policy; the two apply templates do. Do not run them while learning the
 installation. They are
 described in [chapter 9](09-security-benchmarks.md#the-seeded-stig-templates),
 after the recovery preparation they depend on.
+
+## Do: update to a newer guide release
+
+Use [`scripts/update-controller.sh`](../scripts/update-controller.sh), as
+[chapter 3 shows](03-controller.md#update-a-controller-to-a-newer-guide-release).
+It works the same on this controller, including the SELinux labels of the files
+it writes.
 
 ## Do: move to a real repository later
 

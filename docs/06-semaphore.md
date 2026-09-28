@@ -202,6 +202,13 @@ field and Galaxy role and collection install arguments are not in 2.19.12. The
 [copy of that page pinned by the 2.19.12 release](https://github.com/semaphoreui/semaphore-docs/blob/dc61d7c1c58ddf3941088ab56a834c01fe6d84fc/docs/user-guide/apps/ansible.md)
 does not list those fields.
 
+**Optional: group templates in tabs.** Semaphore calls them views. On **Task
+Templates**, select the pencil next to **All**, add a tab such as `Lessons` or
+`Patching`, and save; then open each template and choose its tab in the
+**View** field. A tab only changes how the list is shown: a template's limit,
+variables and access stay the same. The seeded controllers create the tabs
+**Lessons**, **Patching** and **STIG** for their templates.
+
 ## Step 7: qualify a complete job
 
 Launch a template with its run (▶) button, then **Run** in the dialog. The

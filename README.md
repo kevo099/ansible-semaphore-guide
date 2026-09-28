@@ -173,6 +173,9 @@ Follow [the Ubuntu chapter](docs/03-controller.md) or
 inventory and twelve Semaphore templates. Follow the selected chapter to
 authorize the generated automation key on each target, add its verified host
 key with `scripts/add-target.sh`, and run **Ping**. A Git remote is optional.
+To bring a controller installed from an earlier release up to date, run
+`scripts/update-controller.sh` from the newer copy; see
+[update a controller](docs/03-controller.md#update-a-controller-to-a-newer-guide-release).
 
 For the Ubuntu **manual path**, after target bootstrap a first scoped test from
 the controller's guide working copy looks like this:
