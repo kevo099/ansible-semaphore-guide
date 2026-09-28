@@ -456,8 +456,9 @@ az snapshot create -g RESOURCE_GROUP -n snap-lab-alma-pre-stig \
   --source "$disk" --incremental true
 ```
 
-It is in the same resource group, so `remove.yml` refuses to delete the group
-while it exists; delete the snapshot when you no longer need it.
+It is in the same resource group. `remove.yml` then removes the lab's own
+resources, lists the snapshot as left over and keeps the group; delete the
+snapshot when you no longer need it and run `remove.yml` again, as the test did.
 
 **The Azure administrator loses sudo.** cloud-init gives the administrator
 passwordless sudo in `/etc/sudoers.d/90-cloud-init-users`, and the

@@ -88,6 +88,7 @@ run, from a workstation through the controller:
 | Local content template, placeholders | Stopped before scanning with the explanation. |
 | DISA RHEL 9 V2R9 `MAC-1_Classified` | RHEL 9.8: 340 pass, 27 fail, 25 not applicable. AlmaLinux 9.8: all 392 not applicable. |
 | DISA Ubuntu 24.04 V1R5 `MAC-1_Classified` | Ubuntu Pro target: 141 pass, 22 fail, 2 not applicable. |
+| `remove.yml` | With VMs made by the Azure CLI still present, it removed its own VMs and stopped at `InUseNetworkSecurityGroupCannotBeDeleted`. After those were deleted, it removed the network and kept the group because the three snapshots remained. After the snapshots were deleted, it deleted the group. |
 
 ## Found and fixed during the run
 
