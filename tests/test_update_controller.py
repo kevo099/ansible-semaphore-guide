@@ -250,6 +250,31 @@ class LabFolderTests(unittest.TestCase):
         self.assertEqual(problems, [])
         self.assertIn("ansible.cfg", plan["yours"])
 
+    def apply(self, plan):
+        written = plan["add"] + plan["update"]
+        for relative in written:
+            self.lab.write(relative, (self.guide / relative).read_bytes())
+        self.lab.write(updater.MANIFEST, updater.manifest_for(self.guide, self.files, "test"))
+        git(self.lab_root, "add", "--", *written, updater.MANIFEST)
+        git(self.lab_root, "commit", "-q", "-m", "Update the guide's files to test")
+
+    def test_your_edit_survives_a_second_update(self):
+        (self.lab_root / "ansible.cfg").write_text("forks = 1\n")
+        git(self.lab_root, "commit", "-qam", "My forks")
+        plan, problems, _source = self.plan()
+        self.assertEqual(problems, [])
+        self.apply(plan)
+        plan, problems, source = self.plan()
+        self.assertEqual(source, updater.MANIFEST)
+        self.assertEqual(problems, [])
+        self.assertEqual(plan["yours"], ["ansible.cfg"])
+        self.assertEqual(plan["update"] + plan["add"], [])
+        # A later guide change to a file you left alone is still delivered.
+        (self.guide / "playbooks/keep.yml").write_text("newer\n")
+        plan, problems, _source = self.plan()
+        self.assertEqual(plan["update"], ["playbooks/keep.yml"])
+        self.assertEqual(plan["yours"], ["ansible.cfg"])
+
     def test_a_file_both_changed_stops_unless_replacement_is_asked_for(self):
         (self.lab_root / "playbooks/stig-audit.yml").write_text("my audit\n")
         git(self.lab_root, "commit", "-qam", "My audit")

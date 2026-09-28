@@ -7,7 +7,9 @@ plan; --apply makes the changes. See docs/03-controller.md.
 
 import argparse
 import grp
+import hashlib
 import importlib.util
+import json
 import os
 from pathlib import Path
 import pwd
@@ -21,8 +23,10 @@ import sys
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
 MARKER = Path("/etc/semaphore/.practice-project-seeded")
-# Commits whose files are the guide's own, as the installer or an update left them.
-BASE_MESSAGES = ("^Seed the local lab folder from the guide$", "^Update the guide's files to ")
+# The guide's own version of each file, recorded by every update as SHA-256 hashes.
+# Before the first update, the installer's first commit holds the guide's files.
+MANIFEST = ".guide-files.json"
+SEED_MESSAGE = "^Seed the local lab folder from the guide$"
 
 
 def load_seeder():
@@ -38,12 +42,16 @@ def guide_files(repo=REPO):
     return sorted(files + ["ansible.cfg", "scripts/summarize_xccdf.py"])
 
 
-def classify(lab, base, new):
-    """Three-way decision for one guide file: lab and base are None when absent.
+def digest(data):
+    return None if data is None else hashlib.sha256(data).hexdigest()
 
-    base is the file as the installer or the last update wrote it. A file only the
-    guide changed is updated, a file only you changed is kept, and a file both
-    changed is a conflict.
+
+def classify(lab, base, new):
+    """Three-way decision for one guide file, from hashes: lab and base are None when absent.
+
+    base is the guide's version the installer or the last update put there. A file
+    only the guide changed is updated, a file only you changed is kept, and a file
+    both changed is a conflict.
     """
     if lab == new:
         return "current"
@@ -166,51 +174,71 @@ class LabFolder:
                              f"{result.stderr.decode(errors='replace').strip()}")
         return result
 
-    def base_commit(self):
-        greps = [f"--grep={pattern}" for pattern in BASE_MESSAGES]
-        out = self.git("log", "-1", "--format=%H", *greps).stdout.decode().strip()
-        return out or None
+    def seed_commit(self):
+        out = self.git("log", "--reverse", "--format=%H", f"--grep={SEED_MESSAGE}").stdout.decode().split()
+        return out[0] if out else None
 
     def committed(self, commit, relative):
         result = self.git("show", f"{commit}:{relative}", check=False)
         return result.stdout if result.returncode == 0 else None
 
 
+def base_hashes(lab, files):
+    """The guide's own hash of each file as last installed, and where it came from."""
+    recorded = lab.read(MANIFEST)
+    if recorded is not None:
+        try:
+            return json.loads(recorded)["files"], MANIFEST
+        except (ValueError, KeyError, TypeError):
+            raise Unsafe(f"{MANIFEST} is not a list of file hashes; restore it with git") from None
+    seed = lab.seed_commit()
+    if not seed:
+        return {}, None
+    return {relative: digest(lab.committed(seed, relative)) for relative in files}, "the installer's commit"
+
+
 def lab_plan(lab, repo, files, replace_edited):
     """Everything the file part would do, and every reason it must not."""
     plan = {name: [] for name in ("add", "update", "yours", "removed by you", "conflict", "current")}
     problems = []
-    for folder in ("content",):
-        try:
-            lab.folder_state(folder)
-        except Unsafe as error:
-            problems.append(str(error))
+    try:
+        lab.folder_state("content")
+    except Unsafe as error:
+        problems.append(str(error))
     if lab.git("rev-parse", "--verify", "-q", "HEAD", check=False).returncode != 0:
         problems.append("the lab folder's Git history has no commits")
         return plan, problems, None
     if lab.git("diff", "--cached", "--quiet", check=False).returncode != 0:
         problems.append("the lab folder's Git index has staged changes; commit or unstage them first")
     status = lab.git("status", "--porcelain=v1", "-z", "--ignored", "--untracked-files=all", "--",
-                     *files).stdout.decode(errors="replace")
+                     *files, MANIFEST).stdout.decode(errors="replace")
     for entry in filter(None, status.split("\0")):
         problems.append(f"uncommitted change to a guide file: {entry} (commit or discard it; after an "
                         "interrupted update, commit the files it wrote)")
-    base = lab.base_commit()
+    try:
+        base, source = base_hashes(lab, files)
+    except Unsafe as error:
+        problems.append(str(error))
+        return plan, problems, None
     for relative in files:
         try:
-            current = lab.read(relative)
+            current = digest(lab.read(relative))
         except Unsafe as error:
             problems.append(str(error))
             continue
-        new = (repo / relative).read_bytes()
-        decision = classify(current, lab.committed(base, relative) if base else None, new)
+        decision = classify(current, base.get(relative), digest((repo / relative).read_bytes()))
         if decision == "conflict" and replace_edited:
             decision = "update"
         plan[decision].append(relative)
     if plan["conflict"]:
         problems.append("guide files that both you and this release changed: " + ", ".join(plan["conflict"])
                         + ". Compare them with the new copy; --replace-edited replaces yours, and Git keeps them")
-    return plan, problems, base
+    return plan, problems, source
+
+
+def manifest_for(repo, files, version):
+    return (json.dumps({"guide": version, "files": {f: digest((repo / f).read_bytes()) for f in files}},
+                       indent=2, sort_keys=True) + "\n").encode()
 
 
 def show(title, items):
@@ -253,7 +281,7 @@ def main():
                          "--always"]).stdout.strip() or "this copy"
     files = guide_files()
 
-    plan, problems, base = lab_plan(lab, REPO, files, args.replace_edited)
+    plan, problems, source = lab_plan(lab, REPO, files, args.replace_edited)
     print(f"Guide {version} -> lab folder {root} (owned by {owner.pw_name})")
     show("Files to add", plan["add"])
     show("Files to update (only the guide changed them)", plan["update"])
@@ -267,8 +295,10 @@ def main():
         needs_content = False
     if needs_content:
         print("  content/ will be created for SCAP files you supply")
-    if not base:
-        print("  No earlier guide commit was found, so every differing file counts as changed by both.")
+    if source:
+        print(f"  The guide's earlier versions come from {source}.")
+    else:
+        print("  No record of the guide's earlier files was found, so every differing file counts as changed by both.")
     for problem in problems:
         print(f"  Problem: {problem}")
     if args.apply and problems:
@@ -303,6 +333,10 @@ def main():
     written = plan["add"] + plan["update"]
     for relative in written:
         lab.write(relative, (REPO / relative).read_bytes())
+    manifest = manifest_for(REPO, files, version)
+    if lab.read(MANIFEST) != manifest:
+        lab.write(MANIFEST, manifest)
+        written.append(MANIFEST)
     lab.make_folder("content")
     selinux = shutil.which("selinuxenabled")
     if selinux and run_check([selinux]).returncode == 0:
