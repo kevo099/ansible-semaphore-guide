@@ -16,7 +16,7 @@ umask 077
 usage() { sed -n '2,/^[^#]/{/^#/p}' "$0"; }
 missing() { echo "$1 needs a value."; usage; exit 2; }
 
-name= address= group= fingerprint= lab_dir=/opt/ansible-lab known_hosts=/etc/semaphore/known_hosts
+name='' address='' group='' fingerprint='' lab_dir=/opt/ansible-lab known_hosts=/etc/semaphore/known_hosts
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --name) [[ $# -ge 2 ]] || missing "$1"; name="$2"; shift ;;

@@ -140,7 +140,12 @@ class SummaryReportTests(unittest.TestCase):
 class LabFolderTests(unittest.TestCase):
     def test_seeded_lab_folder_contains_every_script_the_playbooks_call(self):
         # Join continued lines so a wrapped install command still counts as one.
-        installer = (ROOT / "scripts" / "install-controller-el9.sh").read_text().replace("\\\n", " ")
+        installer = (ROOT / "scripts" / "controller-common.sh").read_text().replace("\\\n", " ")
+        for name in ("install-controller.sh", "install-controller-el9.sh"):
+            with self.subTest(installer=name):
+                source = (ROOT / "scripts" / name).read_text()
+                self.assertIn('source "$script_dir/controller-common.sh"', source)
+                self.assertRegex(source, r"(?m)^controller_seed_lab$")
         called = set()
         for playbook in (ROOT / "playbooks").rglob("*.yml"):
             called |= set(re.findall(r"\.\./scripts/([\w.-]+)", playbook.read_text()))
@@ -150,7 +155,7 @@ class LabFolderTests(unittest.TestCase):
                 self.assertTrue((ROOT / "scripts" / script).is_file())
                 copies = [line for line in installer.splitlines()
                           if f'"$repo_dir/scripts/{script}"' in line and '"$lab_dir/scripts/' in line]
-                self.assertTrue(copies, f"install-controller-el9.sh does not copy {script} into the lab folder")
+                self.assertTrue(copies, f"controller-common.sh does not copy {script} into the lab folder")
 
 
 if __name__ == "__main__":

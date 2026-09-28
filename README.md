@@ -21,7 +21,8 @@ flowchart LR
     C --> S[Semaphore UI: loopback port 3000]
     S --> P[(PostgreSQL 16: loopback port 5432)]
     S --> A[Ansible in a Python virtual environment]
-    G[Reviewed Git repository] -->|Fetch when a task runs| S
+    L[Local lab folder: seeded installer] -->|Read when a task runs| S
+    G[Reviewed Git repository: optional] -->|Fetch when a task runs| S
     A -->|SSH and sudo| U[Ubuntu 24.04 target]
     A -->|SSH and sudo| E[AlmaLinux, Rocky Linux or RHEL 9 target]
 ```
@@ -44,7 +45,7 @@ target access and a real job run from both the terminal and Semaphore.
 | --- | --- | --- |
 | 1 | [Design and prerequisites](docs/01-design.md) | Choose resources, networks and account boundaries. |
 | 2 | [Create the VMs](docs/02-create-vms.md) | Build a controller and two fresh targets. |
-| 3 | **One of:** [Ubuntu controller](docs/03-controller.md) or [Enterprise Linux 9 seeded controller](docs/03-controller-el9.md) | Install natively on Ubuntu 24.04, manually or with the installer; or install on RHEL, AlmaLinux or Rocky Linux 9.4 or later in one run that also seeds a practice project. |
+| 3 | **One of:** [Ubuntu controller](docs/03-controller.md) or [Enterprise Linux 9 seeded controller](docs/03-controller-el9.md) | Both installers create a local-folder practice project with eleven templates, including STIG lessons, with no Git remote needed. Ubuntu also has a manual walkthrough. |
 | 4 | [SSH, sudo and target bootstrap](docs/04-access.md) | Establish verified, key-based automation access. |
 | 5 | [Command-line Ansible lessons](docs/05-cli-lessons.md) | Preview, apply, repeat and inspect five playbooks. |
 | 6 | [Configure Semaphore](docs/06-semaphore.md) | Run the same lessons from named task templates. |
@@ -100,8 +101,8 @@ before proceeding to the next layer.
 | [`playbooks/stig-apply.yml`](playbooks/stig-apply.yml) | Applies the vendor's own STIG remediation to exactly one target per run after an explicit recovery-point approval, with before and after scans. |
 | [`examples/bootstrap-existing-vm.yml`](examples/bootstrap-existing-vm.yml) | Prepares a VM that already exists for the automation account: chapter 4, steps 3 and 4, in one run per host. |
 | [`examples/azure/`](examples/azure/) | Creates, stops and removes an Azure lab network, optional controller and cloud-init targets; see [chapter 13](docs/13-azure.md). |
-| [`scripts/install-controller.sh`](scripts/install-controller.sh) | Shows a plan by default; `--apply` bootstraps a fresh Ubuntu controller. |
-| [`scripts/install-controller-el9.sh`](scripts/install-controller-el9.sh) | Same contract for RHEL, AlmaLinux or Rocky Linux 9.4 or later; also seeds a local-folder practice project through the API. |
+| [`scripts/install-controller.sh`](scripts/install-controller.sh) | Shows a plan by default; `--apply` bootstraps a fresh Ubuntu 24.04 controller and seeds a local-folder practice project through the API. Supports `--editor`, `--lab-dir` and `--expose`. |
+| [`scripts/install-controller-el9.sh`](scripts/install-controller-el9.sh) | Same seeded installation and options for RHEL, AlmaLinux or Rocky Linux 9.4 or later. |
 | [`scripts/seed-semaphore.py`](scripts/seed-semaphore.py) | Creates the practice project, keys, local repository, file inventory and templates on loopback; prints names and ids only. |
 | [`scripts/expose-semaphore.sh`](scripts/expose-semaphore.sh) | Publishes the UI on the VM's address behind an nginx TLS proxy, or in plain HTTP, or reverts to loopback. |
 | [`scripts/add-target.sh`](scripts/add-target.sh) | Adds a host to the local inventory only when its scanned host key matches the fingerprint you read from its console. |
@@ -117,7 +118,7 @@ accounts. Read each playbook before running it.
 
 | Component | Guide baseline |
 | --- | --- |
-| Native controller | Ubuntu Server 24.04 LTS, amd64; alternative seeded path on RHEL, AlmaLinux or Rocky Linux 9.4 or later, x86_64 (RHEL registered, with BaseOS and AppStream enabled) |
+| Native controller | Seeded installers for Ubuntu Server 24.04 LTS, amd64, and RHEL, AlmaLinux or Rocky Linux 9.4 or later, x86_64 (RHEL registered, with BaseOS and AppStream enabled); Ubuntu also has a manual path |
 | Controller Python | 3.12 in the operating system; separate Ansible virtual environment |
 | Ansible Core | 2.21.4, with every Python dependency pinned in [`requirements-controller.txt`](requirements-controller.txt) |
 | Semaphore UI | Community 2.19.12, checksum-verified native binary |
@@ -149,6 +150,8 @@ See [validation and limitations](docs/VALIDATION.md) for what the September
 2026 runs on fresh VMs, registered RHEL and Ubuntu Pro guests and Rocky Linux
 verified, the 2.21.4 requalification and the Community feature campaign, what
 they did not establish, and how to repeat the offline checks.
+The new Ubuntu seeding flow is not yet live-tested; earlier Ubuntu controller
+validation covers the stack installation only.
 This is a learning setup, not a high-availability production design or a claim
 of compliance with a security standard.
 
@@ -166,9 +169,13 @@ bash scripts/install-controller-el9.sh --plan    # RHEL, AlmaLinux or Rocky Linu
 
 Follow [the Ubuntu chapter](docs/03-controller.md) or
 [the Enterprise Linux chapter](docs/03-controller-el9.md) before using
-`--apply`. After target bootstrap, a first scoped test from the Ubuntu
-controller's working copy looks like this; the seeded Enterprise Linux
-controller has the same playbooks in `/opt/ansible-lab`:
+`--apply`. Both installers create `/opt/ansible-lab` by default, with an empty
+inventory and eleven Semaphore templates. Follow the selected chapter to
+authorize the generated automation key on each target, add its verified host
+key with `scripts/add-target.sh`, and run **Ping**. A Git remote is optional.
+
+For the Ubuntu **manual path**, after target bootstrap a first scoped test from
+the controller's guide working copy looks like this:
 
 ```bash
 cp inventories/lab.ini.example inventories/lab.ini
