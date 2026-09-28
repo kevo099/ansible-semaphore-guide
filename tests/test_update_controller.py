@@ -402,6 +402,15 @@ class LabFolderTests(unittest.TestCase):
             self.lab.write("playbooks/new.yml", b"guide\n", None)
         self.assertEqual((self.lab_root / "playbooks/new.yml").read_text(), "appeared meanwhile\n")
 
+    def test_a_missing_git_email_is_filled_in_before_any_change(self):
+        isolated = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+        with mock.patch.dict(os.environ, isolated):
+            git(self.lab_root, "config", "user.useConfigOnly", "true")
+            git(self.lab_root, "config", "user.name", "Only A Name")
+            self.assertEqual(updater.commit_identity(self.lab), updater.FALLBACK_IDENTITY)
+            git(self.lab_root, "config", "user.email", "me@example.test")
+            self.assertEqual(updater.commit_identity(self.lab), [])
+
     def test_writes_are_atomic_owned_and_leave_no_temporary_files(self):
         self.lab.write("playbooks/deeper/new.yml", b"data\n", None)
         written = self.lab_root / "playbooks/deeper/new.yml"
