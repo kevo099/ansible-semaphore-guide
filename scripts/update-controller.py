@@ -20,6 +20,8 @@ import subprocess
 import sys
 
 
+# Run as root from an administrator's copy of the guide: leave no root-owned bytecode in it.
+sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
 MARKER = Path("/etc/semaphore/.practice-project-seeded")
