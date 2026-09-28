@@ -15,7 +15,7 @@ newer online documentation exists in the pinned release.
 If you used the [Ubuntu installer](03-controller.md) or the
 [Enterprise Linux installer](03-controller-el9.md),
 the **Ansible Practice** project, its SSH key, inventory, repository, variable
-groups and eleven templates already exist. Do not create a second project with
+groups and twelve templates already exist. Do not create a second project with
 the same name. Read steps 1-6 to understand those objects, and add the sudo
 credential as
 [3b describes](03-controller-el9.md#do-give-the-templates-the-targets-sudo-password).

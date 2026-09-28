@@ -1,0 +1,5 @@
+---
+# cloud-init reads this file, not Ansible, and its first line must be exactly
+# "#cloud-config", which the YAML comment rule would reject.
+exclude_paths:
+  - examples/onboard/cloud-init.yaml

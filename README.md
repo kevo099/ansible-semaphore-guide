@@ -45,7 +45,7 @@ target access and a real job run from both the terminal and Semaphore.
 | --- | --- | --- |
 | 1 | [Design and prerequisites](docs/01-design.md) | Choose resources, networks and account boundaries. |
 | 2 | [Create the VMs](docs/02-create-vms.md) | Build a controller and two fresh targets. |
-| 3 | **One of:** [Ubuntu controller](docs/03-controller.md) or [Enterprise Linux 9 seeded controller](docs/03-controller-el9.md) | Both installers create a local-folder practice project with eleven templates, including STIG lessons, with no Git remote needed. Ubuntu also has a manual walkthrough. |
+| 3 | **One of:** [Ubuntu controller](docs/03-controller.md) or [Enterprise Linux 9 seeded controller](docs/03-controller-el9.md) | Both installers create a local-folder practice project with twelve templates, including STIG lessons, with no Git remote needed. Ubuntu also has a manual walkthrough. |
 | 4 | [SSH, sudo and target bootstrap](docs/04-access.md) | Establish verified, key-based automation access. |
 | 5 | [Command-line Ansible lessons](docs/05-cli-lessons.md) | Preview, apply, repeat and inspect five playbooks. |
 | 6 | [Configure Semaphore](docs/06-semaphore.md) | Run the same lessons from named task templates. |
@@ -60,9 +60,9 @@ and, if you need it, publishing the UI on the controller's address.
 | 7 | [Git and VS Code](docs/07-git-and-vscode.md) | Edit, review and deliberately deliver changes. |
 | 10 | [Backup, restore and rebuild](docs/10-recovery.md) | Take a recovery capture before you patch or harden anything. |
 | 8 | [Patching and daily operations](docs/08-operations.md) | Handle maintenance, reboots, drift and failures. |
-| 9 | [Optional CIS/STIG practice](docs/09-security-benchmarks.md) | Assess a specific vendor baseline and interpret findings, on disposable targets. |
+| 9 | [Optional CIS/STIG practice](docs/09-security-benchmarks.md) | Assess a specific vendor baseline, or a DISA SCAP benchmark file you supply, and interpret findings, on disposable targets. The [security baseline catalog](docs/appendices/security-baselines.md) compares STIG, CIS and other baselines by platform. |
 | 12 | [Learning exercises and RHCE alignment](docs/12-learning-path.md) | Progress toward independently written automation. |
-| Optional | [Azure and cloud-init](docs/13-azure.md) | Create, bootstrap, stop and remove Azure targets with Ansible, or prepare a VM that already exists. |
+| Optional | [Azure and cloud-init](docs/13-azure.md) | Create, bootstrap, stop and remove Azure targets with Ansible, prepare a VM that already exists with Run Command and no SSH, and run the STIG lessons on Azure targets. |
 
 **Route C: Semaphore Community features.** Each chapter was written from a
 live test of Semaphore Community 2.19.12 and says what is free, what is paid
@@ -100,6 +100,7 @@ before proceeding to the next layer.
 | [`playbooks/stig-audit.yml`](playbooks/stig-audit.yml) | Scans each selected target with the OS vendor's STIG content (SCAP Security Guide or Ubuntu Security Guide) and fetches the report; changes no policy. |
 | [`playbooks/stig-apply.yml`](playbooks/stig-apply.yml) | Applies the vendor's own STIG remediation to exactly one target per run after an explicit recovery-point approval, with before and after scans. |
 | [`examples/bootstrap-existing-vm.yml`](examples/bootstrap-existing-vm.yml) | Prepares a VM that already exists for the automation account: chapter 4, steps 3 and 4, in one run per host. |
+| [`examples/onboard/`](examples/onboard/) | `cloud-init.yaml` prepares a new VM at first boot, and `onboard-linux.sh` prepares an existing one as root through Azure Run Command or `sudo bash`; insert your public key. See [chapter 13](docs/13-azure.md#do-onboard-an-existing-vm-with-run-command). |
 | [`examples/azure/`](examples/azure/) | Creates, stops and removes an Azure lab network, optional controller and cloud-init targets; see [chapter 13](docs/13-azure.md). |
 | [`scripts/install-controller.sh`](scripts/install-controller.sh) | Shows a plan by default; `--apply` bootstraps a fresh Ubuntu 24.04 controller and seeds a local-folder practice project through the API. Supports `--editor`, `--lab-dir` and `--expose`. |
 | [`scripts/install-controller-el9.sh`](scripts/install-controller-el9.sh) | Same seeded installation and options for RHEL, AlmaLinux or Rocky Linux 9.4 or later. |
@@ -150,8 +151,6 @@ See [validation and limitations](docs/VALIDATION.md) for what the September
 2026 runs on fresh VMs, registered RHEL and Ubuntu Pro guests and Rocky Linux
 verified, the 2.21.4 requalification and the Community feature campaign, what
 they did not establish, and how to repeat the offline checks.
-The new Ubuntu seeding flow is not yet live-tested; earlier Ubuntu controller
-validation covers the stack installation only.
 This is a learning setup, not a high-availability production design or a claim
 of compliance with a security standard.
 
@@ -170,7 +169,7 @@ bash scripts/install-controller-el9.sh --plan    # RHEL, AlmaLinux or Rocky Linu
 Follow [the Ubuntu chapter](docs/03-controller.md) or
 [the Enterprise Linux chapter](docs/03-controller-el9.md) before using
 `--apply`. Both installers create `/opt/ansible-lab` by default, with an empty
-inventory and eleven Semaphore templates. Follow the selected chapter to
+inventory and twelve Semaphore templates. Follow the selected chapter to
 authorize the generated automation key on each target, add its verified host
 key with `scripts/add-target.sh`, and run **Ping**. A Git remote is optional.
 

@@ -12,7 +12,7 @@ run; this page only summarizes them.
 | --- | --- |
 | Semaphore | Community 2.19.12, checksum-verified native binary |
 | Ansible Core | 2.21.4, with every Python dependency pinned in [`requirements-controller.txt`](../requirements-controller.txt) |
-| Controller | Ubuntu Server 24.04 (stack installation; new seeding flow not yet live-tested); RHEL, AlmaLinux and Rocky Linux 9.8 (seeded installer) |
+| Controller | Ubuntu Server 24.04 and RHEL, AlmaLinux and Rocky Linux 9.8, each with its seeded installer |
 | Database | PostgreSQL 16 |
 | Targets | Ubuntu 24.04, AlmaLinux 9.8, Rocky Linux 9.8 and registered RHEL 9.8 |
 
@@ -25,23 +25,21 @@ run; this page only summarizes them.
 | Semaphore Community features (chapters 14 to 18 and the appendices) | Each capability is classified as working, paid only or not present in 2.19.12, with its live result and limits. | [Community coverage](COMMUNITY-COVERAGE.md) and [the campaign record](validation/2026-09-community.md) |
 | New chapters as written | Each new chapter's example files and command blocks were run as written on the campaign controller: inputs, other apps, identity, operations, API and webhooks, task identity, runners, export and syslog. Key rotation, identity providers and the upgrade drill rely on the feature tests. | [Rehearsal](validation/2026-09-community.md#rehearsal-of-the-new-chapters) |
 | Azure (chapter 13) | The example playbooks created a controller and two cloud-init targets; a one-shot playbook prepared a third VM created outside Ansible; all lessons, a Semaphore run, reboots, stop and start, and removal passed, with `changed=0` repeats. A review's fixes were retested on a second lab. | [Azure record](validation/2026-09-azure.md) |
+| Onboarding, STIG and seeded controllers on Azure | The universal cloud-init file and the Run Command script prepared Ubuntu 24.04, AlmaLinux 9.8 and RHEL 9.8 VMs, including existing VMs without SSH, and refused seventeen reviewed failure cases. The vendor STIG with reboot hardened Ubuntu Pro, AlmaLinux and RHEL targets, after which the lessons still repeated with `changed=0`. Both seeded installers, including all Ubuntu exposure modes, ran on Azure, and the local SCAP content template scanned with DISA's RHEL 9 and Ubuntu 24.04 benchmarks. | [Onboarding and STIG record](validation/2026-09-onboard-stig.md) |
 | Reorganized chapters | Chapter 3b's exposure, STIG and repository-migration sections moved to [browser access](appendices/browser-access.md), [chapter 9](09-security-benchmarks.md#the-seeded-stig-templates) and [the Git migration appendix](appendices/git-migration.md) with their commands unchanged. The moves passed the offline checks. | This page |
 
 ## Not established
 
-- The Ubuntu 24.04 installer's new seeding flow is **NOT yet live-tested**.
-  Earlier Ubuntu records cover the stack installation without seeding. The
-  planned Azure Ubuntu 24.04 live run must check the local-folder project,
-  service permissions, target addition, authenticated template runs and the
-  exposure modes before this limit can be removed.
 - FIPS mode. On RHEL, AlmaLinux and Rocky Linux the vendor STIG sets the
   `FIPS:STIG` crypto policy. On RHEL and AlmaLinux `fips-mode-setup --check`
-  then reported that FIPS mode is not enabled; Rocky Linux's FIPS mode and
-  host-key offer were not checked. Ubuntu was not switched to FIPS kernels.
+  then reported that FIPS mode is not enabled, and on Azure `fips_enabled`
+  stayed 0; Rocky Linux's FIPS mode and host-key offer were not checked. Ubuntu
+  was not switched to FIPS kernels.
 - Chapter 9's manual CIS remediation (the packaged RHEL playbook and `usg fix`
   with a CIS profile), its reboot and after-scan. Vendor STIG remediation was
   applied only through `stig-apply.yml`.
-- Repeated remediation until no further rule changes.
+- Repeated remediation until no further rule changes. A second pass on RHEL
+  9.8 reduced 16 failing rules to 13.
 - Enterprise Linux releases other than 9.8, as controller or target. The EL9
   installer's 9.4 minimum is where `python3.12` and the `postgresql:16` stream
   first appear, not a tested release.
@@ -62,7 +60,8 @@ run; this page only summarizes them.
 - Chapter 2's manual ISO installation, editing through VS Code Remote SSH in
   chapter 7, and the troubleshooting chapter's diagnostics as a separate
   exercise. The Azure chapter's own limits are in
-  [its record](validation/2026-09-azure.md#not-established).
+  [its record](validation/2026-09-azure.md#not-established) and the
+  [onboarding and STIG record](validation/2026-09-onboard-stig.md#not-established).
 
 ## Repeat the offline checks
 

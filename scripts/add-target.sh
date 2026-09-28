@@ -90,4 +90,4 @@ PY
 cat "$matched" >> "$known_hosts"
 echo "Added $name ($address) to $inventory under [$group] and trusted its verified host key."
 echo "Next: authorize the key shown by 'sudo cat /etc/semaphore/svc_ansible.pub' for svc_ansible"
-echo "on $name (chapter 3b), then run the Ping template."
+echo "on $name (chapter 4, step 3, or examples/onboard/onboard-linux.sh), then run the Ping template."

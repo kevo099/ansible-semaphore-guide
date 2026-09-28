@@ -20,7 +20,7 @@ seed the same local-folder practice project.
 
 - **Manual path:** follow the numbered sections below to see what each layer does.
 - **Installer path:** read the script, view its plan, then apply it on the fresh VM
-  to get the stack and eleven ready-configured task templates.
+  to get the stack and twelve ready-configured task templates.
 
 Both paths use the files in this repository. Do not execute the manual path
 and then run the fresh installer over it. The installer intentionally refuses
@@ -55,14 +55,15 @@ continue at [Check controller readiness](#check-controller-readiness), then
 | Database | PostgreSQL 16 from Ubuntu's repositories, loopback only, SCRAM login |
 | Application | Semaphore Community 2.19.12, checksum-verified, `127.0.0.1:3000`, hardened `semaphore.service` |
 | Secrets | Protected files in `/etc/semaphore`: application configuration, the root-only initial admin password and `svc_ansible` RSA 4096 private key, plus its public key; no secret values are printed |
-| Lab folder | `/opt/ansible-lab`, owned by the editor and readable by the service: `ansible.cfg`, seven playbooks and their supporting files, the report summarizer, an empty `inventories/lab.ini` and local Git history; `.gitignore` excludes inventories and host/group variables |
-| Semaphore objects | Project **Ansible Practice**; keys **None** and **Practice target SSH**; repository **Local lab folder**; inventory **Lab inventory file**; variable groups **Practice defaults** and **Allow required reboot** |
-| Eleven task templates | **Ping**; **Baseline preview**; **Baseline apply**; **Users**; **Webserver**; **Patch preview**; **Patch, no reboot**; **Patch, allow required reboot**; **STIG audit (vendor scan only)**; **STIG apply (vendor fixes, approval required)**; **STIG apply, allow required reboot** |
+| Lab folder | `/opt/ansible-lab`, owned by the editor and readable by the service: `ansible.cfg`, seven playbooks and their supporting files, the report summarizer, an empty `inventories/lab.ini`, an empty `content/` folder for SCAP files you supply, and local Git history; `.gitignore` excludes inventories and host/group variables |
+| Semaphore objects | Project **Ansible Practice**; keys **None** and **Practice target SSH**; repository **Local lab folder**; inventory **Lab inventory file**; variable groups **Practice defaults**, **Allow required reboot** and **Local SCAP content** |
+| Twelve task templates | **Ping**; **Baseline preview**; **Baseline apply**; **Users**; **Webserver**; **Patch preview**; **Patch, no reboot**; **Patch, allow required reboot**; **STIG audit (vendor scan only)**; **STIG apply (vendor fixes, approval required)**; **STIG apply, allow required reboot**; **STIG audit, local SCAP content** |
 
 The lesson templates limit runs to the `lab` group. The two STIG apply
 templates instead ask for exactly one host and a recovery-point approval when
-you run them. The preview templates use `--check --diff`. Only the templates
-named “allow required reboot” enable reboots. The three optional STIG templates
+you run them, and the local SCAP content template asks for the hosts its
+content file is written for. The preview templates use `--check --diff`. Only the templates
+named “allow required reboot” enable reboots. The four optional STIG templates
 run the playbooks from this local folder; see
 [the seeded STIG lessons](09-security-benchmarks.md#the-seeded-stig-templates)
 for vendor-content prerequisites and the recovery preparation required before
@@ -94,8 +95,9 @@ firewall checks and how to return to loopback.
 This chapter uses `/opt/ansible-lab` below. If you choose another folder, use
 that path and pass the same `--lab-dir DIR` to `scripts/add-target.sh`.
 
-Ubuntu seeding is **not yet live-tested**; see the current limits in
-[validation](VALIDATION.md#not-established).
+The seeded Ubuntu installer, its target addition, template runs and all three
+exposure modes were tested live on Azure; see the
+[onboarding and STIG record](validation/2026-09-onboard-stig.md).
 
 ## Manual step 1: inspect the fresh host
 
@@ -291,7 +293,7 @@ curl --fail http://127.0.0.1:3000/api/ping
 
 Expect `passed: true`, active services and HTTP success. This proves application
 readiness, not target access or a successful authenticated job. The installer
-also prints a seeding summary naming the project, inventory file and eleven
+also prints a seeding summary naming the project, inventory file and twelve
 template identifiers. Complete the target checks below for the installer path,
 or in [chapter 4](04-access.md) for the manual path.
 

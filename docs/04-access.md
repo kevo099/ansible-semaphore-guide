@@ -88,9 +88,14 @@ Steps 3 and 4 are also available as one playbook,
 run from the controller as the target's own administrator. It is useful for a
 VM that already exists, such as a cloud VM created in a portal;
 [chapter 13](13-azure.md#do-finish-access-with-one-playbook) shows it end to
-end. On the seeded Enterprise Linux controller, pass it the exported service
-key as well, as that chapter shows, or it replaces the key Semaphore uses. The
-manual steps below explain what it does.
+end. On a seeded controller, pass it the exported service key as well, as that
+chapter shows, or it replaces the key Semaphore uses. Without SSH, the same
+steps run as root through Azure Run Command or `sudo bash` with
+[`examples/onboard/onboard-linux.sh`](../examples/onboard/onboard-linux.sh), and
+a new VM can do them at first boot with
+[`examples/onboard/cloud-init.yaml`](../examples/onboard/cloud-init.yaml); see
+[chapter 13](13-azure.md#do-onboard-an-existing-vm-with-run-command). The
+manual steps below explain what they do.
 
 First copy the public key from the controller to each target administrator's
 home directory. This `scp`, like step 2's first connection, logs in to the
