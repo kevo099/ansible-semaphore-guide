@@ -48,17 +48,24 @@ be your workstation or the controller. The Azure SDK is large, so keep it in its
 own virtual environment rather than the controller's `/opt/ansible-venv`:
 
 ```bash
-python3 -m venv ~/azure-venv
+python3.12 -m venv ~/azure-venv
 ~/azure-venv/bin/pip install ansible-core==2.21.4
 ~/azure-venv/bin/ansible-galaxy collection install -r examples/azure/requirements.yml
 ~/azure-venv/bin/pip install \
   -r ~/.ansible/collections/ansible_collections/azure/azcollection/requirements.txt
 ```
 
-The collection's requirement set pins about 170 packages, about 1.7 GB on disk,
-and includes one exact pre-release pin (`msal`). `pip` installs it as listed; on
-an Ubuntu 24.04 controller it took about two minutes. Some other installers,
-such as `uv`, refuse the pre-release unless you allow it.
+ansible-core 2.21 needs Python 3.12 or later. On Ubuntu 24.04 that is `python3`,
+with the `python3.12-venv` package; on Enterprise Linux 9 it is the separate
+`python3.12` that [chapter 3b](03-controller-el9.md) installs, not the system
+`python3`.
+
+The collection's requirement set resolved to 169 installed packages in the
+test and took about 1.7 GB on disk. It lists several pre-release packages and
+pulls in a transitive exact pre-release pin (`msal`). `pip` installs them as
+listed; on an Ubuntu 24.04 controller it took about two minutes. Some other
+installers, such as `uv`, refuse pre-releases unless you allow them. The file
+does not lock every dependency, so record `pip freeze` for your own lab.
 
 The playbooks authenticate with the Azure CLI login. Sign in, then select the
 subscription explicitly:
@@ -99,14 +106,17 @@ cd examples/azure
 ~/azure-venv/bin/ansible-playbook -i localhost, network.yml
 ```
 
-This creates the resource group with its tags, the targets' network security
-group, the VNet and the subnet. The security group allows SSH from
+Run every Azure playbook from this `examples/azure` directory on this machine.
+This one creates the resource group with its tags, the targets' network
+security group, the VNet and the subnet. The security group allows SSH from
 `azure_target_ssh_source` and denies other traffic from inside the VNet.
 
 ## Optional Do: run the controller in Azure
 
 `controller.yml` creates an Ubuntu 24.04 controller with a static public
-address and a security group that allows SSH from `operator_cidr` only:
+address and a security group that allows SSH from `operator_cidr` and denies
+all other inbound traffic. The explicit deny matters: Azure's default rules
+would otherwise let every VM in the VNet reach every port on the controller.
 
 ```bash
 ~/azure-venv/bin/ansible-playbook -i localhost, controller.yml
@@ -172,16 +182,33 @@ see [chapter 4, step 6](04-access.md#step-6-install-target-trust-for-semaphore).
 
 [`examples/bootstrap-existing-vm.yml`](../examples/bootstrap-existing-vm.yml)
 is the automated form of chapter 4, steps 3 and 4. On a VM that cloud-init
-prepared, it completes the account; on any other VM, it does everything:
+prepared, it completes the account; on any other VM, it does the whole job.
+It needs what any Ansible run needs: SSH from the controller as an
+administrator whose sudo works, and Python 3 on the VM, which mainstream cloud
+images have. It then:
 
-- installs `python3`, the package bindings, `sudo` and the SSH server;
-- creates or completes `svc_ansible` and authorizes only the controller's
-  automation public key, restoring SELinux labels on Enterprise Linux;
+- ensures the package bindings, `sudo` and the SSH server are installed;
+- creates or completes `svc_ansible` and authorizes exactly the public keys in
+  `automation_public_key_files`, restoring SELinux labels on Enterprise Linux;
 - sets the sudo password you type at its prompt, stored only as a hash;
 - writes `/etc/sudoers.d/90-ansible-lab`, checked with `visudo`;
-- writes the SSH drop-in, checks the whole SSH configuration, and removes the
-  drop-in again instead of reloading if the check fails;
-- confirms the effective SSH policy and sudo rule for `svc_ansible`.
+- writes the SSH drop-in and checks the whole configuration and the effective
+  policy for `svc_ansible` before any reload. If another setting overrides the
+  policy, it restores the previous drop-in, or removes the one it created, and
+  stops without reloading SSH, so it cannot lock the account out;
+- runs `sudo -k -n` as `svc_ansible` and fails if that succeeds, which catches
+  a `NOPASSWD` rule elsewhere that would override the password requirement.
+
+By default it authorizes `~/.ssh/ansible_lab.pub`. On the
+[seeded Enterprise Linux controller](03-controller-el9.md), list the exported
+service key instead, and your CLI key too if you use one, or the run replaces
+the key Semaphore logs in with:
+
+```bash
+/opt/ansible-venv/bin/ansible-playbook -i inventories/bootstrap.ini \
+  examples/bootstrap-existing-vm.yml --limit lab-alma -u YOUR_ADMIN \
+  -e '{"automation_public_key_files": ["~/svc_ansible.pub", "~/.ssh/ansible_lab.pub"]}'
+```
 
 **Where: the controller, as your administrator account, in the repository root.**
 Put the VMs in a private inventory, for example `inventories/bootstrap.ini`:
@@ -215,8 +242,9 @@ repeat run with the same password reports no changes.
 This covers a VM created in the portal, with the Azure CLI, by another tool, or
 before you used cloud-init. You do not need `network.yml` or `targets.yml`:
 
-1. Make sure the controller can reach the VM's SSH port, and pin its host key
-   as above.
+1. Make sure the controller can reach the VM's SSH port as its administrator,
+   that the administrator's sudo works, and that the VM has Python 3. Pin its
+   host key as above.
 2. Add the VM to the bootstrap inventory with its address.
 3. Run `bootstrap-existing-vm.yml` for that host, as its administrator.
 4. Continue with [chapter 4, step 5](04-access.md#step-5-test-all-three-layers).
@@ -248,6 +276,7 @@ resource group held the same resources before and after.
 
 ## Do: stop compute, and remove the lab
 
+**Where: back on the machine with your Azure login, in `examples/azure`.**
 Shutting Linux down from inside the guest can leave Azure compute allocated and
 billed. `power.yml` deallocates through Azure and then checks the power state
 Azure reports:
@@ -257,29 +286,37 @@ Azure reports:
 ~/azure-venv/bin/ansible-playbook -i localhost, power.yml -e azure_power=running
 ```
 
-Add `-e include_controller=true` to include the controller. In the test, the
-targets deallocated, started again with the same private addresses, and
-answered Ping. Disks and the static public address continue to cost money while
+Add `-e include_controller=true` to include the controller. In the test, a
+target deallocated, started again with the same private address, and answered
+Ping. Disks and the static public address continue to cost money while
 deallocated.
 
-`remove.yml` deletes the lab's VMs with their network interfaces, disks and
-public address, then the security groups and VNet, and deletes the resource
-group only if nothing else is left in it. It requires the resource group name
-as confirmation:
+`remove.yml` removes only what the lab created, inside its resource group:
 
 ```bash
 ~/azure-venv/bin/ansible-playbook -i localhost, remove.yml -e remove_confirm=RESOURCE_GROUP
 ```
 
-`remove.yml` removes only the VMs it knows: `azure_targets` and, unless you
-pass `-e include_controller=false`, the controller. A VM you created another
-way, such as the existing VM above, can still use the targets' security group
-and subnet. Azure then refuses to delete them
+- It requires the resource group name as confirmation, and refuses before
+  changing anything without it or with a wrong name.
+- It removes a VM only when the VM's `owner` and `purpose` tags match
+  `azure_tags`, and deletes the VM alone; its OS disk goes with it because the
+  playbooks create it with the `Delete` option.
+- It then deletes the lab's network interfaces and the controller's public
+  address by name, the security groups and the VNet, and deletes the resource
+  group only if nothing else is left in it. It never follows a VM's
+  attachments into another resource group.
+- On a lab that is already gone it ends without changes, and after a partial
+  run it continues where it stopped.
+
+`remove.yml` knows only the VMs in `azure_targets` and, unless you pass
+`-e include_controller=false`, the controller. A VM you created another way,
+such as the existing VM above, can still use the targets' security group and
+subnet. Azure then refuses to delete them
 (`InUseNetworkSecurityGroupCannotBeDeleted`) and the playbook stops with the
-network and the resource group in place, which the test showed. Remove that VM
-with the tool that created it, then run `remove.yml` again. Without a
-confirmation, or with the wrong name, it refuses before changing anything.
-Never point it at a shared resource group.
+network and the resource group in place. Remove that VM with the tool that
+created it, then run `remove.yml` again. Never point it at a shared resource
+group.
 
 ## Concept
 

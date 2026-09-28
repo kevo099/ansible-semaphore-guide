@@ -24,7 +24,7 @@ run; this page only summarizes them.
 | ansible-core 2.21.4 | Both installers resolved exactly the pinned set and passed readiness. A seeded RHEL 9.8 controller then seeded eleven templates and ran ten of them against an Ubuntu 24.04 Ubuntu Pro target, including `changed=0` repeats and a STIG apply with the approved reboot. | [2.21.4 requalification](validation/2026-09-community.md#ansible-core-2214-requalification) |
 | Semaphore Community features (chapters 14 to 18 and the appendices) | Each capability is classified as working, paid only or not present in 2.19.12, with its live result and limits. | [Community coverage](COMMUNITY-COVERAGE.md) and [the campaign record](validation/2026-09-community.md) |
 | New chapters as written | Each new chapter's example files and command blocks were run as written on the campaign controller: inputs, other apps, identity, operations, API and webhooks, task identity, runners, export and syslog. Key rotation, identity providers and the upgrade drill rely on the feature tests. | [Rehearsal](validation/2026-09-community.md#rehearsal-of-the-new-chapters) |
-| Azure (chapter 13) | The example playbooks created a controller and two cloud-init targets; a one-shot playbook prepared a third VM created outside Ansible; all lessons, a Semaphore run, reboots, stop and start, and removal passed, with `changed=0` repeats. | [Azure record](validation/2026-09-azure.md) |
+| Azure (chapter 13) | The example playbooks created a controller and two cloud-init targets; a one-shot playbook prepared a third VM created outside Ansible; all lessons, a Semaphore run, reboots, stop and start, and removal passed, with `changed=0` repeats. A review's fixes were retested on a second lab. | [Azure record](validation/2026-09-azure.md) |
 | Reorganized chapters | Chapter 3b's exposure, STIG and repository-migration sections moved to [browser access](appendices/browser-access.md), [chapter 9](09-security-benchmarks.md#the-seeded-stig-templates) and [the Git migration appendix](appendices/git-migration.md) with their commands unchanged. The moves passed the offline checks. | This page |
 
 ## Not established
@@ -40,9 +40,11 @@ run; this page only summarizes them.
 - Enterprise Linux releases other than 9.8, as controller or target. The EL9
   installer's 9.4 minimum is where `python3.12` and the `postgresql:16` stream
   first appear, not a tested release.
-- ansible-core 2.21.4 against AlmaLinux, Rocky Linux and RHEL **targets**, the
-  Ubuntu manual path, and chapter 10's restore. Those last ran on 2.20.x. The
-  2.21.4 lessons ran against an Ubuntu target only.
+- ansible-core 2.21.4 against Rocky Linux targets and subscription-registered
+  RHEL targets, the Ubuntu manual path, and chapter 10's restore; those last
+  ran on 2.20.x. On 2.21.4 the lessons ran against Ubuntu 24.04, and, in
+  [Azure](validation/2026-09-azure.md), against AlmaLinux 9.8 and
+  pay-as-you-go RHEL 9.8.
 - Offsite backup copies and high availability.
 - Delivery to real Slack, Microsoft Teams, Rocket.Chat, DingTalk, Gotify,
   Telegram or e-mail providers. Notifications were received by local test

@@ -88,7 +88,9 @@ Steps 3 and 4 are also available as one playbook,
 run from the controller as the target's own administrator. It is useful for a
 VM that already exists, such as a cloud VM created in a portal;
 [chapter 13](13-azure.md#do-finish-access-with-one-playbook) shows it end to
-end. The manual steps below explain what it does.
+end. On the seeded Enterprise Linux controller, pass it the exported service
+key as well, as that chapter shows, or it replaces the key Semaphore uses. The
+manual steps below explain what it does.
 
 First copy the public key from the controller to each target administrator's
 home directory. This `scp`, like step 2's first connection, logs in to the

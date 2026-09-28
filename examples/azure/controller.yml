@@ -32,6 +32,14 @@
             access: Allow
             priority: 100
             direction: Inbound
+          # Azure's default AllowVNetInBound would otherwise open every port to the VNet.
+          - name: deny-other-inbound
+            protocol: "*"
+            source_address_prefix: "*"
+            destination_port_range: "*"
+            access: Deny
+            priority: 4000
+            direction: Inbound
         tags: "{{ azure_tags }}"
 
     - name: Static public address for the controller

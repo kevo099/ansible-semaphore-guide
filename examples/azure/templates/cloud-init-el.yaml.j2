@@ -6,7 +6,7 @@ users:
     shell: /bin/bash
     lock_passwd: true
     ssh_authorized_keys:
-      - {{ automation_public_key }}
+      - {{ automation_public_key | to_json }}
 packages:
   - python3
   - python3-dnf

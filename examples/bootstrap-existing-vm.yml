@@ -1,9 +1,12 @@
 ---
 # One-shot preparation of a VM that already exists (made in a cloud portal, by
 # another tool, or before cloud-init was set up): the automated form of chapter
-# 4, steps 3 and 4. It creates or completes svc_ansible, installs the controller's
-# automation public key and target prerequisites, sets the sudo password you type,
+# 4, steps 3 and 4. It creates or completes svc_ansible, authorizes the listed
+# public keys, ensures the target prerequisites, sets the sudo password you type,
 # and adds the dedicated sudoers and SSH drop-ins. It is safe to run again.
+#
+# The VM must already accept SSH from the controller for an administrator whose
+# sudo works, and have Python 3; mainstream cloud images do.
 #
 # Run it from the controller's repository root, as the VM's own administrator
 # account, one host at a time (each target gets its own sudo password):
@@ -22,9 +25,13 @@
       private: true
       confirm: true
   vars:
-    automation_public_key_file: ~/.ssh/ansible_lab.pub
-    automation_public_key: "{{ lookup('ansible.builtin.file', automation_public_key_file) }}"
+    # Every public key that may log in as svc_ansible. On the seeded Enterprise
+    # Linux controller, list the exported service key and, if you use one, your CLI key.
+    automation_public_key_files:
+      - ~/.ssh/ansible_lab.pub
+    automation_public_keys: "{{ query('ansible.builtin.file', *automation_public_key_files) }}"
     ssh_service: "{{ 'ssh' if ansible_facts['os_family'] == 'Debian' else 'sshd' }}"
+    ssh_dropin: /etc/ssh/sshd_config.d/70-ansible-lab.conf
   pre_tasks:
     - name: Require a limit that selects exactly one host
       ansible.builtin.assert:
@@ -44,17 +51,24 @@
         fail_msg: This playbook prepares Ubuntu 24.04 or AlmaLinux, Rocky Linux or RHEL 9 only.
         quiet: true
 
-    - name: Accept only a public key and a password of reasonable length
+    - name: Accept only public keys and a password of reasonable length
       ansible.builtin.assert:
         that:
-          - automation_public_key is match('^(ssh-rsa|ssh-ed25519|ecdsa-sha2-nistp[0-9]+) [A-Za-z0-9+/=]+( .*)?$')
+          - automation_public_keys | length > 0
+          - automation_public_keys | reject('match', '^(ssh-rsa|ssh-ed25519|ecdsa-sha2-nistp[0-9]+) [A-Za-z0-9+/=]+( .*)?$') | list | length == 0
           - svc_ansible_password | length >= 12
-        fail_msg: Use the automation key's .pub file and a sudo password of at least 12 characters.
+        fail_msg: List only single-line public key files, and use a sudo password of at least 12 characters.
         quiet: true
       no_log: true
 
+    - name: Find the address this host sees for the controller
+      ansible.builtin.command: printenv SSH_CONNECTION
+      become: false
+      register: bootstrap_ssh_connection
+      changed_when: false
+
   tasks:
-    - name: Install the Ubuntu prerequisites
+    - name: Ensure the Ubuntu prerequisites
       ansible.builtin.apt:
         name: [python3, python3-apt, sudo, openssh-server]
         state: present
@@ -62,7 +76,7 @@
         cache_valid_time: 3600
       when: ansible_facts['os_family'] == 'Debian'
 
-    - name: Install the Enterprise Linux prerequisites
+    - name: Ensure the Enterprise Linux prerequisites
       ansible.builtin.dnf:
         name: [python3, python3-dnf, python3-libselinux, sudo, openssh-server]
         state: present
@@ -86,9 +100,9 @@
         group: svc_ansible
         mode: "0700"
 
-    - name: Authorize only the controller's automation key
+    - name: Authorize exactly the listed public keys
       ansible.builtin.copy:
-        content: "{{ automation_public_key }}\n"
+        content: "{{ automation_public_keys | join('\n') }}\n"
         dest: /home/svc_ansible/.ssh/authorized_keys
         owner: svc_ansible
         group: svc_ansible
@@ -111,7 +125,12 @@
         mode: "0440"
         validate: visudo -cf %s
 
-    - name: Require a key for svc_ansible over SSH
+    - name: Record whether the SSH drop-in already exists
+      ansible.builtin.stat:
+        path: "{{ ssh_dropin }}"
+      register: bootstrap_dropin_before
+
+    - name: Require a key for svc_ansible over SSH, checked before any reload
       block:
         - name: Write the account's SSH drop-in
           ansible.builtin.copy:
@@ -121,55 +140,86 @@
                   PasswordAuthentication no
                   KbdInteractiveAuthentication no
               Match all
-            dest: /etc/ssh/sshd_config.d/70-ansible-lab.conf
+            dest: "{{ ssh_dropin }}"
             owner: root
             group: root
             mode: "0644"
-          notify: Reload the SSH service
+            backup: true
+          register: bootstrap_dropin
 
         - name: Check the complete SSH configuration
           ansible.builtin.command: /usr/sbin/sshd -t
           changed_when: false
+
+        - name: Read the effective SSH policy for svc_ansible from this controller
+          ansible.builtin.command: >-
+            /usr/sbin/sshd -T -C user=svc_ansible,host={{ bootstrap_controller_addr }},addr={{ bootstrap_controller_addr }}
+          vars:
+            bootstrap_controller_addr: "{{ bootstrap_ssh_connection.stdout.split()[0] }}"
+          register: bootstrap_sshd_policy
+          changed_when: false
+
+        - name: Check that the policy is the one chapter 4 expects
+          ansible.builtin.assert:
+            that:
+              - "'authenticationmethods publickey' in bootstrap_sshd_policy.stdout_lines"
+              - "'passwordauthentication no' in bootstrap_sshd_policy.stdout_lines"
+              - "'kbdinteractiveauthentication no' in bootstrap_sshd_policy.stdout_lines"
+            fail_msg: Another SSH setting overrides the svc_ansible policy; resolve it before reloading SSH.
+            quiet: true
+
+        - name: Schedule the SSH reload only after every check has passed
+          ansible.builtin.debug:
+            msg: The checked SSH policy will be applied.
+          changed_when: bootstrap_dropin is changed
+          notify: Reload the SSH service
       rescue:
-        - name: Remove a drop-in that the SSH daemon rejects
+        - name: Put back the drop-in this run replaced
+          ansible.builtin.copy:
+            src: "{{ bootstrap_dropin.backup_file }}"
+            dest: "{{ ssh_dropin }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0644"
+          when: bootstrap_dropin.backup_file is defined
+
+        - name: Remove the drop-in this run created
           ansible.builtin.file:
-            path: /etc/ssh/sshd_config.d/70-ansible-lab.conf
+            path: "{{ ssh_dropin }}"
             state: absent
+          when: not bootstrap_dropin_before.stat.exists
 
-        - name: Stop before reloading an invalid SSH configuration
+        - name: Stop without reloading SSH
           ansible.builtin.fail:
-            msg: sshd rejected the drop-in; it was removed and SSH was not reloaded.
+            msg: The SSH check failed. The previous drop-in state was restored and SSH was not reloaded.
 
-    - name: Apply the SSH change now
+    - name: Apply the checked SSH policy now
       ansible.builtin.meta: flush_handlers
-
-    - name: Find the address this host sees for the controller
-      ansible.builtin.command: printenv SSH_CONNECTION
-      become: false
-      register: bootstrap_ssh_connection
-      changed_when: false
-
-    - name: Read the effective SSH policy for svc_ansible from this controller
-      ansible.builtin.command: >-
-        /usr/sbin/sshd -T -C user=svc_ansible,host={{ bootstrap_controller_addr }},addr={{ bootstrap_controller_addr }}
-      vars:
-        bootstrap_controller_addr: "{{ bootstrap_ssh_connection.stdout.split()[0] }}"
-      register: bootstrap_sshd_policy
-      changed_when: false
 
     - name: Read svc_ansible's sudo rights
       ansible.builtin.command: sudo -l -U svc_ansible
       register: bootstrap_sudo_rights
       changed_when: false
 
-    - name: Check the result
+    - name: Try sudo as svc_ansible without a password
+      ansible.builtin.command: sudo -k -n /usr/bin/true
+      become: true
+      become_user: svc_ansible
+      vars:
+        ansible_pipelining: true
+      register: bootstrap_sudo_nopass
+      changed_when: false
+      failed_when: false
+
+    - name: Check that sudo requires the password
       ansible.builtin.assert:
         that:
-          - "'authenticationmethods publickey' in bootstrap_sshd_policy.stdout_lines"
-          - "'passwordauthentication no' in bootstrap_sshd_policy.stdout_lines"
-          - "'kbdinteractiveauthentication no' in bootstrap_sshd_policy.stdout_lines"
           - "'(ALL : ALL) ALL' in bootstrap_sudo_rights.stdout"
-        fail_msg: The SSH policy or sudo rule for svc_ansible is not what chapter 4 expects.
+          - bootstrap_sudo_nopass.rc != 0
+        fail_msg: >-
+          svc_ansible can use sudo without its password; another sudoers rule (for example NOPASSWD)
+          overrides 90-ansible-lab. Review "sudo -l -U svc_ansible" on the host.
         success_msg: svc_ansible is ready; continue with chapter 4, step 5.
 
   handlers:
