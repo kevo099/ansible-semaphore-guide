@@ -159,9 +159,8 @@ def update_plan(existing, repository_id, inventory_id):
     title, position) and "templates". Only templates bound to the lab folder's
     repository and inventory count as seeded; a template of yours with a seeded
     name elsewhere is never touched. Existing objects are never changed, except
-    that a seeded template without a tab is put on its tab and one that lost its
-    variable groups is repaired from a backup. Duplicate names that the update
-    would have to choose between are reported and stop an apply.
+    that a seeded template without a tab is put on its tab. Duplicate names that
+    the update would have to choose between are reported and stop an apply.
     """
     env_names = [env["name"] for env in existing["environments"]]
     view_titles = [view["title"] for view in existing["views"]]
@@ -181,8 +180,6 @@ def update_plan(existing, repository_id, inventory_id):
         "views": [title for title, _names in VIEWS if title not in view_titles],
         "templates": missing_templates,
         "tabs": sorted(tabs, key=lambda t: (t["name"], t["id"])),
-        "repair": sorted(({"id": t["id"], "name": t["name"]} for t in seeded if not t.get("environment_ids")),
-                         key=lambda t: (t["name"], t["id"])),
         "duplicates": duplicated,
         "ambiguous": ambiguous,
     }
@@ -320,28 +317,35 @@ def plan_for(found):
                        found["repository"]["id"], found["inventory"]["id"])
 
 
-def earlier_backup(backup_dir, template_id, current):
-    """The newest earlier backup of a template that still had its variable groups."""
-    for path in sorted(backup_dir.glob("semaphore-templates-*.json"), reverse=True):
-        if path == current:
-            continue
+def pending_edits(backup_dir):
+    """Template edits an earlier update began but could not confirm; each blocks an apply."""
+    found = []
+    for path in sorted(backup_dir.glob("pending-template-*.json")):
         try:
-            saved = json.loads(path.read_text())
+            name = json.loads(path.read_text()).get("name", "?")
         except (OSError, ValueError):
-            continue
-        for template in saved:
-            if template.get("id") == template_id and template.get("environment_ids"):
-                return template, path
-    return None, None
+            name = "?"
+        found.append({"name": name, "record": str(path)})
+    return found
 
 
-def save_verified(client, path, before, desired, backup):
-    """PUT desired; if any kept setting differs afterwards, put before back and stop."""
+def save_verified(client, path, before, desired, backup_dir):
+    """PUT desired and confirm every kept setting; otherwise put before back and stop.
+
+    A record of the template as it was is written first and removed only once the
+    result is confirmed, so an edit that could not be confirmed stops later runs
+    until you have checked that template.
+    """
+    record = backup_dir / f"pending-template-{before['id']}.json"
+    with open(os.open(record, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as handle:
+        json.dump(before, handle, indent=2)
+        handle.flush()
+        os.fsync(handle.fileno())
     failed = None
     try:
         client.call("PUT", path, desired)
-        after = client.call("GET", path)
-        if kept_settings(after) == kept_settings(desired):
+        if kept_settings(client.call("GET", path)) == kept_settings(desired):
+            record.unlink()
             return
     except SystemExit as error:
         failed = error
@@ -350,7 +354,11 @@ def save_verified(client, path, before, desired, backup):
         restored = kept_settings(client.call("GET", path)) == kept_settings(before)
     except SystemExit:
         restored = False
-    state = "its settings were put back" if restored else f"restore it from {backup}"
+    if restored:
+        record.unlink()
+        state = "its settings were put back"
+    else:
+        state = f"compare it in the UI with {record}, which holds it as it was, then delete that file"
     raise SystemExit(f"Semaphore did not save template {desired['name']!r} as intended"
                      + (f" ({failed})" if failed else "") + f"; {state}. Stopped there; run the update again "
                      "once the cause is fixed.")
@@ -361,9 +369,14 @@ def apply_update(client, found, plan, backup_dir, say=print):
     if plan["ambiguous"]:
         raise SystemExit("Several objects share a name the update needs: " + "; ".join(plan["ambiguous"])
                          + ". Rename or remove the extra ones, then run again. Nothing was changed.")
+    pending = pending_edits(backup_dir)
+    if pending:
+        raise SystemExit("An earlier update could not confirm its edit of " + ", ".join(
+            f"{item['name']!r} (see {item['record']})" for item in pending)
+            + ". Check that template in the UI, delete the record, and run again. Nothing was changed.")
     base, project_id = found["base"], found["project"]["id"]
     backup = None
-    if plan["tabs"] or plan["repair"]:
+    if plan["tabs"]:
         # Semaphore rewrites a template's variable-group links when it saves one; keep
         # every template as it was, root-only, before changing any of them.
         backup_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -374,16 +387,6 @@ def apply_update(client, found, plan, backup_dir, say=print):
         with open(os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as handle:
             json.dump(details, handle, indent=2)
         say(f"Templates as they were before: {backup}")
-
-    for tab in plan["repair"]:
-        path = f"{base}/templates/{tab['id']}"
-        saved, source = earlier_backup(backup_dir, tab["id"], backup)
-        if saved is None:
-            raise SystemExit(f"Template {tab['name']!r} has no variable group and no earlier backup holds one; "
-                             "choose its variable group in the UI, then run again.")
-        before = client.call("GET", path)
-        save_verified(client, path, before, dict(before, environment_ids=saved["environment_ids"]), backup)
-        say(f"Put back the variable groups of {tab['name']!r} from {source}")
 
     ids = {"repository": found["repository"]["id"], "inventory": found["inventory"]["id"],
            "environments": {env["name"]: env["id"] for env in found["environments"]},
@@ -405,7 +408,7 @@ def apply_update(client, found, plan, backup_dir, say=print):
         if before.get("view_id"):
             say(f"Kept the tab you gave {tab['name']!r} meanwhile")
             continue
-        save_verified(client, path, before, dict(before, view_id=ids["views"][VIEW_OF[tab["name"]]]), backup)
+        save_verified(client, path, before, dict(before, view_id=ids["views"][VIEW_OF[tab["name"]]]), backup_dir)
     return backup
 
 

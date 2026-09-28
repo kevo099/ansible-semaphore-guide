@@ -204,18 +204,30 @@ class SemaphoreUpdateTests(unittest.TestCase):
         seed.apply_update(fake, found, plan, self.backups, say=lambda _text: None)
         self.assertEqual(ping["view_id"], fake.views[0]["id"])
 
-    def test_a_failed_save_is_put_back_and_a_later_run_repairs_from_the_backup(self):
+    def test_a_failed_save_is_put_back_and_leaves_no_pending_record(self):
         fake = FakeSemaphore(fail_put=True)
-        with self.assertRaisesRegex(SystemExit, "did not save"):
+        with self.assertRaisesRegex(SystemExit, "put back"):
             self.update(fake)
         self.assertTrue(all(t["environment_ids"] for t in fake.templates.values() if t["name"] in OLD_TEMPLATES))
-        # Simulate the damaged state a server crash could leave, then run again.
+        self.assertEqual(seed.pending_edits(self.backups), [])
+
+    def test_an_unconfirmed_edit_blocks_the_next_run_until_checked(self):
+        fake = FakeSemaphore()
+        self.backups.mkdir(mode=0o700)
+        record = self.backups / "pending-template-7.json"
+        record.write_text(json.dumps({"id": 7, "name": "Ping"}))
+        with self.assertRaisesRegex(SystemExit, "could not confirm"):
+            self.update(fake)
+        self.assertEqual(fake.writes(), [])
+        record.unlink()
+        self.update(fake)
+
+    def test_a_template_without_a_variable_group_is_left_as_you_chose(self):
+        fake = FakeSemaphore()
         ping = next(t for t in fake.templates.values() if t["name"] == "Ping")
-        ping["environment_ids"], ping["view_id"] = [], fake.views[0]["id"]
-        plan, _backup = self.update(fake)
-        self.assertEqual([t["name"] for t in plan["repair"]], ["Ping"])
-        self.assertTrue(ping_after := fake.templates[ping["id"]]["environment_ids"])
-        self.assertEqual(ping_after, [fake.environments[0]["id"]])
+        ping["environment_ids"] = []
+        self.update(fake)
+        self.assertEqual(fake.templates[ping["id"]]["environment_ids"], [])
 
     def test_a_save_that_drops_variable_groups_is_undone_and_stops(self):
         fake = FakeSemaphore(drop_links_on_put=True)
@@ -357,7 +369,7 @@ class LabFolderTests(unittest.TestCase):
         git(self.lab_root, "rm", "-q", updater.MANIFEST)
         git(self.lab_root, "commit", "-qm", "Drop the record")
         _plan, _expected, problems, _source = self.plan()
-        self.assertTrue(any("was removed" in problem for problem in problems))
+        self.assertTrue(any("was removed in commit" in problem and "git checkout" in problem for problem in problems))
 
     def test_a_file_both_changed_stops_unless_replacement_is_asked_for(self):
         (self.lab_root / "playbooks/stig-audit.yml").write_text("my audit\n")
@@ -410,6 +422,38 @@ class LabFolderTests(unittest.TestCase):
             self.assertEqual(updater.commit_identity(self.lab), updater.FALLBACK_IDENTITY)
             git(self.lab_root, "config", "user.email", "me@example.test")
             self.assertEqual(updater.commit_identity(self.lab), [])
+
+    def test_a_save_during_the_swap_is_swapped_back(self):
+        plan, expected, _problems, _source = self.plan()
+        target = self.lab_root / "playbooks/stig-audit.yml"
+        planned = target.read_bytes()
+        target.write_text("saved during the swap\n")
+        real_read = updater.LabFolder._read_at
+        calls = []
+
+        def read_once_as_planned(fd, leaf, relative):
+            calls.append(leaf)
+            return planned if len(calls) == 1 else real_read(fd, leaf, relative)
+
+        with mock.patch.object(updater.LabFolder, "_read_at", staticmethod(read_once_as_planned)):
+            with self.assertRaisesRegex(updater.Unsafe, "your version was kept"):
+                self.lab.write("playbooks/stig-audit.yml", b"guide\n", expected["playbooks/stig-audit.yml"])
+        self.assertEqual(target.read_text(), "saved during the swap\n")
+        self.assertEqual(sorted(p.name for p in target.parent.iterdir() if p.name.startswith(".")), [])
+
+    def test_a_reverted_update_says_how_to_apply_it_again(self):
+        plan, expected, _problems, _source = self.plan()
+        self.apply(plan, expected)
+        git(self.lab_root, "revert", "--no-edit", "HEAD")
+        _plan, _expected, problems, _source = self.plan()
+        self.assertTrue(any("was reverted" in problem and "git revert" in problem for problem in problems))
+
+    def test_an_uncommitted_record_deletion_says_to_check_it_out(self):
+        plan, expected, _problems, _source = self.plan()
+        self.apply(plan, expected)
+        (self.lab_root / updater.MANIFEST).unlink()
+        _plan, _expected, problems, _source = self.plan()
+        self.assertTrue(any(f"git checkout HEAD -- {updater.MANIFEST}" in problem for problem in problems))
 
     def test_writes_are_atomic_owned_and_leave_no_temporary_files(self):
         self.lab.write("playbooks/deeper/new.yml", b"data\n", None)

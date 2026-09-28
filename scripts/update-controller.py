@@ -6,6 +6,8 @@ plan; --apply makes the changes. See docs/03-controller.md.
 """
 
 import argparse
+import ctypes
+import errno
 import fcntl
 import grp
 import hashlib
@@ -80,6 +82,20 @@ def classify(lab, base, new):
     if new == base:
         return "yours"
     return "conflict"
+
+
+_LIBC = ctypes.CDLL(None, use_errno=True)
+RENAME_EXCHANGE = 2
+
+
+def exchange(fd, first, second):
+    """Swap two names in one folder atomically (Linux renameat2 RENAME_EXCHANGE)."""
+    renameat2 = getattr(_LIBC, "renameat2", None)
+    if renameat2 is None:
+        raise OSError(errno.ENOSYS, "renameat2 is not available")
+    if renameat2(fd, os.fsencode(first), fd, os.fsencode(second), RENAME_EXCHANGE) != 0:
+        code = ctypes.get_errno()
+        raise OSError(code, os.strerror(code))
 
 
 class Unsafe(Exception):
@@ -214,7 +230,7 @@ class LabFolder:
                         raise Unsafe(f"{relative} appeared after the plan was made") from None
                     os.unlink(temporary, dir_fd=fd)
                 else:
-                    os.rename(temporary, leaf, src_dir_fd=fd, dst_dir_fd=fd)
+                    self._replace(fd, temporary, leaf, relative, expected)
             except BaseException:
                 try:
                     os.unlink(temporary, dir_fd=fd)
@@ -223,6 +239,28 @@ class LabFolder:
                 raise
         finally:
             os.close(fd)
+
+    @classmethod
+    def _replace(cls, fd, temporary, leaf, relative, expected):
+        """Swap the new file in, then confirm the old one was the planned one.
+
+        After the swap the old file sits at the temporary name. If someone saved
+        the file after it was checked, the swap is undone, so their bytes stay.
+        """
+        try:
+            exchange(fd, temporary, leaf)
+        except OSError as error:
+            if error.errno not in (errno.ENOSYS, errno.EINVAL, errno.ENOTSUP):
+                raise
+            # A filesystem without the swap: check as late as possible, then rename.
+            if digest(cls._read_at(fd, leaf, relative)) != expected:
+                raise Unsafe(f"{relative} changed after the plan was made") from None
+            os.rename(temporary, leaf, src_dir_fd=fd, dst_dir_fd=fd)
+            return
+        if digest(cls._read_at(fd, temporary, relative)) != expected:
+            exchange(fd, temporary, leaf)
+            raise Unsafe(f"{relative} changed while it was being updated; your version was kept")
+        os.unlink(temporary, dir_fd=fd)
 
     def remove(self, relative, expected):
         *folders, leaf = relative.split("/")
@@ -270,9 +308,17 @@ def base_hashes(lab):
         except (ValueError, KeyError, TypeError, AttributeError):
             raise Unsafe(f"{MANIFEST} is not a record of guide file hashes; restore it with git") from None
         return files, MANIFEST
-    if lab.git("log", "-1", "--format=%H", "--", MANIFEST).stdout.strip():
-        raise Unsafe(f"{MANIFEST}, the record of the guide's versions, was removed. Restore it with: git "
-                     f"checkout \"$(git rev-list -n 1 HEAD -- {MANIFEST})^\" -- {MANIFEST}")
+    if lab.git("cat-file", "-e", f"HEAD:{MANIFEST}", check=False).returncode == 0:
+        raise Unsafe(f"{MANIFEST}, the record of the guide's versions, was deleted without a commit. "
+                     f"Restore it with: git checkout HEAD -- {MANIFEST}")
+    removed = lab.git("log", "-1", "--diff-filter=D", "--format=%H%x00%s", "--", MANIFEST).stdout.decode()
+    if removed:
+        commit, _, subject = removed.strip().partition("\0")
+        if subject.startswith('Revert "Update the guide\'s files to'):
+            raise Unsafe(f"An update was reverted in commit {commit[:12]}. To apply it again, revert that "
+                         f"commit (git revert {commit[:12]}) and run the update once more.")
+        raise Unsafe(f"{MANIFEST}, the record of the guide's versions, was removed in commit {commit[:12]}. "
+                     f"Restore it with: git checkout {commit[:12]}^ -- {MANIFEST}, and commit it")
     seed = lab.seed_commit()
     if not seed:
         return {}, None
@@ -420,9 +466,9 @@ def main():
     show("Template tabs to add", semaphore_plan["views"])
     show("Templates to add", semaphore_plan["templates"])
     show("Templates to put on their tab", [t["name"] for t in semaphore_plan["tabs"]])
-    if semaphore_plan["repair"]:
-        show("Seeded templates without a variable group, to repair from a backup",
-             [t["name"] for t in semaphore_plan["repair"]])
+    for item in seeder.pending_edits(Path("/root/ansible-lab-update")):
+        print(f"  Problem: an earlier update could not confirm its edit of template {item['name']!r}; "
+              f"check it in the UI against {item['record']}, then delete that file")
     if semaphore_plan["duplicates"]:
         show("Seeded template names used more than once, left as they are", semaphore_plan["duplicates"])
     for item in semaphore_plan["ambiguous"]:
