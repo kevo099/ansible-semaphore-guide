@@ -401,6 +401,74 @@ Without a hash the script keeps an existing password, and a new account has
 none: its output then says `password: NOT SET`, and sudo waits until you set
 one this way or with the bootstrap playbook.
 
+## Do: add a target interactively from the controller
+
+**Where: an interactive terminal on the controller**, after preparing the target
+with cloud-init or the onboarding script. Use
+[`scripts/add-target-interactive.py`](../scripts/add-target-interactive.py) when
+you know its IP and want the controller to discover its hostname and OS. This
+avoids copying a generated multi-line command between two consoles. Do not run
+this interactive helper in Azure Run Command, which cannot answer its prompts.
+
+Download and run the standalone file; it needs no repository checkout or Python
+packages beyond the standard library:
+
+```bash
+curl -fsSL -o ~/add-ansible-target.py https://raw.githubusercontent.com/kevo099/ansible-semaphore-guide/main/scripts/add-target-interactive.py && sudo python3 ~/add-ansible-target.py
+```
+
+1. Enter the target's reachable **IPv4 address**. It connects only to that IP on
+   SSH port 22; it does not scan the subnet.
+2. If the controller does not already trust its RSA host key, the helper asks
+   for the `SHA256:...` fingerprint. Read it on the **target** using its console
+   or Azure Run Command and paste just the fingerprint:
+
+   ```bash
+   ssh-keygen -l -E sha256 -f /etc/ssh/ssh_host_rsa_key.pub
+   ```
+
+3. The helper verifies the key and logs in as `svc_ansible` using the controller's
+   `/etc/semaphore/svc_ansible` private key. It reads the short hostname and
+   `/etc/os-release`, selecting `[ubuntu]` for Ubuntu 24.04 or
+   `[enterprise_linux]` for RHEL, AlmaLinux or Rocky Linux 9.
+4. Accept the detected inventory name with Enter, or type another plain hostname.
+   Check the proposed entry and type `y` to save it.
+
+The target must already allow this controller's public key for `svc_ansible`,
+with Python 3 installed and SSH reachable. The seeded, unencrypted service key
+is the default; the helper cannot unlock a passphrase-protected key or repair
+onboarding, networking or sudo. It prompts for no target password. Existing RSA
+trust must match; a changed key stops the helper for manual review.
+
+It updates `/opt/ansible-lab/inventories/lab.ini` and
+`/etc/semaphore/known_hosts`. Each changed file gets a `.before-add-TIMESTAMP`
+backup alongside it. Original file ownership and modes stay intact. A declined
+save, failed SSH login, unsupported OS or conflicting name/address leaves both
+files unchanged. An identical repeat verifies SSH without adding duplicates.
+Locks prevent two copies of this helper from editing together, and it refuses
+files changed by another editor while the prompts were open. Backups remain for
+manual recovery after a power loss or forced termination; review later edits
+before restoring their contents into the original files.
+
+Run it again for another target:
+
+```bash
+sudo python3 ~/add-ansible-target.py
+```
+
+For a customized seeded controller, `--lab-dir`, `--known-hosts` and `--key`
+select the corresponding local paths. This updates the seeded **local file
+inventory**, not a Static inventory stored inside Semaphore or a Git inventory.
+In Semaphore select the local inventory and **Practice target SSH** credential,
+then run **Ping** with Limit set to the new inventory name. Sudo is a separate
+check: select the appropriate sudo credential (Username empty) and run
+**Baseline preview**. No sudo password, credential, policy or template is
+changed by this helper.
+
+The interactive flow, strict SSH options, trust matching, failures, backups,
+repeat runs and rollback are covered by offline tests. SSH scans and remote
+responses are simulated; a live controller/target run has not been established.
+
 ## Do: generate the controller inventory command
 
 **Where: the target VM's Azure Run Command → RunShellScript.** After preparing

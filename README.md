@@ -107,6 +107,7 @@ before proceeding to the next layer.
 | [`scripts/install-controller-el9.sh`](scripts/install-controller-el9.sh) | Same seeded installation and options for RHEL, AlmaLinux or Rocky Linux 9.4 or later. |
 | [`scripts/seed-semaphore.py`](scripts/seed-semaphore.py) | Creates the practice project, keys, local repository, file inventory and templates on loopback; prints names and ids only. |
 | [`scripts/expose-semaphore.sh`](scripts/expose-semaphore.sh) | Publishes the UI on the VM's address behind an nginx TLS proxy, or in plain HTTP, or reverts to loopback. |
+| [`scripts/add-target-interactive.py`](scripts/add-target-interactive.py) | Prompts for a prepared target's IP on the controller, verifies SSH, detects its hostname/OS, and backs up and updates the local inventory and host trust. See [chapter 13](docs/13-azure.md#do-add-a-target-interactively-from-the-controller). |
 | [`scripts/add-target.sh`](scripts/add-target.sh) | Adds a host to the local inventory only when its scanned host key matches the fingerprint you read from its console. |
 | [`scripts/check-controller.py`](scripts/check-controller.py) | Checks controller services, permissions and loopback listeners without printing credentials. |
 | [`scripts/validate.py`](scripts/validate.py) | Checks repository links, examples and publication boundaries locally. |
