@@ -83,7 +83,9 @@
           - "nic-{{ item.name }}"
         image: "{{ item.image }}"
         managed_disk_type: StandardSSD_LRS
-        os_disk_size_gb: 40
+        # Azure refuses an OS disk smaller than its image, and Red Hat's RHEL 9
+        # images are 64 GB. A target's own os_disk_size_gb chooses another size.
+        os_disk_size_gb: "{{ item.os_disk_size_gb | default(64 if item.image.publisher | lower == 'redhat' else 40) }}"
         os_disk_delete_option: Delete
         custom_data: "{{ cloud_init_data }}"
         tags: "{{ azure_tags }}"

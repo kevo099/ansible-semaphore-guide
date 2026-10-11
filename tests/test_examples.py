@@ -9,6 +9,9 @@ import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 
+import jinja2
+import yaml
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -97,6 +100,34 @@ class AssessmentTests(unittest.TestCase):
     def test_unrecognized_outcome_is_rejected(self):
         with self.assertRaises(ValueError):
             xccdf.summarize(self.result([("rule", "success")]))
+
+
+class AzureDiskTests(unittest.TestCase):
+    """Azure refuses an OS disk smaller than its image; Red Hat's RHEL 9 images are 64 GB."""
+
+    def disk_expression(self, playbook, task_prefix):
+        tasks = yaml.safe_load((ROOT / "examples" / "azure" / playbook).read_text())[0]["tasks"]
+        task = next(t for t in tasks if t["name"].startswith(task_prefix))
+        return task["azure.azcollection.azure_rm_virtualmachine"]["os_disk_size_gb"]
+
+    def render(self, expression, **variables):
+        environment = jinja2.Environment(undefined=jinja2.StrictUndefined)
+        return int(environment.from_string(expression).render(**variables).strip())
+
+    def test_targets_get_the_image_size_on_red_hat_images_and_keep_40_gb_otherwise(self):
+        expression = self.disk_expression("targets.yml", "Target VMs")
+        for publisher, size in (("RedHat", 64), ("redhat", 64), ("Canonical", 40), ("almalinux", 40)):
+            with self.subTest(publisher=publisher):
+                self.assertEqual(self.render(expression, item={"image": {"publisher": publisher}}), size)
+        self.assertEqual(self.render(expression, item={"image": {"publisher": "RedHat"}, "os_disk_size_gb": 128}), 128)
+
+    def test_the_controller_gets_the_image_size_on_red_hat_images_and_keeps_32_gb_otherwise(self):
+        expression = self.disk_expression("controller.yml", "Controller VM")
+        for publisher, size in (("RedHat", 64), ("Canonical", 32), ("almalinux", 32)):
+            with self.subTest(publisher=publisher):
+                self.assertEqual(self.render(expression, azure_controller={"image": {"publisher": publisher}}), size)
+        self.assertEqual(self.render(expression, azure_controller={"image": {"publisher": "Canonical"},
+                                                                   "os_disk_size_gb": 48}), 48)
 
 
 if __name__ == "__main__":

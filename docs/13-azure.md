@@ -150,7 +150,11 @@ targets' security group, then a VM whose custom data is
 [`examples/onboard/cloud-init.yaml`](../examples/onboard/cloud-init.yaml), with
 the placeholder replaced by the automation public key. The same file works on
 Ubuntu 24.04 and on AlmaLinux, Rocky Linux or RHEL 9, and you can paste it
-into the portal yourself, as the next section shows. At first boot it:
+into the portal yourself, as the next section shows. Each target's OS disk is
+40 GB, except on Red Hat's images, which are 64 GB themselves; Azure refuses an
+OS disk smaller than its image, so those get 64 GB. To choose another size, set
+`os_disk_size_gb` on the target in `vars.yml`, as the commented RHEL 9
+pay-as-you-go example in `vars.example.yml` explains. At first boot it:
 
 - creates `svc_ansible` with the automation public key and no password;
 - writes chapter 4's sudoers rule and SSH drop-in;
