@@ -5,10 +5,16 @@
   gather_facts: false
   serial: 1
   any_errors_fatal: true
+  vars_files:
+    - vars/stig_systems.yml
   vars:
     stig_profile_el: xccdf_org.ssgproject.content_profile_stig
     stig_usg_profile: disa_stig
     stig_fetch_remote_resources: false
+    # Set by the per-system playbooks under playbooks/stig/; empty means every
+    # supported system, and the reports folder then has no system level.
+    stig_os_scope: ''
+    stig_report_folder: ''
     stig_content_file: ''
     stig_content_profile: ''
     allow_reboot: false
@@ -17,7 +23,8 @@
     stig_confirm: "{{ recovery_snapshot_ack | default('') == 'SNAPSHOT READY' }}"
     stig_stamp: "{{ ansible_facts['date_time']['iso8601_basic_short'] }}"
     stig_remote_dir: "/var/log/stig-practice/{{ stig_stamp }}"
-    stig_fetch_dir: "{{ lookup('env', 'HOME') }}/stig-reports/{{ stig_stamp }}"
+    stig_fetch_dir: >-
+      {{ lookup('env', 'HOME') }}/stig-reports/{{ stig_report_folder ~ '/' if stig_report_folder else '' }}{{ stig_stamp }}
   pre_tasks:
     # The recovery prompt names one exact target, so the run must select exactly one.
     # This check runs on the controller before any connection is made.
@@ -60,6 +67,28 @@
 
     - name: Check scope and supported operating system
       ansible.builtin.import_tasks: tasks/preflight.yml
+      tags: always
+
+    # The per-system playbooks under playbooks/stig/ set stig_os_scope, such as
+    # RedHat-9 or Ubuntu-24.04, in the same form as this name.
+    - name: Name this host's system the way the per-system playbooks do
+      ansible.builtin.set_fact:
+        stig_os_key: >-
+          {{ ansible_facts['distribution'] }}-{{ ansible_facts['distribution_version']
+          if ansible_facts['distribution'] == 'Ubuntu' else ansible_facts['distribution_major_version'] }}
+      tags: always
+
+    - name: Refuse a host that another system's playbook covers
+      ansible.builtin.assert:
+        that:
+          - stig_os_scope | length == 0 or stig_os_key == stig_os_scope
+        fail_msg: >-
+          This run applies the STIG to {{ stig_systems[stig_os_scope].label }}
+          hosts, and {{ inventory_hostname }} runs {{ stig_systems[stig_os_key].label }}.
+          Use {{ stig_systems[stig_os_key].label }} · STIG apply, or
+          playbooks/stig/{{ stig_systems[stig_os_key].folder }}/apply.yml, instead.
+          Nothing was changed.
+        quiet: true
       tags: always
 
     - name: Require a recorded recovery point and an explicit approval

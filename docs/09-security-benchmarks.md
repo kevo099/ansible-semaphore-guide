@@ -12,9 +12,11 @@ tools baseline between experiments. Leave the Ansible/Semaphore controller
 available as a recovery and execution platform. The five starter lessons do
 not apply CIS or STIG hardening.
 
-The seeded Enterprise Linux controller ships the same vendor assessments as
-two playbooks, [`stig-audit.yml`](../playbooks/stig-audit.yml) and
-[`stig-apply.yml`](../playbooks/stig-apply.yml), run by four templates; see
+Both seeded controllers ship the same vendor assessments as two shared
+playbooks, [`stig-audit.yml`](../playbooks/stig-audit.yml) and
+[`stig-apply.yml`](../playbooks/stig-apply.yml), with one audit and apply
+playbook per operating system and version under
+[`playbooks/stig/`](../playbooks/stig/) and one Semaphore tab for each; see
 [the seeded STIG templates](#the-seeded-stig-templates) near the end of this
 chapter. [The security baseline catalog](appendices/security-baselines.md)
 compares STIG, CIS and the other common baselines and lists the profile IDs
@@ -260,9 +262,31 @@ less secure merely because the raw fail count increased.
 ## The seeded STIG templates
 
 Both seeded controllers, [Ubuntu](03-controller.md) and
-[Enterprise Linux](03-controller-el9.md), create four STIG templates. The
-first three wrap the operating-system vendor's own STIG tooling and
-content that this chapter walks through by hand: the packaged SCAP Security
+[Enterprise Linux](03-controller-el9.md), organize the STIG lessons per
+operating system and version. Each supported system has its own playbook
+folder, content folder and Semaphore tab:
+
+| System | Playbooks in the lab folder | SCAP files you supply | Semaphore tab |
+| --- | --- | --- | --- |
+| RHEL 9 | `playbooks/stig/rhel/9/` | `content/rhel/9/` | **STIG · RHEL 9** |
+| AlmaLinux 9 | `playbooks/stig/almalinux/9/` | `content/almalinux/9/` | **STIG · AlmaLinux 9** |
+| Rocky Linux 9 | `playbooks/stig/rocky/9/` | `content/rocky/9/` | **STIG · Rocky Linux 9** |
+| Ubuntu 24.04 | `playbooks/stig/ubuntu/24.04/` | `content/ubuntu/24.04/` | **STIG · Ubuntu 24.04** |
+
+Each playbook folder holds `audit.yml` and `apply.yml`. They are short
+wrappers that name their system and run the shared `playbooks/stig-audit.yml`
+and `playbooks/stig-apply.yml`, so a fix to the shared playbooks reaches every
+system. Semaphore tabs cannot be nested, so each system and version gets one
+flat tab. Ansible tells the systems apart by the facts it gathers, the
+distribution and its major version, or the full version on Ubuntu; your
+inventory groups stay `ubuntu` and `enterprise_linux`, and one host can only
+match one system.
+
+Every tab holds three templates, named after its system, for example
+**RHEL 9 · STIG audit**. The RHEL 9 and Ubuntu 24.04 tabs add a fourth for
+DISA's own benchmark, because DISA publishes SCAP content for those two
+systems only. The templates wrap the operating-system vendor's own STIG tooling
+and content that this chapter walks through by hand: the packaged SCAP Security
 Guide `stig` profile on RHEL, AlmaLinux and Rocky Linux, and the Ubuntu
 Security Guide `disa_stig` profile on Ubuntu.
 The guide adds no rules of its own. On Enterprise Linux two things differ from
@@ -275,26 +299,36 @@ then needs access to them. Second, the remediation is
 `oscap xccdf eval --remediate` with the data stream's own fixes, not the
 packaged Ansible playbook applied on RHEL above.
 
-- **STIG audit (vendor scan only)** installs the scanner where missing, runs
-  the assessment, keeps the XML and HTML on the target under
-  `/var/log/stig-practice/`, fetches them to the controller and prints outcome
-  counts. It changes no policy. Ubuntu needs `usg` already installed through
-  your own Ubuntu Pro attachment. Without it, that host fails with an
-  explanation while the other hosts' scans still complete, so the task is
-  marked failed but the Enterprise Linux results are in the same log.
-- **STIG apply (vendor fixes, approval required)** scans, applies the vendor
-  remediation with `oscap --remediate` or `usg fix`, and scans again;
-  **STIG apply, allow required reboot** also reboots before the second scan.
-  Each changes exactly one target per run: its Run dialog asks for that host
-  in **Limit**, for example `lab-alma`, and for confirmation that a recovery
-  point for it exists. A run selecting more than one host is refused before
-  any connection. From the CLI the same gates are `--limit lab-alma` and
-  `-e '{"stig_confirm": true}'`, plus `--ask-vault-pass` if you chose the
-  Vault option for sudo passwords.
-- **STIG audit, local SCAP content** scans with a content file you place in
-  the lab folder, such as a DISA SCAP benchmark, using the profile you name in
-  the **Local SCAP content** variable group; see
+- **STIG audit** runs on the system's inventory group, `enterprise_linux` or
+  `ubuntu`, and skips the hosts there that run another system; the log names
+  each skipped host and its system. On the hosts it keeps, it installs the
+  scanner where missing, runs the assessment, keeps the XML and HTML on the
+  target under `/var/log/stig-practice/`, fetches them to the controller under
+  `~/stig-reports/<system>/<version>/`, for example `~/stig-reports/rhel/9/`,
+  and prints outcome counts. If no host in the group runs that system, the run
+  stops and says which systems the hosts run. It changes no policy. Ubuntu needs `usg` already
+  installed through your own Ubuntu Pro attachment. Without it, that host fails
+  with an explanation while the other hosts' scans still complete.
+- **STIG apply (approval required)** scans, applies the vendor remediation with
+  `oscap --remediate` or `usg fix`, and scans again; **STIG apply, allow
+  required reboot** also reboots before the second scan. Each changes exactly
+  one target per run: its Run dialog asks for that host in **Limit**, for
+  example `lab-alma` on the AlmaLinux 9 tab, and for confirmation that a
+  recovery point for it exists. A run selecting more than one host is refused
+  before any connection, and a host that runs another system is refused before
+  anything changes, with the name of the template to use instead. From the CLI
+  the same gates are `--limit lab-alma` and `-e '{"stig_confirm": true}'`, plus
+  `--ask-vault-pass` if you chose the Vault option for sudo passwords.
+- **STIG audit, DISA SCAP file** (RHEL 9 and Ubuntu 24.04) scans with DISA's
+  benchmark file, which you place in the system's `content/` folder, using the
+  profile in the **DISA SCAP file ·** variable group of that system; see
   [scan with a local SCAP content file](#scan-with-a-local-scap-content-file).
+
+From the CLI, run the playbook of the system you mean, for example
+`ansible-playbook playbooks/stig/rhel/9/audit.yml --limit enterprise_linux`.
+The shared `playbooks/stig-audit.yml` still audits every supported system in
+its limit at once, with reports under `~/stig-reports/`, and
+`playbooks/stig-apply.yml` applies to whichever single host you name.
 
 The STIG templates refuse Dry Run because the scanner does not run in check
 mode.
@@ -335,7 +369,7 @@ SCAP benchmark as a ZIP file that downloads without an account. Check the
 release; the example uses the RHEL 9 benchmark V2R9:
 
 ```bash
-cd /opt/ansible-lab/content
+cd /opt/ansible-lab/content/rhel/9
 curl -fLO https://dl.dod.cyber.mil/wp-content/uploads/stigs/zip/U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.zip
 sha256sum U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.zip
 python3 -m zipfile -e U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.zip .
@@ -344,33 +378,40 @@ grep -o 'Profile id="[^"]*"' U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.xml
 ```
 
 Record the checksum with your results. The seeded installers create
-`content/` in the lab folder; the file must stay readable by the `semaphore`
-group, which `chmod 0640` keeps. DISA benchmarks list the profiles
+`content/` in the lab folder with one folder per system and version, and the
+example works in `content/rhel/9/`, where the seeded RHEL 9 variable group
+expects the file; for Ubuntu 24.04 use `content/ubuntu/24.04/` and the Ubuntu
+benchmark from [the catalog](appendices/security-baselines.md). The file must
+stay readable by the `semaphore` group, which `chmod 0640` keeps. DISA benchmarks list the profiles
 `xccdf_mil.disa.stig_profile_MAC-1_Classified` through `MAC-3_Sensitive`,
 plus `CAT_I_Only` and `Disable_Slow_Rules`. Choose the one your system owner
 names; `MAC-1_Classified` selects the most checks.
 
-**In Semaphore:** open **Variable Groups → Local SCAP content** and replace
-both placeholders in its extra variables:
+**In Semaphore:** the variable group **DISA SCAP file · RHEL 9** already holds
+the path and profile of this example:
 
 ```json
 {
-  "stig_content_file": "content/U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.xml",
+  "stig_content_file": "content/rhel/9/U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.xml",
   "stig_content_profile": "xccdf_mil.disa.stig_profile_MAC-1_Classified"
 }
 ```
 
-Then run **STIG audit, local SCAP content** and enter the hosts the file is
-written for in **Limit**, for example `lab-rhel`. While the placeholders
-remain, the run stops with an explanation before scanning. From the CLI, run
-from the lab folder with your own key and the targets' sudo password, as
-[chapter 5](05-cli-lessons.md) does, and pass the same two variables:
+Run **RHEL 9 · STIG audit, DISA SCAP file** from the **STIG · RHEL 9** tab. It
+scans the RHEL 9 hosts in `enterprise_linux` and skips AlmaLinux and Rocky
+Linux hosts, which the benchmark does not cover. While the file is missing, the
+run stops before scanning and names the path it expected. For a newer DISA
+release, or a profile your system owner names, edit the two values in that
+variable group; **DISA SCAP file · Ubuntu 24.04** works the same way for
+`content/ubuntu/24.04/`. From the CLI, run from the lab folder with your own
+key and the targets' sudo password, as [chapter 5](05-cli-lessons.md) does,
+and pass the same two variables:
 
 ```bash
 cd /opt/ansible-lab
-/opt/ansible-venv/bin/ansible-playbook playbooks/stig-audit.yml --limit lab-rhel \
+/opt/ansible-venv/bin/ansible-playbook playbooks/stig/rhel/9/audit.yml --limit enterprise_linux \
   --private-key ~/.ssh/ansible_lab -K \
-  -e '{"stig_content_file": "content/U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.xml", "stig_content_profile": "xccdf_mil.disa.stig_profile_MAC-1_Classified"}'
+  -e '{"stig_content_file": "content/rhel/9/U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.xml", "stig_content_profile": "xccdf_mil.disa.stig_profile_MAC-1_Classified"}'
 ```
 
 On a seeded controller that key must be authorized on the targets beside the
@@ -384,7 +425,8 @@ because DISA benchmarks carry checks but no fixes, and remediation always
 uses the vendor's packaged content.
 
 A benchmark checks that it runs on its own platform. In the test, DISA's RHEL 9
-benchmark reported all 392 of its rules as not applicable on AlmaLinux 9.8, so
+benchmark reported all 392 of its rules as not applicable on AlmaLinux 9.8,
+which is why the DISA template of each system scans only that system's hosts;
 scan AlmaLinux and Rocky Linux with their own packaged content. DISA content
 and the vendor's `stig` profile also check different releases in different
 ways, so their counts differ on the same machine. On targets the vendor STIG

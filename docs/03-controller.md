@@ -20,7 +20,7 @@ seed the same local-folder practice project.
 
 - **Manual path:** follow the numbered sections below to see what each layer does.
 - **Installer path:** read the script, view its plan, then apply it on the fresh VM
-  to get the stack and twelve ready-configured task templates.
+  to get the stack and 22 ready-configured task templates.
 
 Both paths use the files in this repository. Do not execute the manual path
 and then run the fresh installer over it. The installer intentionally refuses
@@ -55,15 +55,17 @@ continue at [Check controller readiness](#check-controller-readiness), then
 | Database | PostgreSQL 16 from Ubuntu's repositories, loopback only, SCRAM login |
 | Application | Semaphore Community 2.19.12, checksum-verified, `127.0.0.1:3000`, hardened `semaphore.service` |
 | Secrets | Protected files in `/etc/semaphore`: application configuration, the root-only initial admin password and `svc_ansible` RSA 4096 private key, plus its public key; no secret values are printed |
-| Lab folder | `/opt/ansible-lab`, owned by the editor and readable by the service: `ansible.cfg`, seven playbooks and their supporting files, the report summarizer, an empty `inventories/lab.ini`, an empty `content/` folder for SCAP files you supply, and local Git history; `.gitignore` excludes inventories and host/group variables |
-| Semaphore objects | Project **Ansible Practice**; keys **None** and **Practice target SSH**; repository **Local lab folder**; inventory **Lab inventory file**; variable groups **Practice defaults**, **Allow required reboot** and **Local SCAP content**; template tabs **Lessons**, **Patching** and **STIG** |
-| Twelve task templates | **Ping**; **Baseline preview**; **Baseline apply**; **Users**; **Webserver**; **Patch preview**; **Patch, no reboot**; **Patch, allow required reboot**; **STIG audit (vendor scan only)**; **STIG apply (vendor fixes, approval required)**; **STIG apply, allow required reboot**; **STIG audit, local SCAP content** |
+| Lab folder | `/opt/ansible-lab`, owned by the editor and readable by the service: `ansible.cfg`, seven playbooks and their supporting files, one STIG audit and apply playbook per system and version under `playbooks/stig/` (`rhel/9`, `almalinux/9`, `rocky/9`, `ubuntu/24.04`), the report summarizer, an empty `inventories/lab.ini`, a `content/` folder with the same per-system subfolders for SCAP files you supply, and local Git history; `.gitignore` excludes inventories and host/group variables |
+| Semaphore objects | Project **Ansible Practice**; keys **None** and **Practice target SSH**; repository **Local lab folder**; inventory **Lab inventory file**; variable groups **Practice defaults**, **Allow required reboot**, **DISA SCAP file · RHEL 9** and **DISA SCAP file · Ubuntu 24.04**; template tabs **Lessons**, **Patching**, **STIG · RHEL 9**, **STIG · AlmaLinux 9**, **STIG · Rocky Linux 9** and **STIG · Ubuntu 24.04** |
+| 22 task templates | **Lessons:** Ping; Baseline preview; Baseline apply; Users; Webserver. **Patching:** Patch preview; Patch, no reboot; Patch, allow required reboot. **Each STIG tab**, with names that start with the system, such as **RHEL 9 · STIG audit**: STIG audit; STIG apply (approval required); STIG apply, allow required reboot; and on the RHEL 9 and Ubuntu 24.04 tabs, STIG audit, DISA SCAP file |
 
-The lesson templates limit runs to the `lab` group. The two STIG apply
-templates instead ask for exactly one host and a recovery-point approval when
-you run them, and the local SCAP content template asks for the hosts its
-content file is written for. The preview templates use `--check --diff`. Only the templates
-named “allow required reboot” enable reboots. The four optional STIG templates
+The lesson templates limit runs to the `lab` group. Each STIG audit template
+runs on its system's inventory group, `enterprise_linux` or `ubuntu`, and skips
+the hosts there that run another system, so **RHEL 9 · STIG audit** reports
+only on RHEL 9 hosts. The STIG apply templates instead ask for exactly one host
+and a recovery-point approval when you run them, and refuse a host that runs
+another system. The preview templates use `--check --diff`. Only the templates
+named “allow required reboot” enable reboots. The optional STIG templates
 run the playbooks from this local folder; see
 [the seeded STIG lessons](09-security-benchmarks.md#the-seeded-stig-templates)
 for vendor-content prerequisites and the recovery preparation required before
@@ -293,7 +295,7 @@ curl --fail http://127.0.0.1:3000/api/ping
 
 Expect `passed: true`, active services and HTTP success. This proves application
 readiness, not target access or a successful authenticated job. The installer
-also prints a seeding summary naming the project, inventory file and twelve
+also prints a seeding summary naming the project, inventory file and 22
 template identifiers. Complete the target checks below for the installer path,
 or in [chapter 4](04-access.md) for the manual path.
 
@@ -394,10 +396,10 @@ seeded project, so the script refuses it; build its project by hand as
 [chapter 6](06-semaphore.md) describes. The installers refuse to run a second
 time, so use [`scripts/update-controller.sh`](../scripts/update-controller.sh)
 instead of installing again. Get the newer copy of the guide first; replace
-`v1.6.0` with the release you want:
+`v1.7.0` with the release you want:
 
 ```bash
-git clone --branch v1.6.0 https://github.com/kevo099/ansible-semaphore-guide.git ~/guide-new
+git clone --branch v1.7.0 https://github.com/kevo099/ansible-semaphore-guide.git ~/guide-new
 cd ~/guide-new
 sudo bash scripts/update-controller.sh
 ```
@@ -415,10 +417,10 @@ versions: yours, the guide's version you last installed, and the new one.
   the release's version, and the folder's Git history keeps yours.
 - Other files you added are never touched.
 
-The plan also lists whether `content/` would be created for SCAP files you
-supply, and the Semaphore variable groups, template tabs and templates it would
-add, with the seeded templates it would put on a tab. When the plan is what you
-expect, apply it:
+The plan also lists the `content/` folders it would create for SCAP files you
+supply, the Semaphore variable groups, template tabs and templates it would
+add, the seeded templates it would put on a tab, and the seeded objects that
+this release replaces. When the plan is what you expect, apply it:
 
 ```bash
 sudo bash scripts/update-controller.sh --apply
@@ -433,14 +435,17 @@ refuses to run twice at once.
 It then logs in to Semaphore and checks the project before changing anything.
 Only templates bound to the lab folder's repository and inventory count as
 seeded, so a template of yours with the same name is left alone. In Semaphore it
-only adds what the project lacks, and puts a seeded template that has no tab on
-its tab. Before that it saves every template to a root-only file under
+adds what the project lacks, and puts a seeded template that has no tab on its
+tab. When all your seeded templates use the same vault password, as
+[chapter 3b's per-target sudo option](03-controller-el9.md#do-give-the-templates-the-targets-sudo-password)
+sets up, the new templates get it too. Before that it saves every template to a root-only file under
 `/root/ansible-lab-update/`, and it confirms each template it edits, putting it
 back if Semaphore changed any other setting. If it cannot confirm an edit, it
 leaves a `pending-template-ID.json` record there, and later runs stop until you
 have checked that template in the UI and deleted the record. It never changes
 Semaphore itself, the database, Ansible, the inventory, keys, a template's
-variable groups, or a tab you chose.
+variable groups, or a tab you chose, and it deletes nothing unless you ask, as
+the next section describes.
 
 Last, it checks that the lab folder is exactly as planned; if you edited a
 guide file meanwhile, it stops without touching the folder, and a second run
@@ -453,6 +458,30 @@ that the next update compares with. `git revert HEAD` in the folder undoes that
 commit; running the update again applies it again. A second run reports
 nothing to do.
 
+**From one STIG tab to one per system.** Release `v1.7.0` replaced the single
+**STIG** tab with one tab per system and version. An update adds the new tabs
+and templates and keeps the four old STIG templates, the **STIG** tab and the
+**Local SCAP content** variable group, so nothing you ran disappears; the old
+templates still work and audit every supported system at once. The plan lists
+them as replaced. If you scanned with a SCAP file of your own, move it into its
+system's folder, for example with
+`mv /opt/ansible-lab/content/U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.xml /opt/ansible-lab/content/rhel/9/`
+as the folder's owner, where the variable group **DISA SCAP file · RHEL 9**
+expects DISA's RHEL 9 V2R9 benchmark, or edit that group's path. Once you have
+checked the new tabs, delete the old objects with:
+
+```bash
+sudo bash scripts/update-controller.sh --apply --remove-replaced
+```
+
+It deletes them only after the lab folder holds the new playbooks, and saves
+the templates, the tab and the variable group to a root-only file under
+`/root/ansible-lab-update/` first. Deleting a template in Semaphore also deletes
+its task history, so keep any task output you need first; the backup holds
+settings, not runs. The tab and the variable group are deleted only when no
+other template uses them, and a **Local SCAP content** group that you filled
+in is kept with your values; delete it in the UI once you have copied them.
+
 It runs the readiness check before and after the update. A check that already
 failed before is listed with its fix, and the update still completes; only a
 check that newly fails ends it with an error. On a controller whose UI was
@@ -464,8 +493,8 @@ and keeps your certificate, so the browser's fingerprint does not change:
 ```bash
 sudo bash scripts/expose-semaphore.sh --mode https
 ```
- With a different
-lab folder, add the same `--lab-dir DIR` the installer used. If several projects
+
+With a different lab folder, add the same `--lab-dir DIR` the installer used. If several projects
 share the seeded project's name, pass `--project-id` with its ID.
 
 If you changed the administrator's password in the UI, the stored installer
@@ -476,7 +505,8 @@ shows and pass it as `SEMAPHORE_API_TOKEN` with
 `sudo --preserve-env=SEMAPHORE_API_TOKEN`.
 
 **Check:** the **Task Templates** page shows the tabs **Lessons**, **Patching**
-and **STIG** beside **All**, and **Ping** still succeeds.
+and one **STIG ·** tab per system beside **All**, plus the old **STIG** tab
+until you remove it, and **Ping** still succeeds.
 
 ## Concept
 

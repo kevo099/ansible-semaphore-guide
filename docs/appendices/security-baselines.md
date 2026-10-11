@@ -137,7 +137,8 @@ read the selected release's terms before redistributing content.
 ## Profiles usable with this guide
 
 The [audit playbook](../../playbooks/stig-audit.yml) and
-[apply playbook](../../playbooks/stig-apply.yml) accept the variables below.
+[apply playbook](../../playbooks/stig-apply.yml), and their per-system
+wrappers under [`playbooks/stig/`](../../playbooks/stig/), accept the variables below.
 Set them as Ansible extra variables with `-e`, or in the Semaphore template's
 variable group JSON. Ordinary inventory variables do not override the defaults
 declared inside these plays. The task names still say STIG when you select CIS.
@@ -295,10 +296,10 @@ that file with `oscap info` and selecting its MAC-1 Public profile:
 
 ```bash
 cd /opt/ansible-lab
-/opt/ansible-venv/bin/ansible-playbook -i inventories/lab.ini playbooks/stig-audit.yml \
+/opt/ansible-venv/bin/ansible-playbook -i inventories/lab.ini playbooks/stig/rhel/9/audit.yml \
   --limit lab-rhel \
   --private-key ~/.ssh/ansible_lab -K \
-  -e '{"stig_content_file": "content/U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.xml", "stig_content_profile": "xccdf_mil.disa.stig_profile_MAC-1_Public"}'
+  -e '{"stig_content_file": "content/rhel/9/U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.xml", "stig_content_profile": "xccdf_mil.disa.stig_profile_MAC-1_Public"}'
 ```
 
 This selects OpenSCAP on either supported OS family, bypassing the vendor
@@ -308,10 +309,14 @@ checks. In the run, the RHEL 9 DISA benchmark returned all 392 rules as not
 applicable on AlmaLinux 9.8. The tested DISA content contains no remediation fixes, and
 `stig-apply.yml` refuses local content.
 
-Seeded controllers include **STIG audit, local SCAP content**, using the
-**Local SCAP content** variable group. Replace both placeholders with the
-reviewed file path and full profile ID; the playbook refuses the placeholders.
-Choose matching targets in Limit and leave Dry Run off.
+Seeded controllers include **RHEL 9 · STIG audit, DISA SCAP file** and
+**Ubuntu 24.04 · STIG audit, DISA SCAP file**, using the variable groups
+**DISA SCAP file · RHEL 9** and **DISA SCAP file · Ubuntu 24.04**. Each group
+names the benchmark this catalog lists, in that system's folder under
+`content/`, with the `MAC-1_Classified` profile; edit the path for a newer
+release or the profile your system owner names. Each template scans only the
+hosts of its own system and stops, naming the expected path, until the file is
+there. Leave Dry Run off.
 
 ## What the live run establishes
 

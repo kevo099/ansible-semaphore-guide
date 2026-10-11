@@ -1,0 +1,9 @@
+---
+# Vendor STIG audit of the RHEL 9 hosts in the run's limit; the seeded
+# "RHEL 9 · STIG audit" templates run it. Hosts that run another system are
+# skipped, and reports go to ~/stig-reports/rhel/9/ on the controller.
+- name: Audit RHEL 9 hosts against the vendor STIG
+  ansible.builtin.import_playbook: ../../../stig-audit.yml
+  vars:
+    stig_os_scope: RedHat-9
+    stig_report_folder: rhel/9
