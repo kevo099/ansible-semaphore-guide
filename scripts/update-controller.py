@@ -532,9 +532,12 @@ def main():
     show("Templates to put on their tab", [t["name"] for t in semaphore_plan["tabs"]])
     replaced = seeder.replaced_names(semaphore_plan)
     if args.remove_replaced:
-        show("Replaced by this release, to remove (with the templates' task history)", replaced)
+        show("Replaced by this release, to remove after the files are updated (with the templates' task "
+             "history)", replaced)
     else:
         show("Replaced by this release, kept (--remove-replaced deletes them)", replaced)
+    show("Replaced variable groups that hold your values, kept (copy them, then delete them in the UI)",
+         semaphore_plan["edited"])
     for item in seeder.pending_edits(Path("/root/ansible-lab-update")):
         print(f"  Problem: an earlier update could not confirm its edit of template {item['name']!r}; "
               f"check it in the UI against {item['record']}, then delete that file")
@@ -548,8 +551,7 @@ def main():
     if semaphore_plan["ambiguous"]:
         raise SystemExit("Nothing was changed. Rename or remove the duplicates, then run again.")
 
-    seeder.apply_update(client, found, semaphore_plan, Path("/root/ansible-lab-update"),
-                        remove_replaced=args.remove_replaced)
+    seeder.apply_update(client, found, semaphore_plan, Path("/root/ansible-lab-update"))
 
     # The Semaphore part can take a while (and a login prompt); make sure the folder
     # is exactly as planned before touching it.
@@ -590,6 +592,11 @@ def main():
                              f"{result.stderr.decode(errors='replace').strip()}\nCommit them in {root} with: "
                              f"git commit -m \"Update the guide's files to {version}\" -- " + " ".join(changed))
         print(f"Committed {len(changed)} file(s) in {root}; git revert HEAD there undoes them.")
+
+    if args.remove_replaced:
+        # Only now do the lab folder's playbooks match the templates that remain.
+        _backup, removed = seeder.remove_replaced(client, found, semaphore_plan, Path("/root/ansible-lab-update"))
+        print(f"Removed {len(removed)} replaced object(s) from Semaphore.")
 
     outcome, names = readiness_outcome(readiness_before, failing_readiness())
     if outcome == "new":

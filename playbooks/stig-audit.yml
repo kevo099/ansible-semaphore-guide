@@ -5,6 +5,8 @@
   hosts: lab
   become: true
   gather_facts: false
+  vars_files:
+    - vars/stig_systems.yml
   vars:
     stig_phase: audit
     stig_profile_el: xccdf_org.ssgproject.content_profile_stig
@@ -49,9 +51,27 @@
           if ansible_facts['distribution'] == 'Ubuntu' else ansible_facts['distribution_major_version'] }}
       tags: always
 
+    - name: Stop when no host in the run has the system this playbook audits
+      ansible.builtin.fail:
+        msg: >-
+          No host in this run's limit runs {{ stig_systems[stig_os_scope].label }},
+          so there is nothing to audit. The hosts run {{ ansible_play_hosts
+          | map('extract', hostvars, 'stig_os_key') | unique | map('extract', stig_systems, 'label')
+          | join(', ') }}; run the STIG audit of that system instead, or add a
+          {{ stig_systems[stig_os_scope].label }} host to the inventory.
+      when:
+        - stig_os_scope | length > 0
+        - ansible_play_hosts | map('extract', hostvars, 'stig_os_key') | select('equalto', stig_os_scope)
+          | list | length == 0
+      tags: always
+
     - name: Report hosts that another system's playbook covers
       ansible.builtin.debug:
-        msg: "{{ inventory_hostname }} runs {{ stig_os_key }}; this run audits {{ stig_os_scope }} hosts only."
+        msg: >-
+          {{ inventory_hostname }} runs {{ stig_systems[stig_os_key].label }}; this
+          run audits {{ stig_systems[stig_os_scope].label }} hosts only. Audit it
+          with {{ stig_systems[stig_os_key].label }} · STIG audit, or
+          playbooks/stig/{{ stig_systems[stig_os_key].folder }}/audit.yml.
       when: stig_os_scope | length > 0 and stig_os_key != stig_os_scope
       tags: always
 

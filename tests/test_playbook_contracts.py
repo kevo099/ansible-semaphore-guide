@@ -178,6 +178,23 @@ class PerSystemPlaybookTests(unittest.TestCase):
                 with self.subTest(playbook=playbook, scope=scope):
                     self.assertEqual(self.os_key(playbook, facts), scope)
 
+    def test_the_system_names_in_messages_match_the_seeded_templates(self):
+        systems = yaml.safe_load((ROOT / "playbooks/vars/stig_systems.yml").read_text())["stig_systems"]
+        seeded = load("seed-semaphore").STIG_SYSTEMS
+        wrappers = {tasks(f"playbooks/stig/{folder}/audit.yml")[0]["vars"]["stig_os_scope"]: (label, folder)
+                    for label, folder, _group, _file in seeded}
+        self.assertEqual({key: (value["label"], value["folder"]) for key, value in systems.items()}, wrappers)
+        for playbook in STIG_PLAYBOOKS:
+            self.assertEqual(tasks(playbook)[0]["vars_files"], ["vars/stig_systems.yml"])
+
+    def test_an_audit_with_no_host_of_its_system_stops_with_an_explanation(self):
+        audit = tasks("playbooks/stig-audit.yml")[0]["pre_tasks"]
+        stop = named(audit, "Stop when no host in the run has the system this playbook audits")
+        self.assertIn("select('equalto', stig_os_scope)", " ".join(stop["when"]))
+        names = [t["name"] for t in audit]
+        self.assertLess(names.index(stop["name"]), next(i for i, t in enumerate(audit)
+                                                        if t.get("ansible.builtin.meta") == "end_host"))
+
     def test_audit_skips_and_apply_refuses_another_system(self):
         audit = tasks("playbooks/stig-audit.yml")[0]["pre_tasks"]
         end = next(t for t in audit if t.get("ansible.builtin.meta") == "end_host")

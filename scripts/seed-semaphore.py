@@ -117,7 +117,10 @@ VIEW_OF = {name: title for title, names in VIEWS for name in names}
 REPLACED_TEMPLATES = ["STIG audit (vendor scan only)", "STIG apply (vendor fixes, approval required)",
                       "STIG apply, allow required reboot", "STIG audit, local SCAP content"]
 REPLACED_VIEWS = ["STIG"]
-REPLACED_ENVIRONMENTS = ["Local SCAP content"]
+# A replaced variable group is removed only while it still holds what was seeded;
+# one you filled in keeps your values until you delete it yourself.
+REPLACED_ENVIRONMENTS = {"Local SCAP content": {"stig_content_file": "content/REPLACE_WITH_BENCHMARK.xml",
+                                                "stig_content_profile": "REPLACE_WITH_PROFILE_ID"}}
 
 
 def lab_dir_path(value):
@@ -128,7 +131,7 @@ def lab_dir_path(value):
     return str(path)
 
 
-def template_payload(project_id, ids, lesson):
+def template_payload(project_id, ids, lesson, vaults=()):
     name, playbook, extra_args, group, prompt, options = lesson
     one_target = options.get("allow_override_limit", False)
     limit = ", ".join(options.get("limit", []))
@@ -152,6 +155,7 @@ def template_payload(project_id, ids, lesson):
         "survey_vars": prompt,
         # Without a tab, Semaphore lists the template only under All.
         "view_id": ids.get("views", {}).get(VIEW_OF.get(name)),
+        "vaults": [dict(vault) for vault in vaults],
     }
 
 
@@ -201,7 +205,8 @@ def update_plan(existing, repository_id, inventory_id):
 
     Seeded objects this release replaces are listed under "replaced": the old
     templates, and the old tab and variable group when nothing else uses them.
-    Only apply_update(remove_replaced=True) deletes them.
+    A replaced variable group you filled in is listed under "edited" instead,
+    and kept. Only remove_replaced() deletes anything.
     """
     env_names = [env["name"] for env in existing["environments"]]
     view_titles = [view["title"] for view in existing["views"]]
@@ -232,10 +237,24 @@ def update_plan(existing, repository_id, inventory_id):
             "views": [{"id": v["id"], "title": v["title"]} for v in existing["views"]
                       if v["title"] in REPLACED_VIEWS and not any(t.get("view_id") == v["id"] for t in others)],
             "environments": [{"id": e["id"], "name": e["name"]} for e in existing["environments"]
-                             if e["name"] in REPLACED_ENVIRONMENTS
+                             if e["name"] in REPLACED_ENVIRONMENTS and not edited(e)
                              and not any(e["id"] in environments_of(t) for t in others)],
         },
+        "edited": [e["name"] for e in existing["environments"] if e["name"] in REPLACED_ENVIRONMENTS and edited(e)],
     }
+
+
+def edited(environment):
+    """Whether a replaced variable group holds anything but the values it was seeded with."""
+    try:
+        values = json.loads(environment.get("json") or "")
+    except ValueError:
+        return True
+    try:
+        variables = json.loads(environment.get("env") or "{}")
+    except ValueError:
+        return True
+    return values != REPLACED_ENVIRONMENTS[environment["name"]] or variables != {}
 
 
 def environments_of(template):
@@ -433,36 +452,105 @@ def save_verified(client, path, before, desired, backup_dir):
                      "once the cause is fixed.")
 
 
-def remove_replaced_objects(client, base, plan, repository_id, inventory_id, say):
-    """Delete what the plan lists as replaced, checking each object again first."""
-    for template in plan["replaced"]["templates"]:
+def seeded_vaults(client, base, found):
+    """The vault passwords that every seeded template shares, for the templates an update adds.
+
+    Chapter 3b's per-target sudo option adds a vault password to every template.
+    Returns (vaults, note): vaults is empty when the seeded templates use none or
+    differ, and note says what a person should check then.
+    """
+    names = set(VIEW_OF) | set(REPLACED_TEMPLATES)
+    shared = set()
+    for template in found["templates"]:
+        if (template["name"] in names and template.get("repository_id") == found["repository"]["id"]
+                and template.get("inventory_id") == found["inventory"]["id"]):
+            vaults = client.call("GET", f"{base}/templates/{template['id']}").get("vaults") or []
+            shared.add(tuple(sorted((v["vault_key_id"], v.get("type") or "password", v.get("script") or "")
+                                    for v in vaults)))
+    if len(shared) == 1 and next(iter(shared)):
+        vaults = [{"vault_key_id": key, "type": kind, **({"script": script} if script else {})}
+                  for key, kind, script in next(iter(shared))]
+        return vaults, "The new templates use the same vault password as your seeded templates."
+    if any(shared):
+        return [], ("Your seeded templates use different vault passwords, so the new templates have none; "
+                    "add yours under Ansible options -> Vaults if they need one.")
+    return [], None
+
+
+def removable(plan):
+    replaced = plan["replaced"]
+    return bool(replaced["templates"] or replaced["views"] or replaced["environments"])
+
+
+def take_backup(client, base, found, backup_dir, prefix, extra=None):
+    """Save every template as it is now, and any extra objects, root-only; returns the path."""
+    backup_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    # Names sort by time, and two runs in one second never share one.
+    stamp = time.time_ns()
+    path = backup_dir / (f"{prefix}-{time.strftime('%Y%m%dT%H%M%S', time.localtime(stamp // 10**9))}"
+                         f"-{stamp % 10**9:09d}.json")
+    details = [client.call("GET", f"{base}/templates/{t['id']}")
+               for t in client.call("GET", f"{base}/templates") or []]
+    with open(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as handle:
+        json.dump(details if extra is None else {"templates": details, **extra}, handle, indent=2)
+    return path
+
+
+def remove_replaced(client, found, plan, backup_dir, say=print):
+    """Delete what the plan lists as replaced, after a backup, checking each object again first.
+
+    Returns (backup path or None, the names of what was removed).
+    """
+    if not removable(plan):
+        return None, []
+    base = found["base"]
+    replaced = plan["replaced"]
+    view_ids = {v["id"] for v in replaced["views"]}
+    environment_ids = {e["id"] for e in replaced["environments"]}
+    backup = take_backup(client, base, found, backup_dir, "semaphore-before-removal", {
+        "views": [v for v in client.call("GET", f"{base}/views") or [] if v["id"] in view_ids],
+        "environments": [e for e in client.call("GET", f"{base}/environment") or [] if e["id"] in environment_ids],
+    })
+    say(f"Templates, tab and variable group as they were before: {backup}")
+    removed = []
+    repository_id, inventory_id = found["repository"]["id"], found["inventory"]["id"]
+    for template in replaced["templates"]:
         current = client.call("GET", f"{base}/templates/{template['id']}")
         if (current.get("name") != template["name"] or current.get("repository_id") != repository_id
                 or current.get("inventory_id") != inventory_id):
             say(f"Kept template {template['name']!r}: it changed since the plan")
             continue
         client.call("DELETE", f"{base}/templates/{template['id']}")
+        removed.append(f"template {template['name']!r}")
         say(f"Removed template {template['name']!r} and its task history")
     remaining = [client.call("GET", f"{base}/templates/{t['id']}")
                  for t in client.call("GET", f"{base}/templates") or []]
-    for view in plan["replaced"]["views"]:
+    for view in replaced["views"]:
         if any(t.get("view_id") == view["id"] for t in remaining):
             say(f"Kept tab {view['title']!r}: other templates are on it")
             continue
         client.call("DELETE", f"{base}/views/{view['id']}")
+        removed.append(f"tab {view['title']!r}")
         say(f"Removed tab {view['title']!r}")
-    for environment in plan["replaced"]["environments"]:
+    current = {e["id"]: e for e in client.call("GET", f"{base}/environment") or []}
+    for environment in replaced["environments"]:
         if any(environment["id"] in environments_of(t) for t in remaining):
             say(f"Kept variable group {environment['name']!r}: other templates use it")
             continue
+        if environment["id"] not in current or edited(current[environment["id"]]):
+            say(f"Kept variable group {environment['name']!r}: it changed since the plan")
+            continue
         client.call("DELETE", f"{base}/environment/{environment['id']}")
+        removed.append(f"variable group {environment['name']!r}")
         say(f"Removed variable group {environment['name']!r}")
+    return backup, removed
 
 
-def apply_update(client, found, plan, backup_dir, say=print, remove_replaced=False):
-    """Add what the plan lists, and with remove_replaced delete what it replaces.
+def apply_update(client, found, plan, backup_dir, say=print):
+    """Add what the plan lists. Returns the path of the template backup, if one was taken.
 
-    Returns the path of the template backup, if one was taken.
+    It removes nothing; remove_replaced() does that, once the lab folder holds
+    the playbooks the new templates run.
     """
     if plan["ambiguous"]:
         raise SystemExit("Several objects share a name the update needs: " + "; ".join(plan["ambiguous"])
@@ -474,18 +562,10 @@ def apply_update(client, found, plan, backup_dir, say=print, remove_replaced=Fal
             + ". Check that template in the UI, delete the record, and run again. Nothing was changed.")
     base, project_id = found["base"], found["project"]["id"]
     backup = None
-    removing = remove_replaced and any(plan["replaced"].values())
-    if plan["tabs"] or removing:
-        # Semaphore rewrites a template's variable-group links when it saves one, and
-        # deleting a template deletes it for good; keep every template as it was,
-        # root-only, before changing any of them.
-        backup_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-        # Names sort by time, and two runs in one second never share one.
-        stamp = time.time_ns()
-        backup = backup_dir / f"semaphore-templates-{time.strftime('%Y%m%dT%H%M%S', time.localtime(stamp // 10**9))}-{stamp % 10**9:09d}.json"
-        details = [client.call("GET", f"{base}/templates/{t['id']}") for t in found["templates"]]
-        with open(os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as handle:
-            json.dump(details, handle, indent=2)
+    if plan["tabs"]:
+        # Semaphore rewrites a template's variable-group links when it saves one; keep
+        # every template as it was, root-only, before changing any of them.
+        backup = take_backup(client, base, found, backup_dir, "semaphore-templates")
         say(f"Templates as they were before: {backup}")
 
     ids = {"repository": found["repository"]["id"], "inventory": found["inventory"]["id"],
@@ -499,9 +579,12 @@ def apply_update(client, found, plan, backup_dir, say=print, remove_replaced=Fal
         body = {"project_id": project_id, "title": title, "position": position}
         ids["views"][title] = client.call("POST", f"{base}/views", body)["id"]
         position += 1
+    vaults, note = seeded_vaults(client, base, found) if plan["templates"] else ([], None)
+    if note:
+        say(note)
     for lesson in LESSONS:
         if lesson[0] in plan["templates"]:
-            client.call("POST", f"{base}/templates", template_payload(project_id, ids, lesson))
+            client.call("POST", f"{base}/templates", template_payload(project_id, ids, lesson, vaults))
     for tab in plan["tabs"]:
         path = f"{base}/templates/{tab['id']}"
         before = client.call("GET", path)
@@ -509,8 +592,6 @@ def apply_update(client, found, plan, backup_dir, say=print, remove_replaced=Fal
             say(f"Kept the tab you gave {tab['name']!r} meanwhile")
             continue
         save_verified(client, path, before, dict(before, view_id=ids["views"][VIEW_OF[tab["name"]]]), backup_dir)
-    if removing:
-        remove_replaced_objects(client, base, plan, ids["repository"], ids["inventory"], say)
     return backup
 
 
@@ -521,10 +602,17 @@ def update(client, args):
     result = {"project": {"name": found["project"]["name"], "id": found["project"]["id"]},
               "planned" if args.plan else "done": plan}
     if not args.plan:
-        backup = apply_update(client, found, plan, Path("/root/ansible-lab-update"), say=lambda _text: None,
-                              remove_replaced=args.remove_replaced)
+        notes = []
+        backup = apply_update(client, found, plan, Path("/root/ansible-lab-update"), say=notes.append)
         if backup:
             result["template_backup"] = str(backup)
+        if args.remove_replaced:
+            removal_backup, removed = remove_replaced(client, found, plan, Path("/root/ansible-lab-update"),
+                                                      say=notes.append)
+            result["removed"] = removed
+            if removal_backup:
+                result["removal_backup"] = str(removal_backup)
+        result["notes"] = [note for note in notes if not note.startswith(("Templates", "Removed"))]
     print(json.dumps(result, indent=2))
 
 

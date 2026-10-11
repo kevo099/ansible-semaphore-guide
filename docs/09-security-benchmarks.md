@@ -305,7 +305,8 @@ packaged Ansible playbook applied on RHEL above.
   scanner where missing, runs the assessment, keeps the XML and HTML on the
   target under `/var/log/stig-practice/`, fetches them to the controller under
   `~/stig-reports/<system>/<version>/`, for example `~/stig-reports/rhel/9/`,
-  and prints outcome counts. It changes no policy. Ubuntu needs `usg` already
+  and prints outcome counts. If no host in the group runs that system, the run
+  stops and says which systems the hosts run. It changes no policy. Ubuntu needs `usg` already
   installed through your own Ubuntu Pro attachment. Without it, that host fails
   with an explanation while the other hosts' scans still complete.
 - **STIG apply (approval required)** scans, applies the vendor remediation with

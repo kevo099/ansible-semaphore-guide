@@ -435,30 +435,17 @@ refuses to run twice at once.
 It then logs in to Semaphore and checks the project before changing anything.
 Only templates bound to the lab folder's repository and inventory count as
 seeded, so a template of yours with the same name is left alone. In Semaphore it
-only adds what the project lacks, and puts a seeded template that has no tab on
-its tab. Before that it saves every template to a root-only file under
+adds what the project lacks, and puts a seeded template that has no tab on its
+tab. When all your seeded templates use the same vault password, as
+[chapter 3b's per-target sudo option](03-controller-el9.md#do-give-the-templates-the-targets-sudo-password)
+sets up, the new templates get it too. Before that it saves every template to a root-only file under
 `/root/ansible-lab-update/`, and it confirms each template it edits, putting it
 back if Semaphore changed any other setting. If it cannot confirm an edit, it
 leaves a `pending-template-ID.json` record there, and later runs stop until you
 have checked that template in the UI and deleted the record. It never changes
 Semaphore itself, the database, Ansible, the inventory, keys, a template's
-variable groups, or a tab you chose.
-
-Release `v1.7.0` replaced the single **STIG** tab with one tab per system and
-version. An update adds the new tabs and templates and keeps the four old STIG
-templates, the **STIG** tab and the **Local SCAP content** variable group, so
-nothing you ran disappears; the old templates still work and audit every
-supported system at once. The plan lists them as replaced. Once you have
-checked the new tabs, delete them with:
-
-```bash
-sudo bash scripts/update-controller.sh --apply --remove-replaced
-```
-
-Deleting a template in Semaphore also deletes its task history, so keep any
-task output you need first; the root-only backup holds the templates' settings,
-not their runs. The tab and the variable group are deleted only when no other
-template uses them.
+variable groups, or a tab you chose, and it deletes nothing unless you ask, as
+the next section describes.
 
 Last, it checks that the lab folder is exactly as planned; if you edited a
 guide file meanwhile, it stops without touching the folder, and a second run
@@ -470,6 +457,30 @@ Git history with `.guide-files.json`, the record of the guide's own versions
 that the next update compares with. `git revert HEAD` in the folder undoes that
 commit; running the update again applies it again. A second run reports
 nothing to do.
+
+**From one STIG tab to one per system.** Release `v1.7.0` replaced the single
+**STIG** tab with one tab per system and version. An update adds the new tabs
+and templates and keeps the four old STIG templates, the **STIG** tab and the
+**Local SCAP content** variable group, so nothing you ran disappears; the old
+templates still work and audit every supported system at once. The plan lists
+them as replaced. If you scanned with a SCAP file of your own, move it into its
+system's folder, for example with
+`mv /opt/ansible-lab/content/U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.xml /opt/ansible-lab/content/rhel/9/`
+as the folder's owner, where the variable group **DISA SCAP file · RHEL 9**
+expects DISA's RHEL 9 V2R9 benchmark, or edit that group's path. Once you have
+checked the new tabs, delete the old objects with:
+
+```bash
+sudo bash scripts/update-controller.sh --apply --remove-replaced
+```
+
+It deletes them only after the lab folder holds the new playbooks, and saves
+the templates, the tab and the variable group to a root-only file under
+`/root/ansible-lab-update/` first. Deleting a template in Semaphore also deletes
+its task history, so keep any task output you need first; the backup holds
+settings, not runs. The tab and the variable group are deleted only when no
+other template uses them, and a **Local SCAP content** group that you filled
+in is kept with your values; delete it in the UI once you have copied them.
 
 It runs the readiness check before and after the update. A check that already
 failed before is listed with its fix, and the update still completes; only a
@@ -494,7 +505,8 @@ shows and pass it as `SEMAPHORE_API_TOKEN` with
 `sudo --preserve-env=SEMAPHORE_API_TOKEN`.
 
 **Check:** the **Task Templates** page shows the tabs **Lessons**, **Patching**
-and one **STIG ·** tab per system beside **All**, and **Ping** still succeeds.
+and one **STIG ·** tab per system beside **All**, plus the old **STIG** tab
+until you remove it, and **Ping** still succeeds.
 
 ## Concept
 

@@ -5,6 +5,8 @@
   gather_facts: false
   serial: 1
   any_errors_fatal: true
+  vars_files:
+    - vars/stig_systems.yml
   vars:
     stig_profile_el: xccdf_org.ssgproject.content_profile_stig
     stig_usg_profile: disa_stig
@@ -81,9 +83,11 @@
         that:
           - stig_os_scope | length == 0 or stig_os_key == stig_os_scope
         fail_msg: >-
-          This run applies the STIG to {{ stig_os_scope }} hosts, and
-          {{ inventory_hostname }} runs {{ stig_os_key }}. Use the playbook or
-          template for {{ stig_os_key }} instead. Nothing was changed.
+          This run applies the STIG to {{ stig_systems[stig_os_scope].label }}
+          hosts, and {{ inventory_hostname }} runs {{ stig_systems[stig_os_key].label }}.
+          Use {{ stig_systems[stig_os_key].label }} · STIG apply, or
+          playbooks/stig/{{ stig_systems[stig_os_key].folder }}/apply.yml, instead.
+          Nothing was changed.
         quiet: true
       tags: always
 
