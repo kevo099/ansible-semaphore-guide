@@ -15,14 +15,15 @@ newer online documentation exists in the pinned release.
 If you used the [Ubuntu installer](03-controller.md) or the
 [Enterprise Linux installer](03-controller-el9.md),
 the **Ansible Practice** project, its SSH key, inventory, repository, variable
-groups and twelve templates already exist. Do not create a second project with
+groups and 22 templates already exist. Do not create a second project with
 the same name. Read steps 1-6 to understand those objects, and add the sudo
 credential as
 [3b describes](03-controller-el9.md#do-give-the-templates-the-targets-sudo-password).
 Then qualify the seeded lesson templates with step 7's sequence. Their names
 have no `Ubuntu —` prefix, and their limit is the whole `lab` group, so one run
-covers every target you added; read each host's recap. The STIG apply and local
-SCAP content templates instead ask for their hosts when you run them. Keep their local-folder
+covers every target you added; read each host's recap. Each STIG audit runs on
+its system's inventory group and skips hosts of other systems; the STIG apply
+templates ask for their one host when you run them. Keep their local-folder
 repository and file inventory; the Git repository and static inventories below
 are for the manual setup.
 
@@ -206,8 +207,11 @@ does not list those fields.
 Templates**, select the pencil next to **All**, add a tab such as `Lessons` or
 `Patching`, and save; then open each template and choose its tab in the
 **View** field. A tab only changes how the list is shown: a template's limit,
-variables and access stay the same. The seeded controllers create the tabs
-**Lessons**, **Patching** and **STIG** for their templates.
+variables and access stay the same. Tabs cannot be nested, so the seeded
+controllers create **Lessons** and **Patching** plus one flat tab per STIG
+system and version, such as **STIG · RHEL 9** and **STIG · Ubuntu 24.04**,
+and start each STIG template's name with its system, so the **All** tab still
+shows which system each one is for.
 
 ## Step 7: qualify a complete job
 

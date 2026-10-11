@@ -1,0 +1,9 @@
+---
+# Vendor STIG audit of the Rocky Linux 9 hosts in the run's limit; the seeded
+# "Rocky Linux 9 · STIG audit" templates run it. Hosts that run another system are
+# skipped, and reports go to ~/stig-reports/rocky/9/ on the controller.
+- name: Audit Rocky Linux 9 hosts against the vendor STIG
+  ansible.builtin.import_playbook: ../../../stig-audit.yml
+  vars:
+    stig_os_scope: Rocky-9
+    stig_report_folder: rocky/9

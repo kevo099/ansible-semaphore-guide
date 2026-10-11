@@ -1,0 +1,9 @@
+---
+# Vendor STIG remediation of one approved RHEL 9 host; the seeded
+# "RHEL 9 · STIG apply" templates run it. A host that runs another system is
+# refused before anything changes.
+- name: Apply the vendor STIG to one approved RHEL 9 host
+  ansible.builtin.import_playbook: ../../../stig-apply.yml
+  vars:
+    stig_os_scope: RedHat-9
+    stig_report_folder: rhel/9

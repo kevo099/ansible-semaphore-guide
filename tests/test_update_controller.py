@@ -24,8 +24,13 @@ def load(name):
 seed = load("seed-semaphore")
 updater = load("update-controller")
 LAB = "/opt/ansible-lab"
+LESSON_TEMPLATES = [lesson[0] for lesson in seed.LESSONS if "STIG" not in lesson[0]]
+STIG_TEMPLATES = [lesson[0] for lesson in seed.LESSONS if "STIG" in lesson[0]]
 # What installers before template tabs seeded: eleven templates, two variable groups, no tabs.
-OLD_TEMPLATES = [lesson[0] for lesson in seed.LESSONS if lesson[0] != "STIG audit, local SCAP content"]
+OLD_TEMPLATES = LESSON_TEMPLATES + seed.REPLACED_TEMPLATES[:3]
+# What 1.5.0 to 1.6.x seeded: twelve templates on the tabs Lessons, Patching and STIG.
+TABBED_VIEWS = {"Lessons": LESSON_TEMPLATES[:5], "Patching": LESSON_TEMPLATES[5:],
+                "STIG": seed.REPLACED_TEMPLATES}
 
 
 class FakeSemaphore:
@@ -95,7 +100,32 @@ class FakeSemaphore:
                 self.fail_put = False
                 raise SystemExit(f"PUT {path} failed with HTTP 500")
             return None
+        if method == "DELETE":
+            kind, _, number = rest[1:].partition("/")
+            number = int(number)
+            if kind == "templates":
+                del self.templates[number]
+            elif kind == "views":
+                self.views = [view for view in self.views if view["id"] != number]
+            elif kind == "environment":
+                self.environments = [env for env in self.environments if env["id"] != number]
+            else:
+                raise AssertionError(f"unexpected call {method} {path}")
+            return None
         raise AssertionError(f"unexpected call {method} {path}")
+
+
+def tabbed_project():
+    """A project as 1.5.0 to 1.6.x seeded it."""
+    fake = FakeSemaphore(templates=OLD_TEMPLATES + [seed.REPLACED_TEMPLATES[3]],
+                         environments=("Practice defaults", "Allow required reboot", "Local SCAP content"),
+                         views=tuple((title, index) for index, title in enumerate(TABBED_VIEWS)))
+    views = {view["title"]: view["id"] for view in fake.views}
+    for template in fake.templates.values():
+        template["view_id"] = next(views[title] for title, names in TABBED_VIEWS.items() if template["name"] in names)
+        if template["name"] == "STIG audit, local SCAP content":
+            template["environment_ids"] = [fake.environments[2]["id"]]
+    return fake
 
 
 class SemaphoreUpdateTests(unittest.TestCase):
@@ -104,10 +134,11 @@ class SemaphoreUpdateTests(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.backups = Path(self.directory.name) / "backups"
 
-    def update(self, fake, project_id=None):
+    def update(self, fake, project_id=None, remove_replaced=False):
         found = seed.resolve(fake, "Ansible Practice", LAB, project_id)
         plan = seed.plan_for(found)
-        return plan, seed.apply_update(fake, found, plan, self.backups, say=lambda _text: None)
+        return plan, seed.apply_update(fake, found, plan, self.backups, say=lambda _text: None,
+                                       remove_replaced=remove_replaced)
 
     def test_every_seeded_template_has_exactly_one_tab(self):
         names = [name for _title, members in seed.VIEWS for name in members]
@@ -124,14 +155,15 @@ class SemaphoreUpdateTests(unittest.TestCase):
     def test_an_old_project_gains_only_what_it_lacks_and_keeps_settings(self):
         fake = FakeSemaphore()
         plan, backup = self.update(fake)
-        self.assertEqual(plan["environments"], ["Local SCAP content"])
+        self.assertEqual(plan["environments"], ["DISA SCAP file · RHEL 9", "DISA SCAP file · Ubuntu 24.04"])
         self.assertEqual(plan["views"], [title for title, _members in seed.VIEWS])
-        self.assertEqual(plan["templates"], ["STIG audit, local SCAP content"])
-        self.assertEqual(sorted(t["name"] for t in plan["tabs"]), sorted(OLD_TEMPLATES))
+        self.assertEqual(plan["templates"], STIG_TEMPLATES)
+        self.assertEqual(sorted(t["name"] for t in plan["tabs"]), sorted(LESSON_TEMPLATES))
+        self.assertEqual(seed.replaced_names(plan), [f"template {name!r}" for name in sorted(seed.REPLACED_TEMPLATES[:3])])
         view_ids = {view["title"]: view["id"] for view in fake.views}
-        self.assertEqual([view["position"] for view in fake.views], [0, 1, 2])
+        self.assertEqual([view["position"] for view in fake.views], list(range(len(seed.VIEWS))))
         for template in fake.templates.values():
-            self.assertEqual(template["view_id"], view_ids[seed.VIEW_OF[template["name"]]], template["name"])
+            self.assertEqual(template["view_id"], view_ids.get(seed.VIEW_OF.get(template["name"])), template["name"])
             if template["name"] in OLD_TEMPLATES:
                 self.assertEqual((template["playbook"], template["survey_vars"]), ("kept.yml", [{"name": "kept"}]))
         self.assertEqual(stat.S_IMODE(backup.stat().st_mode), 0o600)
@@ -150,7 +182,7 @@ class SemaphoreUpdateTests(unittest.TestCase):
         fake = FakeSemaphore(views=(("Mine", 5),))
         self.update(fake)
         self.assertEqual([(v["title"], v["position"]) for v in fake.views],
-                         [("Mine", 5), ("Lessons", 6), ("Patching", 7), ("STIG", 8)])
+                         [("Mine", 5)] + [(title, 6 + index) for index, (title, _names) in enumerate(seed.VIEWS)])
 
     def test_a_tab_you_chose_and_templates_you_added_are_kept(self):
         fake = FakeSemaphore(templates=OLD_TEMPLATES + ["My own"], views=(("Mine", 0),))
@@ -176,8 +208,8 @@ class SemaphoreUpdateTests(unittest.TestCase):
         self.assertEqual(fake.writes(), [])
 
     def test_duplicate_tabs_it_needs_stop_before_any_change(self):
-        fake = FakeSemaphore(views=(("STIG", 0), ("STIG", 1)))
-        with self.assertRaisesRegex(SystemExit, "tab 'STIG'"):
+        fake = FakeSemaphore(views=(("STIG · RHEL 9", 0), ("STIG · RHEL 9", 1)))
+        with self.assertRaisesRegex(SystemExit, "tab 'STIG · RHEL 9'"):
             self.update(fake)
         self.assertEqual(fake.writes(), [])
 
@@ -238,6 +270,74 @@ class SemaphoreUpdateTests(unittest.TestCase):
         restored = fake.templates[int(puts[1][1].rsplit("/", 1)[1])]
         self.assertTrue(restored["environment_ids"])
         self.assertIsNone(restored.get("view_id"))
+
+    def test_a_tabbed_project_gains_the_system_tabs_and_keeps_what_they_replace(self):
+        fake = tabbed_project()
+        plan, backup = self.update(fake)
+        self.assertEqual(plan["views"], [title for title, _members in seed.VIEWS[2:]])
+        self.assertEqual(plan["templates"], STIG_TEMPLATES)
+        self.assertEqual(plan["tabs"], [])
+        self.assertIsNone(backup)
+        self.assertEqual(seed.replaced_names(plan),
+                         [f"template {name!r}" for name in sorted(seed.REPLACED_TEMPLATES)]
+                         + ["tab 'STIG'", "variable group 'Local SCAP content'"])
+        self.assertFalse([call for call in fake.writes() if call[0] in ("PUT", "DELETE")])
+        names = [t["name"] for t in fake.templates.values()]
+        self.assertTrue(set(seed.REPLACED_TEMPLATES) <= set(names))
+        self.assertEqual(len(names), 4 + len(seed.LESSONS))
+        # A later run lists the same replaced objects and adds nothing.
+        fake.calls.clear()
+        again, _backup = self.update(fake)
+        self.assertEqual(again["replaced"], plan["replaced"])
+        self.assertEqual(fake.writes(), [])
+
+    def test_remove_replaced_deletes_them_after_a_backup(self):
+        fake = tabbed_project()
+        plan, backup = self.update(fake, remove_replaced=True)
+        deleted = [path for method, path, _body in fake.writes() if method == "DELETE"]
+        self.assertEqual(len(deleted), 6)
+        self.assertEqual(sorted(t["name"] for t in fake.templates.values()), sorted(seed.VIEW_OF))
+        self.assertEqual([v["title"] for v in fake.views], [title for title, _members in seed.VIEWS])
+        self.assertEqual(sorted(e["name"] for e in fake.environments), sorted(seed.VARIABLE_GROUPS))
+        saved = json.loads(backup.read_text())
+        self.assertEqual(sorted(t["name"] for t in saved), sorted(OLD_TEMPLATES + [seed.REPLACED_TEMPLATES[3]]))
+        self.assertEqual(stat.S_IMODE(backup.stat().st_mode), 0o600)
+        fake.calls.clear()
+        plan, backup = self.update(fake, remove_replaced=True)
+        self.assertEqual((fake.writes(), backup, seed.replaced_names(plan)), ([], None, []))
+
+    def test_remove_replaced_keeps_what_your_templates_use(self):
+        fake = tabbed_project()
+        stig_tab = next(v["id"] for v in fake.views if v["title"] == "STIG")
+        local = fake.environments[2]["id"]
+        mine = fake.add_template(name="My scan", repository_id=3, inventory_id=4, view_id=stig_tab,
+                                 environment_ids=[local])
+        elsewhere = fake.add_template(name="STIG audit (vendor scan only)", repository_id=444, inventory_id=555)
+        plan, _backup = self.update(fake, remove_replaced=True)
+        self.assertEqual(plan["replaced"]["views"], [])
+        self.assertEqual(plan["replaced"]["environments"], [])
+        self.assertIn(stig_tab, [v["id"] for v in fake.views])
+        self.assertIn(local, [e["id"] for e in fake.environments])
+        self.assertIn(mine["id"], fake.templates)
+        self.assertIn(elsewhere["id"], fake.templates)
+        self.assertEqual(len([path for method, path, _body in fake.writes() if method == "DELETE"]), 4)
+
+    def test_remove_replaced_rechecks_each_object_before_deleting(self):
+        fake = tabbed_project()
+        found = seed.resolve(fake, "Ansible Practice", LAB)
+        plan = seed.plan_for(found)
+        renamed = next(t for t in fake.templates.values() if t["name"] == "STIG audit (vendor scan only)")
+        renamed["name"] = "My audit"
+        stig_tab = next(v["id"] for v in fake.views if v["title"] == "STIG")
+        local = fake.environments[2]["id"]
+        fake.add_template(name="Late", repository_id=3, inventory_id=4, view_id=stig_tab, environment_ids=[local])
+        said = []
+        seed.apply_update(fake, found, plan, self.backups, say=said.append, remove_replaced=True)
+        self.assertIn(renamed["id"], fake.templates)
+        self.assertIn(stig_tab, [v["id"] for v in fake.views])
+        self.assertIn(local, [e["id"] for e in fake.environments])
+        self.assertIn("Kept template 'STIG audit (vendor scan only)': it changed since the plan", said)
+        self.assertIn("Kept tab 'STIG': other templates are on it", said)
 
     def test_a_missing_password_file_without_a_terminal_changes_nothing(self):
         client = seed.Client("http://127.0.0.1:9/api")

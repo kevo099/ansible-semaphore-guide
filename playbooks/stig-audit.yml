@@ -10,13 +10,18 @@
     stig_profile_el: xccdf_org.ssgproject.content_profile_stig
     stig_usg_profile: disa_stig
     stig_fetch_remote_resources: false
+    # Set by the per-system playbooks under playbooks/stig/; empty means every
+    # supported system, and the reports folder then has no system level.
+    stig_os_scope: ''
+    stig_report_folder: ''
     # Optional: scan with a SCAP data stream you supply, such as a DISA SCAP
     # benchmark in the lab folder's content/ directory, and one of its profile IDs.
     stig_content_file: ''
     stig_content_profile: ''
     stig_stamp: "{{ ansible_facts['date_time']['iso8601_basic_short'] }}"
     stig_remote_dir: "/var/log/stig-practice/{{ stig_stamp }}"
-    stig_fetch_dir: "{{ lookup('env', 'HOME') }}/stig-reports/{{ stig_stamp }}"
+    stig_fetch_dir: >-
+      {{ lookup('env', 'HOME') }}/stig-reports/{{ stig_report_folder ~ '/' if stig_report_folder else '' }}{{ stig_stamp }}
   pre_tasks:
     # Check mode skips the scanner commands, so a preview could only report
     # missing results. Refuse it on the controller before any connection.
@@ -33,6 +38,26 @@
 
     - name: Check scope and supported operating system
       ansible.builtin.import_tasks: tasks/preflight.yml
+      tags: always
+
+    # The per-system playbooks under playbooks/stig/ set stig_os_scope, such as
+    # RedHat-9 or Ubuntu-24.04, in the same form as this name.
+    - name: Name this host's system the way the per-system playbooks do
+      ansible.builtin.set_fact:
+        stig_os_key: >-
+          {{ ansible_facts['distribution'] }}-{{ ansible_facts['distribution_version']
+          if ansible_facts['distribution'] == 'Ubuntu' else ansible_facts['distribution_major_version'] }}
+      tags: always
+
+    - name: Report hosts that another system's playbook covers
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }} runs {{ stig_os_key }}; this run audits {{ stig_os_scope }} hosts only."
+      when: stig_os_scope | length > 0 and stig_os_key != stig_os_scope
+      tags: always
+
+    - name: Leave hosts of other systems to their own playbook
+      ansible.builtin.meta: end_host
+      when: stig_os_scope | length > 0 and stig_os_key != stig_os_scope
       tags: always
   tasks:
     - name: Scan with the vendor tooling and collect the evidence

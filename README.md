@@ -45,7 +45,7 @@ target access and a real job run from both the terminal and Semaphore.
 | --- | --- | --- |
 | 1 | [Design and prerequisites](docs/01-design.md) | Choose resources, networks and account boundaries. |
 | 2 | [Create the VMs](docs/02-create-vms.md) | Build a controller and two fresh targets. |
-| 3 | **One of:** [Ubuntu controller](docs/03-controller.md) or [Enterprise Linux 9 seeded controller](docs/03-controller-el9.md) | Both installers create a local-folder practice project with twelve templates, including STIG lessons, with no Git remote needed. Ubuntu also has a manual walkthrough. |
+| 3 | **One of:** [Ubuntu controller](docs/03-controller.md) or [Enterprise Linux 9 seeded controller](docs/03-controller-el9.md) | Both installers create a local-folder practice project with 22 templates, including STIG lessons on one tab per OS and version, with no Git remote needed. Ubuntu also has a manual walkthrough. |
 | 4 | [SSH, sudo and target bootstrap](docs/04-access.md) | Establish verified, key-based automation access. |
 | 5 | [Command-line Ansible lessons](docs/05-cli-lessons.md) | Preview, apply, repeat and inspect five playbooks. |
 | 6 | [Configure Semaphore](docs/06-semaphore.md) | Run the same lessons from named task templates. |
@@ -99,6 +99,7 @@ before proceeding to the next layer.
 | [`playbooks/patch.yml`](playbooks/patch.yml) | Updates one target at a time; reboot defaults to disabled. |
 | [`playbooks/stig-audit.yml`](playbooks/stig-audit.yml) | Scans each selected target with the OS vendor's STIG content (SCAP Security Guide or Ubuntu Security Guide) and fetches the report; changes no policy. |
 | [`playbooks/stig-apply.yml`](playbooks/stig-apply.yml) | Applies the vendor's own STIG remediation to exactly one target per run after an explicit recovery-point approval, with before and after scans. |
+| [`playbooks/stig/`](playbooks/stig/) | One folder per operating system and version, `rhel/9`, `almalinux/9`, `rocky/9` and `ubuntu/24.04`, each with an `audit.yml` and `apply.yml` that run the two STIG playbooks for that system only; the seeded Semaphore tabs use them. |
 | [`examples/bootstrap-existing-vm.yml`](examples/bootstrap-existing-vm.yml) | Prepares a VM that already exists for the automation account: chapter 4, steps 3 and 4, in one run per host. |
 | [`examples/onboard/`](examples/onboard/) | `cloud-init.yaml` prepares a new VM at first boot, and `onboard-linux.sh` prepares an existing one as root through Azure Run Command or `sudo bash`; insert your public key. See [chapter 13](docs/13-azure.md#do-onboard-an-existing-vm-with-run-command). |
 | [`examples/onboard/inventory-info.sh`](examples/onboard/inventory-info.sh) | Reads a prepared VM through Azure Run Command and prints a complete controller command to add its inventory entry and verify its RSA host key. See [chapter 13](docs/13-azure.md#do-generate-the-controller-inventory-command). |
@@ -170,7 +171,7 @@ bash scripts/install-controller-el9.sh --plan    # RHEL, AlmaLinux or Rocky Linu
 Follow [the Ubuntu chapter](docs/03-controller.md) or
 [the Enterprise Linux chapter](docs/03-controller-el9.md) before using
 `--apply`. Both installers create `/opt/ansible-lab` by default, with an empty
-inventory and twelve Semaphore templates. Follow the selected chapter to
+inventory and 22 Semaphore templates. Follow the selected chapter to
 authorize the generated automation key on each target, add its verified host
 key with `scripts/add-target.sh`, and run **Ping**. A Git remote is optional.
 To bring a controller installed from an earlier release up to date, run

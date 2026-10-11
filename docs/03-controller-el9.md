@@ -15,7 +15,7 @@ the first lessons before choosing a Git host.
 
 ## Goal
 
-Get from a fresh VM to a Semaphore project with twelve scoped task templates in
+Get from a fresh VM to a Semaphore project with 22 scoped task templates in
 one reviewed run, and understand what the installer decided for you.
 
 ## What the installer creates
@@ -26,18 +26,19 @@ one reviewed run, and understand what the installer decided for you.
 | Database | PostgreSQL 16 from the AppStream module stream, loopback only, SCRAM login |
 | Application | Semaphore Community 2.19.12, checksum-verified, `127.0.0.1:3000`, hardened `semaphore.service` |
 | Secrets | In `/etc/semaphore` (0750, root and the `semaphore` group): `config.json` (0640, readable by the service), the initial admin password and the `svc_ansible` RSA 4096 private key (root-only), and its public key (0644); no value is printed |
-| Lab folder | `/opt/ansible-lab` owned by you, readable by the service: `ansible.cfg`, the seven playbooks, the report summarizer, an empty `inventories/lab.ini`, a local Git history with a `.gitignore` that keeps `inventories/`, `host_vars/` and `group_vars/` untracked |
-| Semaphore objects | Project **Ansible Practice**; keys **None** and **Practice target SSH**; repository **Local lab folder**; inventory **Lab inventory file**; variable groups **Practice defaults**, **Allow required reboot** and **Local SCAP content**; template tabs **Lessons**, **Patching** and **STIG**; twelve templates: Ping; Baseline preview; Baseline apply; Users; Webserver; Patch preview; Patch, no reboot; Patch, allow required reboot; STIG audit (vendor scan only); STIG apply (vendor fixes, approval required); STIG apply, allow required reboot; STIG audit, local SCAP content |
+| Lab folder | `/opt/ansible-lab` owned by you, readable by the service: `ansible.cfg`, the seven playbooks, one STIG audit and apply playbook per system and version under `playbooks/stig/` (`rhel/9`, `almalinux/9`, `rocky/9`, `ubuntu/24.04`), the report summarizer, an empty `inventories/lab.ini`, a `content/` folder with the same per-system subfolders for SCAP files you supply, a local Git history with a `.gitignore` that keeps `inventories/`, `host_vars/` and `group_vars/` untracked |
+| Semaphore objects | Project **Ansible Practice**; keys **None** and **Practice target SSH**; repository **Local lab folder**; inventory **Lab inventory file**; variable groups **Practice defaults**, **Allow required reboot**, **DISA SCAP file · RHEL 9** and **DISA SCAP file · Ubuntu 24.04**; template tabs **Lessons**, **Patching**, **STIG · RHEL 9**, **STIG · AlmaLinux 9**, **STIG · Rocky Linux 9** and **STIG · Ubuntu 24.04**; 22 templates. **Lessons:** Ping; Baseline preview; Baseline apply; Users; Webserver. **Patching:** Patch preview; Patch, no reboot; Patch, allow required reboot. **Each STIG tab**, with names that start with the system, such as **RHEL 9 · STIG audit**: STIG audit; STIG apply (approval required); STIG apply, allow required reboot; and on the RHEL 9 and Ubuntu 24.04 tabs, STIG audit, DISA SCAP file |
 
 Every lesson template sets its **Ansible options → Limit** to `lab`, the
-explicit limit the playbooks' preflight requires. The two STIG apply templates
-have no default limit: their Run dialog asks for exactly one host. The local
-SCAP content audit has none either: its Run dialog asks for the hosts its
-content file is written for. The two
+explicit limit the playbooks' preflight requires. Each STIG audit template sets
+it to its system's inventory group, `enterprise_linux` or `ubuntu`, and skips
+the hosts there that run another system. The STIG apply templates have no
+default limit: their Run dialog asks for exactly one host, and they refuse a
+host that runs another system. The two
 preview templates add `--check --diff` as CLI arguments. Only the templates
 whose names end in “allow required reboot” receive `allow_reboot: true`. The
 patch template then reboots only when the operating system reports that it
-needs one. **STIG apply, allow required reboot** always reboots once after
+needs one. Each **STIG apply, allow required reboot** always reboots once after
 remediation, because STIG changes such as kernel boot arguments and the crypto
 policy take full effect only after a restart.
 
@@ -73,7 +74,7 @@ The rest of this chapter uses the default `/opt/ansible-lab`. If you chose
 
 **Check:** the run ends with the readiness JSON from `check-controller.py`
 reporting `"passed": true`, followed by the seeding summary naming the project,
-the inventory file and twelve template identifiers. Then:
+the inventory file and 22 template identifiers. Then:
 
 ```bash
 sudo systemctl is-active postgresql semaphore

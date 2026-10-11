@@ -420,6 +420,11 @@ def show_readiness(names):
         print(f"    {name}: {readiness_hint(name)}")
 
 
+def content_folders(seeder):
+    """content/ and one folder per STIG system and version, as the installers create them."""
+    return ["content"] + [f"content/{folder}" for _label, folder, _group, _file in seeder.STIG_SYSTEMS]
+
+
 def show(title, items):
     print(f"  {title}: {len(items)}")
     for item in items:
@@ -448,6 +453,9 @@ def main():
     parser.add_argument("--replace-edited", action="store_true",
                         help="take the release's version of files that both you and it changed")
     parser.add_argument("--project-id", type=int, help="the seeded project's ID, when project names repeat")
+    parser.add_argument("--remove-replaced", action="store_true",
+                        help="delete the seeded templates, tab and variable group this release replaces, "
+                             "including those templates' task history")
     args = parser.parse_args()
 
     if os.geteuid() != 0:
@@ -474,6 +482,15 @@ def main():
     files = guide_files()
 
     plan, expected, problems, source = lab_plan(lab, REPO, files, args.replace_edited)
+    seeder = load_seeder()
+    new_folders = []
+    for folder in content_folders(seeder):
+        try:
+            if lab.folder_state(folder) == "missing":
+                new_folders.append(folder)
+        except Unsafe as error:
+            if folder != "content":  # lab_plan reports that one
+                problems.append(str(error))
     identity = commit_identity(lab)
     if identity is None:
         problems.append(f"Git has no usable author identity for {owner.pw_name}; set user.name and user.email")
@@ -485,12 +502,8 @@ def main():
     show("Guide files you removed, left removed", plan["removed by you"])
     show("Files that both you and this release changed or claim", plan["conflict"])
     print(f"  Guide files already current: {len(plan['current'])}")
-    try:
-        needs_content = lab.folder_state("content") == "missing"
-    except Unsafe:
-        needs_content = False
-    if needs_content:
-        print("  content/ will be created for SCAP files you supply")
+    if new_folders:
+        print(f"  Folders for SCAP files you supply, to create: {', '.join(f + '/' for f in new_folders)}")
     if source:
         print(f"  The guide's earlier versions come from {source}.")
     else:
@@ -507,7 +520,6 @@ def main():
     else:
         print("Readiness before the update: every check passes.")
 
-    seeder = load_seeder()
     client = seeder.Client(seeder.API, os.environ.get("SEMAPHORE_API_TOKEN") or None)
     seeder.wait_ready(client)
     seeder.log_in(client, "admin", ask=True)
@@ -518,6 +530,11 @@ def main():
     show("Template tabs to add", semaphore_plan["views"])
     show("Templates to add", semaphore_plan["templates"])
     show("Templates to put on their tab", [t["name"] for t in semaphore_plan["tabs"]])
+    replaced = seeder.replaced_names(semaphore_plan)
+    if args.remove_replaced:
+        show("Replaced by this release, to remove (with the templates' task history)", replaced)
+    else:
+        show("Replaced by this release, kept (--remove-replaced deletes them)", replaced)
     for item in seeder.pending_edits(Path("/root/ansible-lab-update")):
         print(f"  Problem: an earlier update could not confirm its edit of template {item['name']!r}; "
               f"check it in the UI against {item['record']}, then delete that file")
@@ -531,7 +548,8 @@ def main():
     if semaphore_plan["ambiguous"]:
         raise SystemExit("Nothing was changed. Rename or remove the duplicates, then run again.")
 
-    seeder.apply_update(client, found, semaphore_plan, Path("/root/ansible-lab-update"))
+    seeder.apply_update(client, found, semaphore_plan, Path("/root/ansible-lab-update"),
+                        remove_replaced=args.remove_replaced)
 
     # The Semaphore part can take a while (and a login prompt); make sure the folder
     # is exactly as planned before touching it.
@@ -551,7 +569,12 @@ def main():
     if current_manifest != manifest:
         lab.write(MANIFEST, manifest, digest(current_manifest))
         changed.append(MANIFEST)
-    lab.make_folder("content")
+    try:
+        for folder in content_folders(seeder):
+            lab.make_folder(folder)
+    except Unsafe as error:
+        raise SystemExit(f"{error}; the files were written but not committed. Fix that folder, then run "
+                         "the update again.") from None
     selinux = shutil.which("selinuxenabled")
     if selinux and run_check([selinux]).returncode == 0 and lab.same_folder():
         subprocess.run(["restorecon", "-RF", str(root)], check=True)

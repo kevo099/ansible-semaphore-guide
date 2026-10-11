@@ -26,7 +26,7 @@ jobs:
         run: ansible-galaxy collection install -r examples/azure/requirements.yml
       - name: Check all lesson and example playbooks
         run: |
-          for playbook in playbooks/*.yml examples/*.yml examples/semaphore/*.yml \
+          for playbook in playbooks/*.yml playbooks/stig/*/*/*.yml examples/*.yml examples/semaphore/*.yml \
               examples/azure/{network,controller,targets,power,remove}.yml; do
             ansible-playbook -i inventories/lab.ini.example --syntax-check "$playbook"
           done
