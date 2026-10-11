@@ -681,6 +681,18 @@ class UpdateScriptTests(unittest.TestCase):
     def test_unknown_arguments_are_refused(self):
         self.assertEqual(self.run_script("--frobnicate").returncode, 2)
 
+    def test_the_wrapper_passes_every_option_the_updater_defines(self):
+        import re
+        options = set(re.findall(r'add_argument\("(--[a-z-]+)"', (ROOT / "scripts" / "update-controller.py").read_text()))
+        wrapper = (ROOT / "scripts" / "update-controller.sh").read_text()
+        accepted = set(re.search(r"\n    (--plan\|[^)]*)\) ;;", wrapper).group(1).split("|"))
+        self.assertTrue(options)
+        self.assertLessEqual(options, accepted)
+        usage = self.run_script("--help").stdout
+        for option in options:
+            with self.subTest(option=option):
+                self.assertIn(option, usage)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -7,6 +7,7 @@ usage() {
   cat <<'USAGE'
 Usage: sudo bash scripts/update-controller.sh [--plan | --apply] [--lab-dir DIR]
                                             [--replace-edited] [--project-id ID]
+                                            [--remove-replaced]
 
 Brings a controller that install-controller.sh or install-controller-el9.sh set
 up to the version of the guide in this copy, without reinstalling anything:
@@ -14,10 +15,13 @@ up to the version of the guide in this copy, without reinstalling anything:
     scripts/summarize_xccdf.py) that only the guide changed, keeps the ones you
     changed, keeps every file you added, and commits the result in the folder's
     Git history;
-  - creates the folder's content/ directory for SCAP files you supply;
+  - creates the folder's content/ directory, with one folder per STIG system
+    and version, for SCAP files you supply;
   - adds the variable groups, template tabs and templates this release seeds
     that the Semaphore project lacks, and puts seeded templates that have no
-    tab on theirs, after saving the templates as they were.
+    tab on theirs, after saving the templates as they were;
+  - lists the seeded templates, tab and variable group this release replaces,
+    and keeps them unless you pass --remove-replaced.
 It does not change Semaphore, PostgreSQL, Ansible, the inventory, keys or other
 template settings. It stops, changing nothing, when the lab folder has
 uncommitted changes to guide files, staged changes, links where guide files
@@ -26,6 +30,9 @@ belong, or files that both you and this release changed.
   --lab-dir DIR       The lab folder (default: /opt/ansible-lab).
   --replace-edited    Replace guide files that both you and this release changed.
   --project-id ID     The seeded project's ID, if several projects share its name.
+  --remove-replaced   After the update, delete the replaced seeded objects, with
+                      the old templates' task history; a backup of their
+                      settings is saved under /root/ansible-lab-update/ first.
 
 The default is a read-only plan. If the installer's admin password was changed
 in the UI, it asks for a Semaphore administrator's login and password. Without a
@@ -41,7 +48,7 @@ for argument in "$@"; do
 done
 for argument in "$@"; do
   case "$argument" in
-    --plan|--apply|--replace-edited|--lab-dir|--project-id|--lab-dir=*|--project-id=*) ;;
+    --plan|--apply|--replace-edited|--remove-replaced|--lab-dir|--project-id|--lab-dir=*|--project-id=*) ;;
     --*) usage; exit 2 ;;
   esac
 done

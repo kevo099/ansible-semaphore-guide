@@ -613,7 +613,7 @@ def update(client, args):
             if removal_backup:
                 result["removal_backup"] = str(removal_backup)
         result["notes"] = [note for note in notes if not note.startswith(("Templates", "Removed"))]
-    print(json.dumps(result, indent=2))
+    print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
 def main():
@@ -696,7 +696,7 @@ def main():
         "inventory": {"name": "Lab inventory file", "file": str(Path(args.lab_dir) / "inventories" / "lab.ini")},
         "views": list(ids["views"]),
         "templates": templates,
-    }, indent=2))
+    }, indent=2, ensure_ascii=False))
     return 0
 
 
