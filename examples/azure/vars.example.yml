@@ -29,6 +29,12 @@ azure_targets:
   - name: lab-alma
     private_ip: REPLACE_WITH_ADDRESS_IN_SUBNET
     image: {publisher: almalinux, offer: almalinux-x86_64, sku: 9-gen2, version: latest}
+  # Optional: RHEL 9 pay-as-you-go, which adds Red Hat's charge to the hourly price.
+  # Its OS disk is 64 GB, the image's own size; other targets get 40 GB. Any VM
+  # here or in azure_controller can set os_disk_size_gb to choose another size.
+  # - name: lab-rhel
+  #   private_ip: REPLACE_WITH_ADDRESS_IN_SUBNET
+  #   image: {publisher: RedHat, offer: RHEL, sku: 9-lvm-gen2, version: latest}
 
 # Optional: a controller VM in Azure (controller.yml). It is the only VM with a
 # public address, and its SSH is open to operator_cidr alone.

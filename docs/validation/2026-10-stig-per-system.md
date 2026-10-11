@@ -65,7 +65,11 @@ passages of the controller chapters described the old single STIG tab.
 The live run found two more: the wrapper's refusal of `--remove-replaced`, and
 the seeding summary printing tab names as `\u00b7` escapes.
 
-The Azure example's `targets.yml` gives every target a 40 GB disk, which the
-RHEL 9 pay-as-you-go image refuses because it needs 64 GB, so the RHEL target
-was created with `az vm create` and the same cloud-init file, as in the earlier
-records.
+The Azure example's `targets.yml` gave every target a 40 GB disk, which the
+RHEL 9 pay-as-you-go image refuses because it is 64 GB itself, so the RHEL
+target was created with `az vm create` and the same cloud-init file, as in the
+earlier records. Release `v1.7.1` fixed this, and it was tested in a second
+disposable group the same day: `controller.yml` made a RHEL 9 controller and
+`targets.yml` a RHEL 9 target, each with a 64 GB disk, while the AlmaLinux
+target kept 40 GB; a second run of both reported `changed=0`; the RHEL target's
+cloud-init onboarding completed; and `remove.yml` deleted the group.

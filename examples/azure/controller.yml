@@ -66,7 +66,7 @@
             public_ip_address_name: "pip-{{ azure_controller.name }}"
         tags: "{{ azure_tags }}"
 
-    - name: Controller VM (Ubuntu 24.04, bootstrap administrator key only)
+    - name: Controller VM (bootstrap administrator key only)
       azure.azcollection.azure_rm_virtualmachine:
         resource_group: "{{ azure_resource_group }}"
         name: "{{ azure_controller.name }}"
@@ -80,7 +80,11 @@
           - "nic-{{ azure_controller.name }}"
         image: "{{ azure_controller.image }}"
         managed_disk_type: StandardSSD_LRS
-        os_disk_size_gb: 32
+        # Azure refuses an OS disk smaller than its image, and Red Hat's RHEL 9
+        # images are 64 GB. azure_controller.os_disk_size_gb chooses another size.
+        os_disk_size_gb: >-
+          {{ azure_controller.os_disk_size_gb
+             | default(64 if azure_controller.image.publisher | lower == 'redhat' else 32) }}
         os_disk_delete_option: Delete
         tags: "{{ azure_tags }}"
 
