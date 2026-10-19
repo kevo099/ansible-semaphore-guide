@@ -18,6 +18,11 @@ A target is **onboarded** when all four hold:
 ## The flow
 
 ```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 320
+---
 flowchart TD
     vm(["A Linux VM to manage"]) --> sys{"A system the<br/>guide supports?"}
     sys -- "no" --> stop(["Not covered by the guide"])
