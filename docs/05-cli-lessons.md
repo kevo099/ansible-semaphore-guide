@@ -22,8 +22,9 @@ ansible-inventory --graph
 ansible-playbook playbooks/ping.yml --limit lab-ubuntu --list-hosts
 ```
 
-On the [seeded Enterprise Linux controller](03-controller-el9.md), run
-`cd /opt/ansible-lab` (or your `--lab-dir`) instead of the first command. Its
+On a controller made by either installer ([chapter 3](03-controller.md) or
+[3b](03-controller-el9.md)), run `cd /opt/ansible-lab` (or your `--lab-dir`)
+instead of the first command. Its
 `ansible.cfg` reads the inventory Semaphore uses, with the host names you gave
 `add-target.sh`. If you chose
 [3b's Vault option](03-controller-el9.md#do-give-the-templates-the-targets-sudo-password)

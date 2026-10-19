@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Make the loopback-only Semaphore UI reachable on this VM's own address.
-# Usage: sudo bash scripts/expose-semaphore.sh --mode https|http|loopback [--address IP_OR_NAME]
+# Usage: sudo bash scripts/expose-semaphore.sh --mode https|http|loopback [--address IP_OR_NAME] [--force]
 #
 #   https     (recommended) nginx terminates TLS on port 443 with a locally generated
 #             self-signed certificate and proxies to 127.0.0.1:3000. Semaphore itself
@@ -18,6 +18,11 @@
 # The certificate in /etc/semaphore/tls is created once and reused by later https
 # runs. To name a new address, remove semaphore.key and semaphore.crt there first.
 #
+# Semaphore restarts only when its bind address changes, that is, when switching to
+# or from http, or when it still listens on an earlier one, and the restart stops
+# every task it runs. While an ansible-playbook of the semaphore account runs, such
+# a restart is refused; --force restarts anyway.
+#
 # The cloud/network firewall in front of the VM is not touched; allow the chosen
 # port there yourself, ideally only from your own address.
 set -euo pipefail
@@ -29,11 +34,12 @@ missing() { echo "$1 needs a value."; usage; exit 2; }
 
 # Split so the repository validator does not read this as a real address.
 any_address='0.0.0''.0'
-mode='' address=''
+mode='' address='' force=''
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --mode) [[ $# -ge 2 ]] || missing "$1"; mode="$2"; shift ;;
     --address) [[ $# -ge 2 ]] || missing "$1"; address="$2"; shift ;;
+    --force) force=1 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1"; exit 2 ;;
   esac
@@ -51,8 +57,40 @@ esac
 marker=/etc/semaphore/exposure
 tls_dir=/etc/semaphore/tls
 
+current_interface() {
+  python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1])).get("interface", ""))' /etc/semaphore/config.json
+}
+
+# True when Semaphore listens on port 3000 at exactly $1, or listens nowhere (stopped).
+# A run interrupted before its restart, or a hand edit, leaves config.json ahead of it.
+# Semaphore serves the any-address from one dual-stack socket, which ss shows as *;
+# [::] is an IPv6-only socket, which does not serve IPv4.
+running_with() {
+  local live
+  live=$(ss -H -lnt 'sport = :3000' | awk '{h = $4; sub(/:3000$/, "", h); gsub(/[][]/, "", h); print h}')
+  [[ -z "$live" || "$live" == "$1" || ( "$1" == "$any_address" && "$live" == '*' ) ]]
+}
+
+# A restart stops every task Semaphore runs, which can leave a host half changed.
+refuse_while_tasks_run() {
+  if [[ -z "$force" ]] && pgrep -u semaphore -f ansible-playbook >/dev/null; then
+    echo 'A Semaphore task is running (ansible-playbook as the semaphore account). This mode'
+    echo "changes Semaphore's bind address, which needs a restart, and the restart would stop"
+    echo 'that task. Semaphore was not restarted: run this command again once the task has'
+    echo 'finished, or add --force to restart Semaphore anyway.'
+    exit 1
+  fi
+}
+
 set_interface() {
-  python3 - "$1" <<'PY'
+  if [[ $(current_interface) == "$1" ]] && running_with "$1"; then
+    # Starts a stopped Semaphore; a running one keeps running, and so do its tasks.
+    systemctl start semaphore
+    echo "Semaphore already listens on $1; it was not restarted."
+    return
+  fi
+  refuse_while_tasks_run
+  python3 -I - "$1" <<'PY'
 import json, sys
 from pathlib import Path
 p = Path('/etc/semaphore/config.json')
@@ -63,6 +101,21 @@ PY
   chown root:semaphore /etc/semaphore/config.json
   chmod 0640 /etc/semaphore/config.json
   systemctl restart semaphore
+}
+
+# apt-get update takes the package lists' lock, which apt-daily may hold for a while
+# after boot and which DPkg::Lock::Timeout does not cover, so retry it.
+apt_update() {
+  local attempt
+  for attempt in {1..30}; do
+    if apt-get -qq update; then return; fi
+    if (( attempt < 30 )); then
+      echo 'apt-get update failed; another apt process may hold its lock. Retrying in 10 seconds.'
+      sleep 10
+    fi
+  done
+  echo 'apt-get update failed 30 times; nothing was changed. Fix the cause above and run this command again.'
+  exit 1
 }
 
 firewall() {  # firewall add|remove https|3000/tcp
@@ -81,7 +134,7 @@ wait_ping() {
     if curl -fs -o /dev/null http://127.0.0.1:3000/api/ping; then return 0; fi
     sleep 1
   done
-  echo 'Semaphore did not answer on loopback after the restart.'; exit 1
+  echo 'Semaphore did not answer on loopback within 30 seconds; see: sudo journalctl -u semaphore'; exit 1
 }
 
 # Remove this script's proxy site. If nginx then listens nowhere, stop it so no
@@ -113,7 +166,7 @@ primary_address() {
     exit 1
   }
   if [[ "$address" =~ ^[0-9.]+$ || "$address" == *:* ]]; then
-    if [[ "$address" == *%* ]] || ! python3 -c 'import ipaddress, sys; ipaddress.ip_address(sys.argv[1])' "$address" 2>/dev/null; then
+    if [[ "$address" == *%* ]] || ! python3 -I -c 'import ipaddress, sys; ipaddress.ip_address(sys.argv[1])' "$address" 2>/dev/null; then
       echo "Not a valid IP address: $address. Pass an address without a %zone suffix, or a DNS name."; exit 1
     fi
     san="IP:$address"
@@ -126,12 +179,18 @@ primary_address() {
   [[ "$address" != *:* ]] || url_host="[$address]"
 }
 
+# Settle before changing anything whether Semaphore must restart, and refuse that
+# while a task runs. set_interface checks again, in case a task started meanwhile.
+interface=127.0.0.1
+[[ "$mode" != http ]] || interface=$any_address
+{ [[ $(current_interface) == "$interface" ]] && running_with "$interface"; } || refuse_while_tasks_run
+
 case "$mode" in
   loopback)
     retire_proxy
     firewall remove https || true
     firewall remove 3000/tcp || true
-    set_interface 127.0.0.1
+    set_interface "$interface"
     wait_ping
     rm -f "$marker"
     echo 'Semaphore is loopback-only again; reach it through an SSH tunnel.'
@@ -140,7 +199,7 @@ case "$mode" in
     primary_address
     retire_proxy
     firewall remove https || true
-    set_interface "$any_address"
+    set_interface "$interface"
     wait_ping
     firewall add 3000/tcp
     printf 'http\n' > "$marker"; chmod 0644 "$marker"
@@ -184,8 +243,8 @@ NGINXMAIN
       chmod 0644 /etc/nginx/nginx.conf
     else
       export DEBIAN_FRONTEND=noninteractive
-      apt-get -qq update
-      apt-get -qq install -y nginx openssl
+      apt_update
+      apt-get -qq -o DPkg::Lock::Timeout=600 install -y nginx openssl
       rm -f /etc/nginx/sites-enabled/default
     fi
     install -d -m 0750 -o root -g root "$tls_dir"
@@ -245,7 +304,7 @@ server {
 }
 NGINX
     chmod 0644 "$nginx_site"
-    set_interface 127.0.0.1
+    set_interface "$interface"
     wait_ping
     firewall remove 3000/tcp || true
     nginx -t >/dev/null

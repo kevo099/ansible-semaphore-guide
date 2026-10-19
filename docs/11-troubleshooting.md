@@ -11,6 +11,7 @@ or loosen security controls without understanding what failed.
 
 | Symptom | Check first | Appropriate next step |
 | --- | --- | --- |
+| `add-target.sh` refuses a newly onboarded target's lines, or the target fails Ping or its first sudo task | Which onboarding step did not finish | Follow [when a step fails](ONBOARDING.md#when-a-step-fails) on the onboarding page. |
 | SSH times out | Correct guest/address, route, firewall and listening SSH service | Use the trusted console to verify networking and daemon state. |
 | Host-key mismatch | Was the guest rebuilt, rolled back, or replaced at the same address? | Verify the current fingerprint through a trusted independent path before updating only its matching pin. |
 | Permission denied (publickey) | Login name, selected key, authorized-key permissions and algorithm policy | Compare the intended public key to the target's authorized key; inspect the SSH debug output privately. |
@@ -24,7 +25,8 @@ or loosen security controls without understanding what failed.
 | Explicit limit rejected | Missing limit or literal `all`/`*` | Name one approved target or the intended lab group. |
 | Reboot option rejected | Boolean versus string | Use JSON `{"allow_reboot":true}` in extra variables. |
 | Check mode skipped work | A required package, directory or group is not installed yet | Read the explanation and verify the dependent task after the first real apply. |
-| Package-manager lock | Another package update is active | Wait for the owning operation; do not delete lock files or kill it blindly. |
+| Package-manager lock | Another package update is active | On Ubuntu, the lessons, the STIG scan and onboarding wait up to ten minutes for the apt lock, so a run soon after a VM's first boot can pause while its first updates finish. On Enterprise Linux, dnf waits until the other package operation finishes. A lock error after that still means: wait for the owning operation; do not delete lock files or kill it blindly. |
+| `sudo` fails for `svc_ansible` on a STIG-hardened host even with the right password | `pam_faillock` locked the account after three wrong passwords within 15 minutes; the vendor STIG sets no automatic unlock | `sudo faillock --user svc_ansible` shows the failures. Reset as root, from the console or Azure Run Command, with `faillock --user svc_ansible --reset`, then correct the password Ansible or Semaphore uses. |
 | Task appears finished but recap is incomplete | Output persistence and stream timing | Wait for the complete host recap, then inspect the actual failure. |
 | Browser works but task is queued | Application concurrency and another running task | Check task state before launching duplicates. |
 | Restored UI cannot decrypt keys | Matching database and access-key encryption configuration | Restore the matching private configuration; generating a new key will not decrypt the old records. |
@@ -116,6 +118,13 @@ free -h
 df -h
 ```
 
+`port_3000_listening` or `port_5432_listening` false means Semaphore or
+PostgreSQL is not listening at all, so read that unit's status and journal;
+`port_3000_only_loopback` or `port_5432_only_loopback` false means it listens
+beyond loopback. On Ubuntu, `postgresql_is_active` checks the cluster unit
+`postgresql@16-main`, because the `postgresql` unit is a wrapper that stays
+active while the cluster is down.
+
 Read logs locally and sanitize them before sharing. A successful `/api/ping`
 response verifies an HTTP endpoint; follow it with an authenticated login and
 an actual task. If a configured proxy is involved, verify its loopback bind,
@@ -133,19 +142,57 @@ files or database just to make the installer run again.
 Both installers download and check the Semaphore archive, and build
 `/opt/ansible-venv`, before they create any state they refuse on a rerun. A
 checksum mismatch deletes the download, and a failed `pip install` removes the
-new virtual environment; fix the cause and run `--apply` again. On Enterprise
-Linux, if the `semaphore` account cannot read the lab folder, the installer
-stops before seeding and prints the `seed-semaphore.py` command to run once the
-permissions are fixed.
+new virtual environment; fix the cause and run `--apply` again. The Ubuntu
+installer installs PostgreSQL 16 after the virtual environment. If that install
+fails before it creates `/etc/postgresql` or `/var/lib/postgresql`, it also
+removes the new `/opt/ansible-venv`, so fix the cause and run `--apply` again;
+if it fails after creating either, it says that a rerun would be refused, and
+the rebuild or manual procedure above applies. With either installer, if the
+`semaphore` account cannot read the lab folder, the installer stops before
+seeding and prints the `seed-semaphore.py` command to run once the permissions
+are fixed.
+
+On a new Ubuntu VM, unattended upgrades can hold apt's locks for minutes. The
+Ubuntu installer and `expose-semaphore.sh` wait up to ten minutes for the
+package lock and retry `apt-get update` every 10 seconds, up to 30 times,
+printing `apt-get update failed; another apt process may hold its lock.
+Retrying in 10 seconds.` Let them wait.
+
+With `--expose`, the controller is installed and seeded before the exposure
+step. If `expose-semaphore.sh` or the readiness check after it fails, the
+installer still prints its next steps, then `Only the --expose MODE step
+failed. Do not run the installer again` with the two commands to run once the
+cause shown above them is fixed, and exits with status 1.
 
 Do not change a release checksum to match an unexpected download. Verify the
 release, architecture and authenticated source first.
 
+## Controller update stopped
+
+`scripts/update-controller.sh` stops before changing anything it should not,
+and its message names the fix:
+
+| Message | Next step |
+| --- | --- |
+| `No lab folder at ...; pass the --lab-dir the installer used.` | Rerun with `--lab-dir` set to the folder the installer used. |
+| `Plan only. Resolve the N problem(s) above before you run it with --apply.` | Each problem line above says what to do; the plan exits with status 1 while any remains. |
+| An uncommitted change to a guide file | When `.guide-files.json` is among the files, an earlier update wrote them and stopped before its commit: commit them together. Otherwise commit your own edit, or discard what an interrupted update wrote. |
+| `Writing the guide's files stopped ...` | The update put back what it had written. Fix the cause, such as a full disk or an editor saving the file, and run it again. |
+| `The password was accepted, but Semaphore also wants a second factor` | Pass an administrator's API token as `SEMAPHORE_API_TOKEN`; see [update a controller](03-controller.md#update-a-controller-to-a-newer-guide-release). |
+| `... may not change the templates of project ...` | Use an administrator's login or token, or the project owner's or a manager's. |
+| `Kept template ...: schedule ... runs it` | Move those schedules or integrations to the per-system templates, then run `--apply --remove-replaced` again. |
+| `... failed with HTTP NNN: REASON` | The text after the colon is Semaphore's own reason. |
+
 ## Benchmark result surprises
 
 A completed scan with failed or manual controls is a result to investigate,
-not a parser failure. An error, unknown outcome or empty result set is an
-assessment-quality problem. New packages can make more rules applicable, and
+not a parser failure. An error, unknown outcome, empty result set, or a result
+in which every rule is `notselected` is an assessment-quality problem: for the
+last, check the profile ID with `oscap info FILE` or `usg list`. When a scan
+stops with `The vendor scanner produced no results`, on Ubuntu the message
+gives `usg`'s exit code and the end of its output; if `usg` rejected the
+profile, set `stig_usg_profile` to an ID that `usg list` shows, as
+[the security baseline catalog](appendices/security-baselines.md) explains. New packages can make more rules applicable, and
 one rule can contain many result instances. Use [the benchmark guide](09-security-benchmarks.md)
 and the original XML instead of relying on a green job label or a simple ratio.
 

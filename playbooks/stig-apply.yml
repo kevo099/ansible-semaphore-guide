@@ -21,7 +21,7 @@
     # A Semaphore survey answer is a string; converting it here keeps the
     # approval check a real boolean. From the CLI pass -e '{"stig_confirm": true}'.
     stig_confirm: "{{ recovery_snapshot_ack | default('') == 'SNAPSHOT READY' }}"
-    stig_stamp: "{{ ansible_facts['date_time']['iso8601_basic_short'] }}"
+    # stig_stamp is set once for every host of the run; see pre_tasks.
     stig_remote_dir: "/var/log/stig-practice/{{ stig_stamp }}"
     stig_fetch_dir: >-
       {{ lookup('env', 'HOME') }}/stig-reports/{{ stig_report_folder ~ '/' if stig_report_folder else '' }}{{ stig_stamp }}
@@ -67,6 +67,14 @@
 
     - name: Check scope and supported operating system
       ansible.builtin.import_tasks: tasks/preflight.yml
+      tags: always
+
+    # The before and after reports share one folder, named once from the controller's
+    # UTC clock. As in stig-audit.yml, this follows the preflight's fact gathering.
+    - name: Use one report folder for the whole run # noqa: run-once[task]
+      ansible.builtin.set_fact:
+        stig_stamp: "{{ now(utc=true, fmt='%Y%m%dT%H%M%SZ') }}"
+      run_once: true
       tags: always
 
     # The per-system playbooks under playbooks/stig/ set stig_os_scope, such as

@@ -25,7 +25,8 @@ up to the version of the guide in this copy, without reinstalling anything:
 It does not change Semaphore, PostgreSQL, Ansible, the inventory, keys or other
 template settings. It stops, changing nothing, when the lab folder has
 uncommitted changes to guide files, staged changes, links where guide files
-belong, or files that both you and this release changed.
+belong, or files that both you and this release changed. If writing the files
+fails part way, it puts back the ones it wrote.
 
   --lab-dir DIR       The lab folder (default: /opt/ansible-lab).
   --replace-edited    Replace guide files that both you and this release changed.
@@ -33,11 +34,15 @@ belong, or files that both you and this release changed.
   --remove-replaced   After the update, delete the replaced seeded objects, with
                       the old templates' task history; a backup of their
                       settings is saved under /root/ansible-lab-update/ first.
+                      A replaced template that a schedule or integration runs
+                      is kept until you move those to its per-system template.
 
-The default is a read-only plan. If the installer's admin password was changed
-in the UI, it asks for a Semaphore administrator's login and password. Without a
-terminal, export SEMAPHORE_API_TOKEN with an API token instead and run it with
-sudo --preserve-env=SEMAPHORE_API_TOKEN.
+The default is a read-only plan; it exits with status 1 when it lists problems
+that would stop --apply. If the installer's admin password was changed in the
+UI, it asks for a Semaphore administrator's login and password. Without a
+terminal, or for a login with a second factor, export SEMAPHORE_API_TOKEN with
+the API token of a Semaphore administrator, or of the project's owner or a
+manager, and run it with sudo --preserve-env=SEMAPHORE_API_TOKEN.
 USAGE
 }
 

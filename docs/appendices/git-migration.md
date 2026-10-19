@@ -78,7 +78,10 @@ git log --oneline -- inventories/
 ```
 
 The last command now prints nothing, and the working tree, `inventories/`
-included, is unchanged. Push only to a **private** repository:
+included, is unchanged. Keep `local-history` on the controller: until an update
+has written `.guide-files.json`, `scripts/update-controller.sh` finds the
+guide's earlier versions in the installer's first commit, which now lives only
+on that branch. Running one update before re-rooting avoids depending on it. Push only to a **private** repository:
 
 ```bash
 git remote add origin YOUR_PRIVATE_REPOSITORY_URL

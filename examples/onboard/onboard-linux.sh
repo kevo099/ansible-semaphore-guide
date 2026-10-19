@@ -6,16 +6,22 @@
 #
 # It creates or completes svc_ansible, authorizes exactly the public keys below,
 # installs the Python bindings the lessons need, writes the sudoers rule and the
-# SSH drop-in from chapter 4, checks both before SSH reloads, and prints the
-# host-key fingerprints to compare with ssh-keyscan from the controller.
+# SSH drop-in from chapter 4, and checks both before SSH reloads, including that
+# AllowUsers, AllowGroups, DenyUsers and DenyGroups let the account in. It prints
+# the host-key fingerprints to compare with ssh-keyscan from the controller, and
+# the lines to paste into scripts/add-target.sh --from-info there to add this VM.
 #
 # Supported: Ubuntu 24.04, AlmaLinux, Rocky Linux and RHEL 9.
 
 # Run Command starts scripts with /bin/sh, which is dash on Ubuntu.
 if [ -z "${BASH_VERSION:-}" ]; then exec /bin/bash "$0" "$@"; fi
 
-# 1. Replace the placeholder line with the controller's ~/.ssh/ansible_lab.pub.
-#    More keys go on further lines. Keep the two END_OF_KEYS lines as they are.
+# 1. Replace the placeholder line with the key Semaphore logs in with: on a
+#    controller made by either installer, the output of
+#    sudo cat /etc/semaphore/svc_ansible.pub; on one set up by hand,
+#    ~/.ssh/ansible_lab.pub. These keys replace the account's authorized keys,
+#    so list every key it needs; your CLI key, if you use one, goes on a further
+#    line. Keep the two END_OF_KEYS lines as they are.
 PUBLIC_KEYS=$(cat <<'END_OF_KEYS'
 REPLACE_WITH_AUTOMATION_PUBLIC_KEY
 END_OF_KEYS
@@ -46,20 +52,29 @@ account=svc_ansible
 sudoers_file=/etc/sudoers.d/90-ansible-lab
 ssh_dropin=/etc/ssh/sshd_config.d/70-ansible-lab.conf
 log_file=/var/log/ansible-lab-onboard.log
+
+# Run Command returns only the last 4 KB, so the result line always comes last,
+# also after an unexpected error: the ERR trap names the line of a failed
+# command, and cleanup reports any other failed exit, such as one inside a
+# function, where the ERR trap does not run.
+reported=
+fail() { printf 'onboard: %s\n' "$*" >&2; reported=yes; printf 'RESULT: FAILED: %s\n' "$*"; exit 1; }
+note() { printf '%s\n' "$*"; }
+trap 'reported=yes; printf "RESULT: FAILED: unexpected error at line %s; see the error output\n" "$LINENO"; exit 1' ERR
 work=$(mktemp -d)
 cleanup() {
+  local status=$?
   rm -rf "$work"
   # Action Run Command leaves a root-only copy of the script on the VM; drop
   # this run's copy when a hash was pasted into it.
   if [ -n "$pasted_hash" ] && [[ $0 == /var/lib/waagent/run-command/download/*/script.sh ]]; then
     rm -f -- "$0"
   fi
+  if [ "$status" -ne 0 ] && [ -z "$reported" ]; then
+    printf 'RESULT: FAILED: unexpected error; see the error output\n'
+  fi
 }
 trap cleanup EXIT
-
-# Run Command returns only the last 4 KB, so the result line always comes last.
-fail() { printf 'onboard: %s\n' "$*" >&2; printf 'RESULT: FAILED: %s\n' "$*"; exit 1; }
-note() { printf '%s\n' "$*"; }
 
 [ "$(id -u)" -eq 0 ] || fail "run as root; Azure Run Command already does"
 
@@ -93,6 +108,21 @@ case "${ID:-}:${VERSION_ID:-}" in
   *) fail "supported systems are Ubuntu 24.04 and AlmaLinux, Rocky Linux or RHEL 9, not ${PRETTY_NAME:-unknown}" ;;
 esac
 
+# apt-get update takes the package lists' lock, which DPkg::Lock::Timeout does not
+# cover, and apt-daily can hold it for a while after boot, so retry for about five minutes.
+apt_update() {
+  local attempt
+  for attempt in {1..30}; do
+    apt-get update -q && return
+    if [ "$attempt" -lt 30 ]; then
+      echo "onboard: apt-get update failed; another apt process may hold its lock. Retrying in 10 seconds."
+      sleep 10
+    fi
+  done
+  echo "onboard: apt-get update failed 30 times, 10 seconds apart"
+  return 1
+}
+
 # Package output goes to the log so Run Command's 4 KB result stays readable.
 if [ "$family" = debian ]; then
   wanted=(python3 python3-apt sudo openssh-server)
@@ -101,8 +131,8 @@ if [ "$family" = debian ]; then
     dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q 'install ok installed' || missing+=("$pkg")
   done
   if [ "${#missing[@]}" -gt 0 ]; then
-    { apt-get -o DPkg::Lock::Timeout=600 update -q &&
-      DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 install -y -q "${missing[@]}"; } \
+    apt_update >>"$log_file" 2>&1 || fail "apt-get update failed 30 times, 10 seconds apart; see $log_file"
+    DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 install -y -q "${missing[@]}" \
       >>"$log_file" 2>&1 || fail "package installation failed; see $log_file"
   fi
   # ssh.service starts on the first connection; sshd -t and -T need its runtime directory.
@@ -167,8 +197,9 @@ while IFS= read -r key; do
   bits=$(ssh-keygen -lf "$work/one.pub" 2>/dev/null | awk '{print $1}') || fail "ssh-keygen cannot read key: ${key:0:30}..."
   [ -n "$bits" ] || fail "ssh-keygen cannot read key: ${key:0:30}..."
   type=${key%% *}
+  # The controller's SSH client signs with SHA-2 only, never with SHA-1 ssh-rsa.
   if [ "$type" = ssh-rsa ]; then
-    algorithms='rsa-sha2-512 rsa-sha2-256 ssh-rsa'
+    algorithms='rsa-sha2-512 rsa-sha2-256'
     if [ "$bits" -lt "$min_rsa" ]; then
       note "warning: a $bits-bit RSA key is below this server's $min_rsa-bit minimum and cannot log in"
       continue
@@ -188,14 +219,20 @@ if getent passwd "$account" >/dev/null; then
   account_state=present
   uid=$(id -u "$account")
   [ "$uid" -ge 1000 ] || fail "$account exists with system UID $uid; resolve that by hand"
-  [ "$(getent passwd "$account" | cut -d: -f7)" = /bin/bash ] || usermod -s /bin/bash "$account"
+  if [ "$(getent passwd "$account" | cut -d: -f7)" != /bin/bash ]; then
+    usermod -s /bin/bash "$account" || fail "usermod could not set $account's shell to /bin/bash; is it a local account?"
+  fi
 else
-  useradd --create-home --shell /bin/bash "$account"
+  # useradd also makes a group of the same name, and stops if one exists already.
+  useradd --create-home --shell /bin/bash "$account" ||
+    fail "useradd could not create $account; if a group named $account exists already, resolve that by hand"
   account_state=created
 fi
 uid=$(id -u "$account")
 home=$(getent passwd "$account" | cut -d: -f6)
 [ -d "$home" ] || fail "$account has no home directory $home"
+# sshd compares these with AllowGroups and DenyGroups.
+groups=$(id -nG "$account") || fail "id could not list the groups of $account"
 
 # The account writes its own key file, so a link it planted cannot redirect root.
 if runuser -u "$account" -- cmp -s - "$home/.ssh/authorized_keys" < "$work/keys" 2>/dev/null; then
@@ -227,14 +264,16 @@ if [ "$(stat -Lc '%U %a' "$home/.ssh")" != "$account 700" ] ||
   fail "$home/.ssh or its authorized_keys is not owned by $account; resolve that by hand"
 fi
 if command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled; then
-  restorecon -RF "$home/.ssh"
+  restorecon -RF "$home/.ssh" || fail "restorecon could not restore the SELinux labels of $home/.ssh"
 fi
 
+# --- Password ----------------------------------------------------------------
 if [ -n "$PASSWORD_HASH" ]; then
   if [ "$(getent shadow "$account" | cut -d: -f2)" = "$PASSWORD_HASH" ]; then
     password_state="unchanged"
   else
-    printf '%s:%s\n' "$account" "$PASSWORD_HASH" | chpasswd -e
+    printf '%s:%s\n' "$account" "$PASSWORD_HASH" | chpasswd -e ||
+      fail "chpasswd could not set $account's password; is it a local account in /etc/shadow?"
     password_state="set from PASSWORD_HASH"
   fi
 elif [[ $(getent shadow "$account" | cut -d: -f2) == '$'* ]]; then
@@ -267,7 +306,7 @@ if ! visudo -cq; then
   fi
   fail "the complete sudo configuration does not parse; this run's rule was taken back"
 fi
-rights=$(sudo -l -U "$account")
+rights=$(sudo -l -U "$account") || fail "sudo -l -U $account failed, so its rights cannot be checked; see the error output"
 grep -q '(ALL : ALL) ALL' <<<"$rights" || fail "$account does not have the (ALL : ALL) ALL rule; check /etc/sudoers.d"
 if grep -Eq 'NOPASSWD|!authenticate' <<<"$rights"; then
   fail "a rule lets $account use sudo without its password; remove it (sudo -l -U $account shows it)"
@@ -320,6 +359,51 @@ reads_key_file() {
   done
   return 1
 }
+# Would DenyUsers, AllowUsers, DenyGroups or AllowGroups keep the account out?
+# Arguments: sshd -T output, the account, its groups as id -nG lists them.
+# Prints "refused: REASON" and "unsure: KEYWORD ENTRY" lines in the order sshd
+# checks them. sshd compares an entry without * or ? exactly, and so does this.
+# It only reports the entries it cannot judge: a pattern, the account with
+# @host, two @ (OpenSSH 9.8 and earlier split at the first, later versions at
+# the last), and a group name with a space, which id -nG cannot show.
+sshd_access() {
+  awk -v account="$2" -v groups="$3" '
+    function verdict(keyword, value,   name, ats, i, n, list) {
+      if (keyword ~ /groups$/) {
+        if (value ~ /[*? ]/) return "unsure"
+        n = split(groups, list, " ")
+        for (i = 1; i <= n; i++) if (list[i] == value) return "yes"
+        return "no"
+      }
+      ats = value
+      if (gsub(/@/, "", ats) > 1) return "unsure"
+      name = value
+      sub(/@.*/, "", name)
+      if (name ~ /[*?]/) return "unsure"
+      if (name != account) return "no"
+      return name == value ? "yes" : "unsure"
+    }
+    $1 ~ /^(deny|allow)(users|groups)$/ {
+      value = substr($0, length($1) + 2)
+      result = verdict($1, value)
+      listed[$1] = 1
+      if (result == "yes" && !($1 in matched)) matched[$1] = value
+      if (result == "unsure") unsure[$1, ++count[$1]] = value
+    }
+    END {
+      split("denyusers allowusers denygroups allowgroups", keywords, " ")
+      split("DenyUsers AllowUsers DenyGroups AllowGroups", names, " ")
+      for (k = 1; k <= 4; k++) {
+        keyword = keywords[k]
+        if (!(keyword in listed) || (keyword ~ /^allow/ && keyword in matched)) continue
+        if (keyword == "denyusers" && keyword in matched) print "refused: DenyUsers lists " account
+        if (keyword == "denygroups" && keyword in matched) print "refused: DenyGroups lists " account "\047s group " matched[keyword]
+        for (i = 1; i <= count[keyword]; i++) print "unsure: " names[k] " " unsure[keyword, i]
+        if (keyword == "allowusers" && !count[keyword]) print "refused: AllowUsers does not list " account
+        if (keyword == "allowgroups" && !count[keyword]) print "refused: AllowGroups lists none of " account "\047s groups (" groups ")"
+      }
+    }' <<<"$1"
+}
 ssh_problem() {
   /usr/sbin/sshd -t >"$work/sshd-t" 2>&1 || { echo "sshd -t: $(head -c 300 "$work/sshd-t")"; return; }
   local context policy line
@@ -330,8 +414,15 @@ ssh_problem() {
       grep -qx "$line" <<<"$policy" || { echo "another setting overrides '$line' for $account (${context#*,})"; return; }
     done
     reads_key_file "$policy" || { echo "AuthorizedKeysFile does not include $home/.ssh/authorized_keys"; return; }
+    while IFS= read -r line; do
+      case "$line" in
+        refused:*) echo "${line#refused: }; sshd would refuse the account, so allow $account there (${context#*,})"; return ;;
+        unsure:*) printf '%s\n' "${line#unsure: }" >>"$work/unsure" ;;
+      esac
+    done <<<"$(sshd_access "$policy" "$account" "$groups")"
   done
 }
+: >"$work/unsure"
 problem=$(ssh_problem)
 if [ -n "$problem" ]; then
   [ "$ssh_state" = unchanged ] || restore_dropin
@@ -373,8 +464,56 @@ ssh-keygen -lf "$home/.ssh/authorized_keys" | cut -c1-110 | sed 's/^/  /'
 note "password: $password_state"
 note "sudo: $sudoers_file $sudo_state; $account's own password is required"
 note "ssh: $ssh_dropin $ssh_state; $ssh_running; key only for $account, checked from $addr to ${#contexts[@]} local address and port pair(s)"
+while IFS= read -r entry; do
+  note "warning: this check cannot evaluate \"$entry\"; make sure sshd lets $account in"
+done < <(awk '!seen[$0]++' "$work/unsure")
 note "host keys to compare with ssh-keyscan from the controller:"
 for pub in /etc/ssh/ssh_host_*_key.pub; do
+  [ -f "$pub" ] || continue
   ssh-keygen -lf "$pub" | awk '{print "  " $1, $2, $NF}'
 done
+# The values add-target.sh --from-info reads on the controller. They are data, not
+# a command: the controller does not trust this VM, so only its own reviewed code
+# acts on them. A value that cannot be read here is left out, and the option that
+# supplies it on the controller is named instead.
+inventory_group=enterprise_linux
+[ "$family" = debian ] && inventory_group=ubuntu
+inventory_name=$(hostname -s 2>/dev/null || true)
+target_address=
+if [ -n "$CONTROLLER_ADDRESS" ]; then
+  target_address=$({ ip -o route get "$CONTROLLER_ADDRESS" 2>/dev/null || true; } \
+    | sed -n 's/.* src \([0-9A-Fa-f.:]*\).*/\1/p' | head -n 1)
+fi
+if [ -z "$target_address" ]; then
+  mapfile -t global_addresses < <(ip -o -4 addr show scope global 2>/dev/null | awk '{sub(/\/.*/, "", $4); print $4}')
+  [ "${#global_addresses[@]}" -eq 1 ] && target_address=${global_addresses[0]}
+fi
+rsa_fingerprint=$({ ssh-keygen -lf /etc/ssh/ssh_host_rsa_key.pub 2>/dev/null || true; } | awk '{print $2}')
+info=() options=()
+# add-target.sh refuses localhost, Ansible's name for the controller, and group names:
+# Ansible's all and ungrouped and the guide's own. They count as unreadable here.
+case "$inventory_name" in localhost|all|ungrouped|lab|ubuntu|enterprise_linux) inventory_name= ;; esac
+if [[ "$inventory_name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+  info+=("name=$inventory_name")
+else
+  options+=("--name with the name the inventory should use")
+fi
+if [[ "$target_address" =~ ^[0-9A-Fa-f.:]+$ ]]; then
+  info+=("address=$target_address")
+else
+  options+=("--address with the address the controller reaches")
+fi
+info+=("group=$inventory_group")
+if [[ "$rsa_fingerprint" =~ ^SHA256:[A-Za-z0-9+/]+$ ]]; then
+  info+=("fingerprint=$rsa_fingerprint")
+else
+  options+=("--fingerprint with the RSA host key's fingerprint, read from the console")
+fi
+note "Add this VM on the controller: in the guide's folder, run"
+note "  sudo bash scripts/add-target.sh --from-info"
+for option in "${options[@]}"; do
+  note "and add $option,"
+done
+note "then paste these lines and press Ctrl-D:"
+printf '%s\n' "${info[@]}"
 note "RESULT: OK"

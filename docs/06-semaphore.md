@@ -219,8 +219,9 @@ Launch a template with its run (▶) button, then **Run** in the dialog. The
 dialog's **Dry Run** (`--check`) and **Diff** (`--diff`) switches apply to that
 one run only; the preview templates keep those arguments fixed so a preview is
 repeatable. Templates for the STIG playbooks, such as
-[the four that both installers seed](09-security-benchmarks.md#the-seeded-stig-templates), refuse Dry Run
-because the scanner does not run in check mode.
+[the 14 that both installers seed](09-security-benchmarks.md#the-seeded-stig-templates),
+three or four on each **STIG ·** tab, refuse Dry Run because the scanner does not
+run in check mode.
 
 1. Run **Ubuntu — Ping**. Verify target identity, `changed=0`, and no failures.
 2. Run **Baseline preview**. Read all predicted changes and skipped tasks.
@@ -245,6 +246,13 @@ connections have a different identity-selection path.
 
 Keep strict host verification. Correct the service's actual known-hosts file,
 permissions, inventory or credentials rather than bypassing authentication.
+
+Like terminal runs with the lab's `ansible.cfg`, Semaphore jobs on a controller
+installed from `v1.8.0` keep a target's SSH connection open for 60 seconds
+after the last task, and a job that starts within that time reuses it,
+whichever Key Store key it selects. Before testing that a removed or replaced
+key is refused, wait a minute after the last job, or restart Semaphore while
+no task runs.
 
 Privilege escalation is also configured differently. The terminal's `-K`
 password is used to become root; a Semaphore sudo credential with a Username

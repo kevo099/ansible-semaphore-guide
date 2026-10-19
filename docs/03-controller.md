@@ -83,14 +83,20 @@ For example, after reviewing the plan:
 
 ```bash
 sudo bash scripts/install-controller.sh --apply --editor "$USER" \
-  --lab-dir /srv/ansible-lab --expose https
+  --lab-dir /srv/ansible-lab --expose https --address CONTROLLER_PUBLIC_ADDRESS
 ```
 
 Choose this command **or** the earlier default apply command, once on a fresh
 VM. Existing controller state or an existing lab folder is refused. With
 `--expose https`, the installer uses the shared exposure helper to publish nginx
 on port 443 with a self-signed certificate. `--expose http` publishes plain HTTP
-on port 3000. Without either option, application access stays on loopback. See
+on port 3000. Without either option, application access stays on loopback.
+`--address`, accepted only together with `--expose`, is the IP address or DNS
+name you browse to; the certificate and the printed URL name it. Without it
+they name the address of the VM's default route, which on a cloud VM behind
+NAT, such as Azure, is the private one. If only the exposure step fails, the
+installer says so and prints the exposure command to run again; do not run the
+installer again. See
 [browser access](appendices/browser-access.md#https-on-the-vms-address) for the
 firewall checks and how to return to loopback.
 
@@ -322,8 +328,9 @@ your password manager. The initial password file does not update automatically.
 To reach the UI on the controller's own address instead of through a tunnel,
 see [browser access](appendices/browser-access.md#https-on-the-vms-address):
 `scripts/expose-semaphore.sh --mode https` works after either installation
-path, the installer also accepts `--expose https`, and `--mode loopback` takes
-the UI off the network again.
+path, the installer also accepts `--expose https` with `--address` for the
+address you browse to, and `--mode loopback` takes the UI off the network
+again.
 
 ## Installer path: add targets and run the first lesson
 
@@ -362,11 +369,17 @@ sudo bash scripts/add-target.sh --name lab-ubuntu --address ubuntu.example.test 
 ```
 
 Use `--group enterprise_linux` for an EL9 target and include `--lab-dir DIR`
-if you chose a custom folder. The helper adds the inventory entry and its
-verified key to `/etc/semaphore/known_hosts`. A fingerprint mismatch or a
-duplicate host is refused without changing either file. Skip chapter 4's step
-6 on this path: it replaces the known-hosts file the helper maintains. RSA host
-keys also support the EL9 vendor STIG's later crypto-policy change.
+if you chose a custom folder. If one of the onboarding scripts prepared the
+target, run `sudo bash scripts/add-target.sh --from-info` instead and paste
+the lines it printed, as [the onboarding page](ONBOARDING.md#step-by-step)
+shows. The helper adds the inventory entry and its
+verified key to `/etc/semaphore/known_hosts`. A fingerprint mismatch, or a name
+or address the inventory already uses for another host, is refused without
+changing either file; for a target rebuilt at the same address, see
+[chapter 3b](03-controller-el9.md#do-add-a-target-without-leaving-the-terminal).
+Skip chapter 4's step 6 on this path: it replaces the known-hosts file the
+helper maintains. RSA host keys also support the EL9 vendor STIG's later
+crypto-policy change.
 
 In Semaphore, run **Ping**. Expect every added target to report its
 distribution, no failed hosts, and job paths under the lab folder without a
@@ -395,16 +408,21 @@ from release `v1.5.0` on. An Ubuntu controller from an earlier release has no
 seeded project, so the script refuses it; build its project by hand as
 [chapter 6](06-semaphore.md) describes. The installers refuse to run a second
 time, so use [`scripts/update-controller.sh`](../scripts/update-controller.sh)
-instead of installing again. Get the newer copy of the guide first; replace
-`v1.7.0` with the release you want:
+instead of installing again. Get the newer copy of the guide first, in a new
+folder for each release; replace `v1.8.0` with the release you want:
 
 ```bash
-git clone --branch v1.7.0 https://github.com/kevo099/ansible-semaphore-guide.git ~/guide-new
-cd ~/guide-new
+git clone --branch v1.8.0 https://github.com/kevo099/ansible-semaphore-guide.git ~/guide-v1.8.0
+cd ~/guide-v1.8.0
 sudo bash scripts/update-controller.sh
 ```
 
-Without options it only shows its plan. For each guide file in the lab folder
+Run `add-target.sh` from this newer copy too; `--from-info` is new in
+`v1.8.0`.
+
+Without options it only shows its plan, and it exits with status 1 while the
+plan lists a problem, ending with `Plan only. Resolve the N problem(s) above
+before you run it with --apply.` For each guide file in the lab folder
 (`playbooks/`, `ansible.cfg` and the report summarizer) it compares three
 versions: yours, the guide's version you last installed, and the new one.
 
@@ -429,8 +447,14 @@ sudo bash scripts/update-controller.sh --apply
 It changes nothing when the lab folder has staged changes, uncommitted changes
 to guide files, a link where a guide file or folder belongs, files that both
 changed, or no `.guide-files.json` after an earlier update; it then says how to
-restore that file from Git, or how to apply a reverted update again. It also
-refuses to run twice at once.
+restore that file from Git, or how to apply a reverted update again. Each
+uncommitted guide file comes with advice: when `.guide-files.json` is among
+them, an earlier update wrote every file and stopped before its commit, so
+commit them together; otherwise commit your own edit, or discard what an
+interrupted update wrote. It also refuses to run twice at once. It finds the
+installer's first commit on any local branch, so a folder whose history was
+re-rooted as [the Git migration appendix](appendices/git-migration.md) shows
+updates normally while the old history is kept on a local branch.
 
 It then logs in to Semaphore and checks the project before changing anything.
 Only templates bound to the lab folder's repository and inventory count as
@@ -449,21 +473,34 @@ the next section describes.
 
 Last, it checks that the lab folder is exactly as planned; if you edited a
 guide file meanwhile, it stops without touching the folder, and a second run
-picks up from there. If you save a file in the very moment it is replaced, the
+picks up from there. If writing the files fails part way, for example on a
+full disk or Ctrl-C, it puts back the files it had written, says that nothing
+in the folder changed while Semaphore is already updated, and stops; run it
+again once the cause is fixed. If you save a file in the very moment it is replaced, the
 swap is undone, your version stays, and the update stops. It writes the files
 as the lab folder's owner, so the `semaphore` group can still read them,
 restores SELinux labels on Enterprise Linux, and commits them in the folder's
 Git history with `.guide-files.json`, the record of the guide's own versions
-that the next update compares with. `git revert HEAD` in the folder undoes that
-commit; running the update again applies it again. A second run reports
-nothing to do.
+that the next update compares with. A second run reports nothing to do.
+
+`git revert HEAD` in the folder undoes that commit's files, not the Semaphore
+changes: the tabs and templates the update added stay and need those files,
+and templates removed with `--remove-replaced` stay removed. If that update
+was the folder's first, which created `.guide-files.json`, the next update
+stops and names the revert commit; to apply the update again, revert that
+commit with `git revert COMMIT` as the folder's owner and run the update. After
+a later update, the revert restores the previous record, so the next update
+plans the same changes again; check its plan before `--apply`.
 
 **From one STIG tab to one per system.** Release `v1.7.0` replaced the single
 **STIG** tab with one tab per system and version. An update adds the new tabs
-and templates and keeps the four old STIG templates, the **STIG** tab and the
-**Local SCAP content** variable group, so nothing you ran disappears; the old
-templates still work and audit every supported system at once. The plan lists
-them as replaced. If you scanned with a SCAP file of your own, move it into its
+and templates and keeps the old STIG objects, so nothing you ran disappears;
+the old templates still work and audit every supported system at once. Which
+old objects a controller has depends on the release it was installed from or
+last updated to: from `v1.6.x`, four STIG templates, the **STIG** tab and the
+**Local SCAP content** variable group; from `v1.5.0`, the four templates and
+the variable group, without a tab; from earlier releases, three templates. The
+plan lists them as replaced. If you scanned with a SCAP file of your own, move it into its
 system's folder, for example with
 `mv /opt/ansible-lab/content/U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.xml /opt/ansible-lab/content/rhel/9/`
 as the folder's owner, where the variable group **DISA SCAP file · RHEL 9**
@@ -475,10 +512,16 @@ sudo bash scripts/update-controller.sh --apply --remove-replaced
 ```
 
 It deletes them only after the lab folder holds the new playbooks, and saves
-the templates, the tab and the variable group to a root-only file under
-`/root/ansible-lab-update/` first. Deleting a template in Semaphore also deletes
-its task history, so keep any task output you need first; the backup holds
-settings, not runs. The tab and the variable group are deleted only when no
+the templates, the tab, the variable group and their schedules and
+integrations to a root-only file under `/root/ansible-lab-update/` first.
+Deleting a template in Semaphore also deletes its task history, so keep any
+task output you need first; the backup holds settings, not runs. Deleting a
+template would also delete its schedules and integrations, so the update keeps
+any old template that one of them still runs: the plan lists it with each
+schedule's and integration's name, for example `schedule 'nightly audit' (ID 1)
+runs it`. Recreate those on the per-system templates, such as **RHEL 9 · STIG
+audit**, delete them from the old template, and run `--apply --remove-replaced`
+again. The tab and the variable group are deleted only when no
 other template uses them, and a **Local SCAP content** group that you filled
 in is kept with your values; delete it in the UI once you have copied them.
 
@@ -494,19 +537,47 @@ and keeps your certificate, so the browser's fingerprint does not change:
 sudo bash scripts/expose-semaphore.sh --mode https
 ```
 
-With a different lab folder, add the same `--lab-dir DIR` the installer used. If several projects
-share the seeded project's name, pass `--project-id` with its ID.
+On a controller already exposed over HTTPS, or on loopback, this does not
+restart Semaphore, so running tasks continue.
+
+**SSH connection reuse for Semaphore jobs.** Controllers installed before
+`v1.8.0` keep their `/etc/semaphore/config.json`, whose `ANSIBLE_SSH_ARGS`
+lacks the connection reuse that the lab's `ansible.cfg` gives terminal runs, so
+every task of a Semaphore job opens a new SSH login; the update does not change
+that file. To add the reuse, while no task runs:
+
+```bash
+sudo sed -i 's|"ANSIBLE_SSH_ARGS": "-o UserKnownHostsFile=|"ANSIBLE_SSH_ARGS": "-o ControlMaster=auto -o ControlPersist=60s -o UserKnownHostsFile=|' /etc/semaphore/config.json
+sudo systemctl restart semaphore
+sudo python3.12 scripts/check-controller.py
+```
+
+The readiness check should still report `"passed": true`. In the test,
+**Baseline preview** against four targets went from 19 to 14.5 seconds.
+
+With a different lab folder, add the same `--lab-dir DIR` the installer used;
+without it, the update stops with `No lab folder at /opt/ansible-lab; pass the
+--lab-dir the installer used.` If several projects share the seeded project's
+name, pass `--project-id` with its ID.
 
 If you changed the administrator's password in the UI, the stored installer
 password no longer works, and it asks for a Semaphore administrator's login and
-password at the terminal. For an unattended run, create an API token as
+password at the terminal. A password login cannot pass a second factor, so
+when the administrator uses one, as [chapter 15](15-identity.md) sets up, use a
+token. For a token, or an unattended run, create an API token for a Semaphore
+administrator, or for the project's owner or a manager, as
 [chapter 17](17-api-and-integrations.md#do-inspect-swagger-and-token-access)
-shows and pass it as `SEMAPHORE_API_TOKEN` with
-`sudo --preserve-env=SEMAPHORE_API_TOKEN`.
+shows, pass it as `SEMAPHORE_API_TOKEN` with
+`sudo --preserve-env=SEMAPHORE_API_TOKEN`, and delete the token afterwards.
+
+STIG reports from `v1.8.0` on go to one folder per run, named after the
+controller's UTC start time with a trailing `Z`, such as `20261019T061020Z`;
+folders from earlier runs keep their old names.
 
 **Check:** the **Task Templates** page shows the tabs **Lessons**, **Patching**
-and one **STIG ·** tab per system beside **All**, plus the old **STIG** tab
-until you remove it, and **Ping** still succeeds.
+and one **STIG ·** tab per system beside **All**, and **Ping** still succeeds.
+On a controller updated from `v1.6.x`, the old **STIG** tab stays until you
+remove it; older controllers keep their old STIG templates under **All**.
 
 ## Concept
 

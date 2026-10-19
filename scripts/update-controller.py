@@ -289,7 +289,10 @@ class LabFolder:
         return result
 
     def seed_commit(self):
-        out = self.git("log", "--reverse", "--format=%H", f"--grep={SEED_MESSAGE}").stdout.decode().split()
+        # Every local branch: publishing only the current files, as the Git migration
+        # appendix shows, leaves the installer's commit on the branch local-history.
+        out = self.git("log", "--branches", "--reverse", "--format=%H",
+                       f"--grep={SEED_MESSAGE}").stdout.decode().split()
         return out[0] if out else None
 
     def committed(self, commit, relative):
@@ -348,9 +351,17 @@ def lab_plan(lab, repo, files, replace_edited):
     paths = sorted(set(files) | set(base))
     status = lab.git("status", "--porcelain=v1", "-z", "--ignored", "--untracked-files=all", "--",
                      *paths, MANIFEST).stdout.decode(errors="replace")
-    for entry in filter(None, status.split("\0")):
-        problems.append(f"uncommitted change to a guide file: {entry} (commit or discard it; after an "
-                        "interrupted update, commit the files it wrote)")
+    entries = list(filter(None, status.split("\0")))
+    # An update writes its record last, so an uncommitted record means it wrote every
+    # file and stopped before its commit. Files without the record are someone's edits,
+    # or what an update wrote before it was killed.
+    unfinished = any(entry[3:] == MANIFEST for entry in entries)
+    for entry in entries:
+        problems.append(f"uncommitted change to a guide file: {entry} ("
+                        + (f"an update wrote it and stopped before its commit; commit the files it wrote, "
+                           f"{MANIFEST} included" if unfinished else
+                           "commit your own edit; discard what an interrupted update wrote, with "
+                           "git checkout -- FILE, or by deleting a file Git does not track") + ")")
     for relative in paths:
         try:
             current = digest(lab.read(relative))
@@ -370,6 +381,70 @@ def lab_plan(lab, repo, files, replace_edited):
     return plan, expected, problems, source
 
 
+def write_files(lab, repo, plan, expected, manifest):
+    """Write the planned files, then the record of the guide's versions; returns what changed.
+
+    If writing stops part way (a file saved meanwhile, a full disk, Ctrl-C), the
+    files written so far are put back as the plan found them, and it stops.
+    """
+    done = []
+    try:
+        for relative in plan["add"] + plan["update"]:
+            change_file(lab, done, relative, expected[relative], (repo / relative).read_bytes())
+        for relative in plan["remove"]:
+            change_file(lab, done, relative, expected[relative], None)
+        current = lab.read(MANIFEST)
+        if current != manifest:
+            change_file(lab, done, MANIFEST, digest(current), manifest)
+    except (Unsafe, OSError, KeyboardInterrupt) as error:
+        reason = "it was interrupted" if isinstance(error, KeyboardInterrupt) else str(error)
+        left = put_back(lab, done)
+        if left:
+            raise SystemExit(f"Writing the guide's files stopped: {reason}. The files written were put back, "
+                             f"except these, which changed meanwhile or could not be put back: {', '.join(left)}. "
+                             f"Semaphore is updated. Check them with git status and git diff in {lab.root}, "
+                             "then run the update again.") from None
+        raise SystemExit(f"Writing the guide's files stopped: {reason}. The files written were put back, so "
+                         "nothing in the folder was changed; Semaphore is updated. Run the update "
+                         "again.") from None
+    return [relative for relative, _before, _after in done]
+
+
+def change_file(lab, done, relative, expected, data):
+    """Write data (None: remove the file) where the plan expects a hash, noting it in done first."""
+    before = lab.read(relative)
+    if digest(before) != expected:
+        raise Unsafe(f"{relative} changed after the plan was made")
+    done.append((relative, before, digest(data)))
+    if data is None:
+        lab.remove(relative, expected)
+    else:
+        lab.write(relative, data, expected)
+
+
+def put_back(lab, done):
+    """Undo the changes in done, newest first; returns the paths it left as they are.
+
+    A path is left when it changed meanwhile, so someone's save is kept, or when
+    putting it back failed too.
+    """
+    left = []
+    for relative, before, after in reversed(done):
+        try:
+            current = digest(lab.read(relative))
+            if current == digest(before):
+                continue
+            if current != after:
+                left.append(relative)
+            elif before is None:
+                lab.remove(relative, after)
+            else:
+                lab.write(relative, before, after)
+        except (Unsafe, OSError):
+            left.append(relative)
+    return sorted(left)
+
+
 def manifest_for(repo, files, version):
     return (json.dumps({"guide": version, "files": {f: digest((repo / f).read_bytes()) for f in files}},
                        indent=2, sort_keys=True) + "\n").encode()
@@ -384,6 +459,20 @@ READINESS_HINTS = {
     "service_can_read_known_hosts": (
         "the semaphore account cannot read /etc/semaphore/known_hosts. Fix it with: "
         "sudo chown root:semaphore /etc/semaphore/known_hosts; sudo chmod 0640 /etc/semaphore/known_hosts"),
+    # A stopped service is not an exposure problem; these come before the port prefix rule.
+    "semaphore_is_active": (
+        "Semaphore is not running. Find out why with: sudo systemctl status semaphore --no-pager; "
+        "sudo journalctl -u semaphore -n 100 --no-pager"),
+    "port_3000_listening": (
+        "nothing listens on port 3000, so Semaphore is stopped or failed to start. Find out why with: "
+        "sudo journalctl -u semaphore -n 100 --no-pager"),
+    "postgresql_is_active": (
+        "PostgreSQL is not running. Find out why with: sudo systemctl status postgresql@16-main --no-pager "
+        "on Ubuntu, or sudo systemctl status postgresql --no-pager on Enterprise Linux"),
+    "port_5432_listening": (
+        "nothing listens on port 5432, so PostgreSQL is stopped or failed to start. Find out why with: "
+        "sudo journalctl -u postgresql@16-main -n 100 --no-pager on Ubuntu, "
+        "or sudo journalctl -u postgresql -n 100 --no-pager on Enterprise Linux"),
 }
 EXPOSURE_HINT = ("Semaphore's address or proxy does not match /etc/semaphore/exposure. Run "
                  "sudo bash scripts/expose-semaphore.sh --mode MODE with the mode you use: https, http or loopback")
@@ -455,7 +544,8 @@ def main():
     parser.add_argument("--project-id", type=int, help="the seeded project's ID, when project names repeat")
     parser.add_argument("--remove-replaced", action="store_true",
                         help="delete the seeded templates, tab and variable group this release replaces, "
-                             "including those templates' task history")
+                             "including those templates' task history; a template that a schedule or "
+                             "integration runs is kept")
     args = parser.parse_args()
 
     if os.geteuid() != 0:
@@ -464,6 +554,8 @@ def main():
         raise SystemExit("This controller was not set up by an installer that seeds Semaphore; "
                          "there is nothing to update.")
     root = Path(os.path.realpath(args.lab_dir))
+    if not root.is_dir():
+        raise SystemExit(f"No lab folder at {root}; pass the --lab-dir the installer used.")
     if run_check(["systemctl", "is-active", "--quiet", "semaphore"]).returncode != 0:
         raise SystemExit("semaphore.service is not running; start it first.")
     owner = pwd.getpwuid(os.stat(root).st_uid)
@@ -479,7 +571,7 @@ def main():
         raise SystemExit(f"No lab folder with Git history at {root}; pass --lab-dir.")
     version = run_check(["git", "-c", f"safe.directory={REPO}", "-C", str(REPO), "describe", "--tags",
                          "--always"]).stdout.strip() or "this copy"
-    files = guide_files()
+    files = guide_files(REPO)
 
     plan, expected, problems, source = lab_plan(lab, REPO, files, args.replace_edited)
     seeder = load_seeder()
@@ -507,7 +599,8 @@ def main():
     if source:
         print(f"  The guide's earlier versions come from {source}.")
     else:
-        print("  No record of the guide's earlier files was found, so every differing file counts as changed by both.")
+        print("  No record of the guide's earlier files was found, so every existing guide file counts as "
+              "changed by both.")
     for problem in problems:
         print(f"  Problem: {problem}")
     if args.apply and problems:
@@ -522,8 +615,9 @@ def main():
 
     client = seeder.Client(seeder.API, os.environ.get("SEMAPHORE_API_TOKEN") or None)
     seeder.wait_ready(client)
-    seeder.log_in(client, "admin", ask=True)
-    found = seeder.resolve(client, "Ansible Practice", str(root), args.project_id)
+    user = seeder.log_in(client, "admin", ask=True)
+    found = seeder.resolve(client, "Ansible Practice", str(root), args.project_id, user)
+    seeder.check_access(client, user, found)
     semaphore_plan = seeder.plan_for(found)
     print(f"Semaphore project {found['project']['name']!r} (ID {found['project']['id']})")
     show("Variable groups to add", semaphore_plan["environments"])
@@ -536,9 +630,12 @@ def main():
              "history)", replaced)
     else:
         show("Replaced by this release, kept (--remove-replaced deletes them)", replaced)
+    show("Replaced templates that schedules or integrations run, kept until you move those",
+         seeder.in_use_names(semaphore_plan))
     show("Replaced variable groups that hold your values, kept (copy them, then delete them in the UI)",
          semaphore_plan["edited"])
-    for item in seeder.pending_edits(Path("/root/ansible-lab-update")):
+    pending = seeder.pending_edits(seeder.BACKUP_DIR)
+    for item in pending:
         print(f"  Problem: an earlier update could not confirm its edit of template {item['name']!r}; "
               f"check it in the UI against {item['record']}, then delete that file")
     if semaphore_plan["duplicates"]:
@@ -546,12 +643,16 @@ def main():
     for item in semaphore_plan["ambiguous"]:
         print(f"  Problem: several objects are named {item}")
     if not args.apply:
+        count = len(problems) + len(pending) + len(semaphore_plan["ambiguous"])
+        if count:
+            print(f"Plan only. Resolve the {count} problem(s) above before you run it with --apply.")
+            return 1
         print("Plan only. Run again with --apply to make these changes.")
         return 0
     if semaphore_plan["ambiguous"]:
         raise SystemExit("Nothing was changed. Rename or remove the duplicates, then run again.")
 
-    seeder.apply_update(client, found, semaphore_plan, Path("/root/ansible-lab-update"))
+    seeder.apply_update(client, found, semaphore_plan, seeder.BACKUP_DIR)
 
     # The Semaphore part can take a while (and a login prompt); make sure the folder
     # is exactly as planned before touching it.
@@ -559,18 +660,7 @@ def main():
     if problems or again != plan or expected_again != expected:
         raise SystemExit("The lab folder changed while Semaphore was being updated. Semaphore is updated; "
                          "nothing in the folder was changed. Run the update again.")
-    changed = []
-    for relative in plan["add"] + plan["update"]:
-        lab.write(relative, (REPO / relative).read_bytes(), expected[relative])
-        changed.append(relative)
-    for relative in plan["remove"]:
-        lab.remove(relative, expected[relative])
-        changed.append(relative)
-    manifest = manifest_for(REPO, files, version)
-    current_manifest = lab.read(MANIFEST)
-    if current_manifest != manifest:
-        lab.write(MANIFEST, manifest, digest(current_manifest))
-        changed.append(MANIFEST)
+    changed = write_files(lab, REPO, plan, expected, manifest_for(REPO, files, version))
     try:
         for folder in content_folders(seeder):
             lab.make_folder(folder)
@@ -595,7 +685,7 @@ def main():
 
     if args.remove_replaced:
         # Only now do the lab folder's playbooks match the templates that remain.
-        _backup, removed = seeder.remove_replaced(client, found, semaphore_plan, Path("/root/ansible-lab-update"))
+        _backup, removed = seeder.remove_replaced(client, found, semaphore_plan, seeder.BACKUP_DIR)
         print(f"Removed {len(removed)} replaced object(s) from Semaphore.")
 
     outcome, names = readiness_outcome(readiness_before, failing_readiness())

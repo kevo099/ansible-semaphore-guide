@@ -13,6 +13,7 @@ controller_parse_args() {
   editor="${SUDO_USER:-}"
   lab_dir=/opt/ansible-lab
   expose=
+  expose_address=
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --help|-h) usage; exit 0 ;;
@@ -22,10 +23,13 @@ controller_parse_args() {
       --editor) [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || { usage; exit 2; }; editor="$2"; shift ;;
       --lab-dir) [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || { usage; exit 2; }; lab_dir="$2"; shift ;;
       --expose) [[ $# -ge 2 && ( "$2" == https || "$2" == http ) ]] || { usage; exit 2; }; expose="$2"; shift ;;
+      # expose-semaphore.sh checks the value; it names the certificate and the printed URL.
+      --address) [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || { usage; exit 2; }; expose_address="$2"; shift ;;
       *) usage; exit 2 ;;
     esac
     shift
   done
+  [[ -z "$expose_address" || -n "$expose" ]] || { echo 'Pass --address together with --expose.'; usage; exit 2; }
 }
 
 controller_validate_lab() {
@@ -113,6 +117,38 @@ controller_install_runtime() {
   chmod -R go+rX /opt/ansible-venv
 }
 
+controller_apt_update() {
+  # Ubuntu. apt-get waits for the dpkg lock only when given DPkg::Lock::Timeout, and
+  # apt-get update takes the package lists' lock, which that option does not cover.
+  # apt-daily can hold it for a while after boot, so retry for about five minutes.
+  local attempt
+  for attempt in {1..30}; do
+    if apt-get update; then return; fi
+    if (( attempt < 30 )); then
+      echo 'apt-get update failed; another apt process may hold its lock. Retrying in 10 seconds.'
+      sleep 10
+    fi
+  done
+  echo 'apt-get update failed 30 times. Nothing was installed; fix the cause above and rerun --apply.'
+  exit 1
+}
+
+controller_apt_install_postgresql() {
+  # Ubuntu installs PostgreSQL after the runtime, because the package creates state the
+  # preflight refuses. If it fails before creating any, remove the new runtime as well,
+  # so that the operator can fix the cause and rerun the fresh installer.
+  if apt-get -o DPkg::Lock::Timeout=600 install -y postgresql-16; then return; fi
+  if [[ -e /etc/postgresql || -e /var/lib/postgresql ]]; then
+    echo 'Installing PostgreSQL 16 failed after it created /etc/postgresql or /var/lib/postgresql,'
+    echo 'so this installer refuses to run again on this VM. See docs/11-troubleshooting.md'
+    echo '(Installer interrupted or failed).'
+  else
+    rm -rf /opt/ansible-venv
+    echo 'Installing PostgreSQL 16 failed; removed the new /opt/ansible-venv. Fix the cause above and rerun --apply.'
+  fi
+  exit 1
+}
+
 controller_configure_account() {
   useradd --system --create-home --home-dir /var/lib/semaphore --shell /usr/sbin/nologin semaphore
   install -d -o root -g semaphore -m 0750 /etc/semaphore
@@ -197,7 +233,7 @@ INVENTORY
   if ! runuser -u semaphore -- test -r "$lab_dir/inventories/lab.ini"; then
     echo "The semaphore account cannot read $lab_dir/inventories/lab.ini, so no template could run."
     echo "Nothing was seeded. Make $lab_dir and each parent folder readable to that account,"
-    echo 'then seed Semaphore (and run expose-semaphore.sh if you chose --expose):'
+    echo 'then seed Semaphore (and, if you chose --expose, run expose-semaphore.sh with that mode):'
     echo "  sudo python3.12 $script_dir/seed-semaphore.py --lab-dir $lab_dir \\"
     echo '    --key-file /etc/semaphore/svc_ansible --known-hosts /etc/semaphore/known_hosts'
     exit 1
@@ -209,10 +245,15 @@ INVENTORY
 }
 
 controller_finish() {
-  # 13. Optional network exposure
+  # 13. Optional network exposure. The controller is complete without it, so when this
+  #     step fails, only the exposure script needs to run again, not the installer.
+  local expose_command=() exposure_failed=
   if [[ -n "$expose" ]]; then
-    bash "$script_dir/expose-semaphore.sh" --mode "$expose"
-    python3.12 "$script_dir/check-controller.py"
+    expose_command=(bash "$script_dir/expose-semaphore.sh" --mode "$expose")
+    [[ -z "$expose_address" ]] || expose_command+=(--address "$expose_address")
+    if ! { "${expose_command[@]}" && python3.12 "$script_dir/check-controller.py"; }; then
+      exposure_failed=1
+    fi
   fi
 
   printf '\nController installed and seeded. Next: authorize the automation key on each target\n'
@@ -220,4 +261,10 @@ controller_finish() {
   printf 'Automation public key: /etc/semaphore/svc_ansible.pub\n'
   printf 'Local lab folder (edit as %s): %s\n' "$editor" "$lab_dir"
   printf 'The initial admin password is in /etc/semaphore/initial-admin-password (root only).\n'
+  if [[ -n "$exposure_failed" ]]; then
+    printf '\nOnly the --expose %s step failed. Do not run the installer again; fix the cause above, then run:\n  sudo' "$expose"
+    printf ' %q' "${expose_command[@]}"
+    printf '\n  sudo python3.12 %q\n' "$script_dir/check-controller.py"
+    exit 1
+  fi
 }

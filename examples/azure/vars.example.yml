@@ -6,8 +6,8 @@ azure_location: eastus2
 azure_resource_group: rg-ansible-lab
 azure_tags:
   purpose: ansible-semaphore-guide
-  owner: REPLACE_WITH_YOUR_NAME
-  expires: REPLACE_WITH_DATE
+  owner: "REPLACE_WITH_YOUR_NAME"
+  expires: "REPLACE_WITH_DATE"   # keep the quotes, for example "2026-10-31"
 
 azure_vnet_name: vnet-ansible-lab
 azure_vnet_prefix: REPLACE_WITH_PRIVATE_PREFIX         # for example a /16 you do not use elsewhere
@@ -17,12 +17,25 @@ azure_subnet_prefix: REPLACE_WITH_SUBNET_PREFIX        # a /24 inside azure_vnet
 # Where SSH to the targets may come from: your controller's address or prefix.
 azure_target_ssh_source: REPLACE_WITH_CONTROLLER_PREFIX
 
+# A size your subscription has quota for (az vm list-usage --location REGION).
+# Some subscriptions have none for this family; Standard_D2als_v7 is one alternative.
 azure_vm_size: Standard_D2als_v6
 azure_admin_user: azadmin
-azure_admin_public_key_file: ~/.ssh/azure_bootstrap.pub   # bootstrap administrator, your workstation key
-azure_automation_public_key_file: files/ansible_lab.pub     # copy of the controller's ~/.ssh/ansible_lab.pub
+# The bootstrap administrator's key, from your workstation. Make it RSA 4096, because
+# Enterprise Linux hardened to FIPS:STIG refuses Ed25519 keys:
+#   ssh-keygen -t rsa -b 4096 -f ~/.ssh/azure_bootstrap
+azure_admin_public_key_file: ~/.ssh/azure_bootstrap.pub
+# The key svc_ansible accepts, copied into examples/azure/files/, which Git ignores.
+# On a controller made by either installer it is a copy of /etc/semaphore/svc_ansible.pub,
+# the key Semaphore logs in with; on a controller you set up by hand, of ~/.ssh/ansible_lab.pub.
+# The playbooks stop before creating anything while a key file is missing or holds
+# anything but one public key.
+azure_automation_public_key_file: files/svc_ansible.pub
 
+# A VM keeps the image it was created from, so choose each image before the first run;
+# the playbooks refuse a changed Marketplace image for a VM that exists.
 azure_targets:
+  # The Ubuntu STIG lessons need the Ubuntu Pro image: sku: ubuntu-pro instead of server.
   - name: lab-ubuntu
     private_ip: REPLACE_WITH_ADDRESS_IN_SUBNET
     image: {publisher: Canonical, offer: ubuntu-24_04-lts, sku: server, version: latest}
@@ -35,6 +48,13 @@ azure_targets:
   # - name: lab-rhel
   #   private_ip: REPLACE_WITH_ADDRESS_IN_SUBNET
   #   image: {publisher: RedHat, offer: RHEL, sku: 9-lvm-gen2, version: latest}
+  # Optional: Rocky Linux 9, the Rocky Enterprise Software Foundation's own image. It
+  # is a Marketplace image with a plan, so accept its terms once per subscription:
+  #   az vm image terms accept --urn resf:rockylinux-x86_64:9-base:latest
+  # - name: lab-rocky
+  #   private_ip: REPLACE_WITH_ADDRESS_IN_SUBNET
+  #   image: {publisher: resf, offer: rockylinux-x86_64, sku: 9-base, version: latest}
+  #   plan: {name: 9-base, product: rockylinux-x86_64, publisher: resf}
 
 # Optional: a controller VM in Azure (controller.yml). It is the only VM with a
 # public address, and its SSH is open to operator_cidr alone.
@@ -42,4 +62,8 @@ azure_controller:
   name: lab-controller
   private_ip: REPLACE_WITH_ADDRESS_IN_SUBNET
   operator_cidr: REPLACE_WITH_YOUR_PUBLIC_ADDRESS_PREFIX
+  # Optional: allow HTTPS (443) from your own address prefix once expose-semaphore.sh
+  # --mode https serves Semaphore. controller.yml writes every rule of the controller's
+  # security group and removes any rule added by hand, so open 443 here, not in the portal.
+  # https_cidr: REPLACE_WITH_YOUR_PUBLIC_ADDRESS_PREFIX
   image: {publisher: Canonical, offer: ubuntu-24_04-lts, sku: server, version: latest}

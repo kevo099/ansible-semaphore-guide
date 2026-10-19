@@ -20,7 +20,7 @@
         state: present
         update_cache: true
         cache_valid_time: 3600
-        lock_timeout: 120
+        lock_timeout: 600
         auto_install_module_deps: false
         policy_rc_d: 101
       when: ansible_facts['os_family'] == 'Debian'
@@ -29,7 +29,7 @@
       ansible.builtin.dnf:
         name: nginx
         state: present
-        lock_timeout: 120
+        lock_timeout: 600
       when: ansible_facts['os_family'] == 'RedHat'
 
     - name: Configure the installed webserver

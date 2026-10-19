@@ -12,6 +12,7 @@
     # Use the virtual environment that holds the Azure SDK, not the system Python.
     ansible_python_interpreter: "{{ ansible_playbook_python }}"
     azure_required_vars: [azure_subscription_id, azure_tags, azure_targets]
+    azure_required_key_files: [azure_admin_public_key_file, azure_automation_public_key_file]
     automation_public_key: "{{ lookup('ansible.builtin.file', azure_automation_public_key_file) }}"
     # The same file you would paste into the portal, with its quoted placeholder
     # replaced by the key as a JSON string, which is valid YAML whatever the key's comment holds.
@@ -25,14 +26,6 @@
   tasks:
     - name: Check the variables
       ansible.builtin.import_tasks: tasks-preflight.yml
-
-    - name: Accept only a single-line public key
-      ansible.builtin.assert:
-        that:
-          - automation_public_key is match('^(ssh-rsa|ssh-ed25519|ecdsa-sha2-nistp[0-9]+) [A-Za-z0-9+/=]+( .*)?$')
-          - "'PRIVATE KEY' not in automation_public_key"
-        fail_msg: azure_automation_public_key_file must be the automation key's .pub file.
-        quiet: true
 
     - name: Keep svc_ansible for automation only
       ansible.builtin.assert:
@@ -69,7 +62,14 @@
       loop_control:
         label: "{{ item.name }}"
 
-    - name: Target VMs with the onboarding cloud-init
+    - name: Check the target VMs that already exist
+      ansible.builtin.import_tasks: tasks-existing-vms.yml
+      vars:
+        azure_planned_vms: "{{ azure_targets }}"
+
+    # Each VM takes a minute or more to create, so start them all and then wait for each.
+    # While it waits, Ansible prints "FAILED - RETRYING" lines; they only mean "not yet".
+    - name: Target VMs with the onboarding cloud-init, all together
       azure.azcollection.azure_rm_virtualmachine:
         resource_group: "{{ azure_resource_group }}"
         name: "{{ item.name }}"
@@ -82,13 +82,41 @@
         network_interface_names:
           - "nic-{{ item.name }}"
         image: "{{ item.image }}"
+        # Marketplace images with a plan, such as Rocky Linux, need it here, and the
+        # plan's terms accepted once per subscription (chapter 13).
+        plan: "{{ item.plan | default(omit) }}"
         managed_disk_type: StandardSSD_LRS
         # Azure refuses an OS disk smaller than its image, and Red Hat's RHEL 9
         # images are 64 GB. A target's own os_disk_size_gb chooses another size.
-        os_disk_size_gb: "{{ item.os_disk_size_gb | default(64 if item.image.publisher | lower == 'redhat' else 40) }}"
+        os_disk_size_gb: >-
+          {{ item.os_disk_size_gb
+             | default(64 if item.image.publisher | default('') | lower == 'redhat' else 40) }}
         os_disk_delete_option: Delete
         custom_data: "{{ cloud_init_data }}"
         tags: "{{ azure_tags }}"
       loop: "{{ azure_targets }}"
       loop_control:
         label: "{{ item.name }}"
+      async: 1800
+      poll: 0
+      register: azure_target_jobs
+      changed_when: false
+
+    - name: Wait for each target VM; a failed one shows Azure's reason
+      ansible.builtin.async_status:
+        jid: "{{ item.ansible_job_id }}"
+      loop: "{{ azure_target_jobs.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      register: azure_target_job
+      until: azure_target_job.finished
+      retries: 120
+      delay: 15
+
+    - name: Remove the finished jobs' results from ~/.ansible_async
+      ansible.builtin.async_status:
+        jid: "{{ item.ansible_job_id }}"
+        mode: cleanup
+      loop: "{{ azure_target_jobs.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"

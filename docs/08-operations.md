@@ -113,8 +113,12 @@ maintenance scope and retry behavior. Check that the VM will actually be
 running, that another task cannot overlap it, and that credentials remain
 valid. Test the task manually under the service account first.
 
-Start with an audit or connectivity check. Schedule patching only after its
-recovery and application checks work. A missed schedule should not silently
+Start with an audit or connectivity check. On a controller updated from
+`v1.5.0` or `v1.6.x`, schedule the per-system STIG templates, such as
+**RHEL 9 · STIG audit**, rather than the old ones, which
+[`--remove-replaced`](03-controller.md#update-a-controller-to-a-newer-guide-release)
+removes once nothing runs them. Schedule patching only after its recovery and
+application checks work. A missed schedule should not silently
 reboot a target outside the intended maintenance window.
 
 The example controller permits one application task at a time. Increase

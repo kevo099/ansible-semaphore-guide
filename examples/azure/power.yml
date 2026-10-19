@@ -29,13 +29,38 @@
         fail_msg: Pass -e azure_power=deallocated or -e azure_power=running.
         quiet: true
 
-    - name: Deallocate or start each VM
+    # Change every VM at once, then wait for each before reading the state back.
+    # While it waits, Ansible prints "FAILED - RETRYING" lines; they only mean "not yet".
+    - name: Deallocate or start each VM, all together
       azure.azcollection.azure_rm_virtualmachine:
         resource_group: "{{ azure_resource_group }}"
         name: "{{ item }}"
         allocated: "{{ azure_power == 'running' }}"
         started: "{{ azure_power == 'running' }}"
       loop: "{{ lab_vm_names }}"
+      async: 1800
+      poll: 0
+      register: azure_power_jobs
+      changed_when: false
+
+    - name: Wait for each VM; a failed one shows Azure's reason
+      ansible.builtin.async_status:
+        jid: "{{ item.ansible_job_id }}"
+      loop: "{{ azure_power_jobs.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      register: azure_power_job
+      until: azure_power_job.finished
+      retries: 120
+      delay: 15
+
+    - name: Remove the finished jobs' results from ~/.ansible_async
+      ansible.builtin.async_status:
+        jid: "{{ item.ansible_job_id }}"
+        mode: cleanup
+      loop: "{{ azure_power_jobs.results }}"
+      loop_control:
+        label: "{{ item.item }}"
 
     - name: Read the power state Azure reports
       azure.azcollection.azure_rm_virtualmachine_info:

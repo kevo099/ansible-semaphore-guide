@@ -45,9 +45,8 @@ to browse to its address. **Where: the controller, from the repository root.**
 sudo bash scripts/expose-semaphore.sh --mode https
 ```
 
-The script works on both installation paths. The Enterprise Linux installer
-can also do it in the same run with `--expose https`; the Ubuntu installer has
-no such option.
+The script works on both installation paths, and either installer can also do
+it in the same run with `--expose https` (or `--expose http`).
 
 It installs nginx with a locally generated self-signed certificate on port
 443, proxies to the still loopback-only Semaphore, opens 443 in the host
@@ -64,9 +63,12 @@ SELinux boolean `httpd_can_network_connect` so nginx can reach Semaphore.
 
 The certificate and the printed URL name the address the VM uses for its
 default route. On a cloud VM behind NAT, that is the private address. There,
-run the script yourself with `--address` and the public IP address or DNS name
-you browse to; the installer's `--expose` cannot pass one. The certificate is
-created only once, so to give it a new address later, remove it first:
+pass `--address` with the public IP address or DNS name you browse to, either
+to this script or to the installer together with `--expose`. On an Azure
+controller made by the guide's playbooks, open port 443 with
+`azure_controller.https_cidr`, as [chapter 13](../13-azure.md#optional-do-run-the-controller-in-azure)
+shows; the playbook removes a rule you add by hand. The certificate is created
+only once, so to give it a new address later, remove it first:
 
 ```bash
 sudo rm /etc/semaphore/tls/semaphore.key /etc/semaphore/tls/semaphore.crt
@@ -76,6 +78,15 @@ sudo bash scripts/expose-semaphore.sh --mode https \
 
 `--mode http` instead binds Semaphore itself to every address on port 3000 in
 plain text. Use it only on a network you fully control.
+
+Semaphore restarts only when its bind address changes, that is, when you switch
+to or from `--mode http`, or when it still listens on an earlier address, for
+example after a run that stopped before its restart. Running `--mode https`
+again, or switching between https and loopback, leaves Semaphore and its running
+tasks alone and prints `Semaphore already listens on 127.0.0.1; it was not
+restarted.` A restart stops every running task, so while a task runs, the script
+refuses such a switch before changing anything; run it again once the task has
+finished, or add `--force` to restart anyway.
 
 **Check:** from another machine, `curl -k https://VM_ADDRESS/api/ping` prints
 `pong`, while `curl http://VM_ADDRESS:3000/` and `curl http://VM_ADDRESS/`
