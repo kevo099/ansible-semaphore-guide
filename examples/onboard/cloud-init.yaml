@@ -41,7 +41,8 @@ write_files:
 
 # Package names differ by family, so install them here rather than in packages:.
 # Every check reports to the console log (/var/log/cloud-init-output.log), and
-# any failure makes cloud-init report an error.
+# any failure makes cloud-init report an error. A successful run ends with the
+# add-target.sh line that adds this VM on the controller.
 runcmd:
   - - /bin/bash
     - -c
@@ -54,19 +55,46 @@ runcmd:
       if ! [ -s "$keys" ] || ! ssh-keygen -lf "$keys" >/dev/null 2>&1; then
         problem "svc_ansible has no valid public key; was the placeholder replaced?"
       fi
+      # apt-get update takes the package lists' lock, which DPkg::Lock::Timeout does not
+      # cover, and apt-daily can hold it for a while after boot, so retry for about five minutes.
+      apt_update() {
+        local attempt
+        for attempt in {1..30}; do
+          apt-get update -q && return
+          if [ "$attempt" -lt 30 ]; then
+            echo "onboard: apt-get update failed; another apt process may hold its lock. Retrying in 10 seconds."
+            sleep 10
+          fi
+        done
+        echo "onboard: apt-get update failed 30 times, 10 seconds apart"
+        return 1
+      }
+      # Install the Python bindings only where missing: images usually ship them, and
+      # dnf would otherwise fetch repository metadata, and fail without outbound access.
+      missing=()
       if command -v apt-get >/dev/null; then
-        export DEBIAN_FRONTEND=noninteractive
-        apt-get -o DPkg::Lock::Timeout=600 install -y -q python3 python3-apt ||
-          { apt-get -o DPkg::Lock::Timeout=600 update -q &&
-            apt-get -o DPkg::Lock::Timeout=600 install -y -q python3 python3-apt; } ||
-          problem "python3-apt installation failed"
+        for pkg in python3 python3-apt; do
+          dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q 'install ok installed' || missing+=("$pkg")
+        done
+        if [ "${#missing[@]}" -gt 0 ]; then
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get -o DPkg::Lock::Timeout=600 install -y -q "${missing[@]}" ||
+            { apt_update && apt-get -o DPkg::Lock::Timeout=600 install -y -q "${missing[@]}"; } ||
+            problem "python3-apt installation failed"
+        fi
         # ssh.service starts on the first connection; sshd -t needs its runtime directory.
         install -d -m 0755 /run/sshd
         ssh_unit=ssh
+        inventory_group=ubuntu
       else
-        dnf -y -q install python3 python3-dnf python3-libselinux ||
-          problem "python3-dnf installation failed"
+        for pkg in python3 python3-dnf python3-libselinux; do
+          rpm -q "$pkg" >/dev/null 2>&1 || missing+=("$pkg")
+        done
+        if [ "${#missing[@]}" -gt 0 ]; then
+          dnf -y -q install "${missing[@]}" || problem "python3-dnf installation failed"
+        fi
         ssh_unit=sshd
+        inventory_group=enterprise_linux
       fi
       if ! visudo -cq; then
         rm -f /etc/sudoers.d/90-ansible-lab
@@ -149,6 +177,52 @@ runcmd:
         done
       done < <(grep -v '^[[:space:]]*#' "$keys" 2>/dev/null)
       [ -n "$usable" ] || problem "no authorized key is of a type and size this SSH server accepts; use an RSA 4096 key"
+      # sshd refuses an account that DenyUsers, AllowUsers, DenyGroups or AllowGroups
+      # keeps out; onboard-linux.sh explains this function, which is the same there.
+      sshd_access() {
+        awk -v account="$2" -v groups="$3" '
+          function verdict(keyword, value,   name, ats, i, n, list) {
+            if (keyword ~ /groups$/) {
+              if (value ~ /[*? ]/) return "unsure"
+              n = split(groups, list, " ")
+              for (i = 1; i <= n; i++) if (list[i] == value) return "yes"
+              return "no"
+            }
+            ats = value
+            if (gsub(/@/, "", ats) > 1) return "unsure"
+            name = value
+            sub(/@.*/, "", name)
+            if (name ~ /[*?]/) return "unsure"
+            if (name != account) return "no"
+            return name == value ? "yes" : "unsure"
+          }
+          $1 ~ /^(deny|allow)(users|groups)$/ {
+            value = substr($0, length($1) + 2)
+            result = verdict($1, value)
+            listed[$1] = 1
+            if (result == "yes" && !($1 in matched)) matched[$1] = value
+            if (result == "unsure") unsure[$1, ++count[$1]] = value
+          }
+          END {
+            split("denyusers allowusers denygroups allowgroups", keywords, " ")
+            split("DenyUsers AllowUsers DenyGroups AllowGroups", names, " ")
+            for (k = 1; k <= 4; k++) {
+              keyword = keywords[k]
+              if (!(keyword in listed) || (keyword ~ /^allow/ && keyword in matched)) continue
+              if (keyword == "denyusers" && keyword in matched) print "refused: DenyUsers lists " account
+              if (keyword == "denygroups" && keyword in matched) print "refused: DenyGroups lists " account "\047s group " matched[keyword]
+              for (i = 1; i <= count[keyword]; i++) print "unsure: " names[k] " " unsure[keyword, i]
+              if (keyword == "allowusers" && !count[keyword]) print "refused: AllowUsers does not list " account
+              if (keyword == "allowgroups" && !count[keyword]) print "refused: AllowGroups lists none of " account "\047s groups (" groups ")"
+            }
+          }' <<<"$1"
+      }
+      while IFS= read -r line; do
+        case "$line" in
+          refused:*) problem "${line#refused: }; sshd would refuse the account, so allow svc_ansible there" ;;
+          unsure:*) echo "onboard: warning: this check cannot evaluate \"${line#unsure: }\"; make sure sshd lets svc_ansible in" ;;
+        esac
+      done <<<"$(sshd_access "$policy" svc_ansible "$(id -nG svc_ansible 2>/dev/null)")"
       # Reload a running server; on Ubuntu an active ssh.socket is enough. Otherwise start it.
       if systemctl is-active --quiet "$ssh_unit"; then
         systemctl reload "$ssh_unit" || problem "SSH did not reload"
@@ -162,3 +236,17 @@ runcmd:
         exit 1
       fi
       echo "onboard: svc_ansible is ready; set its sudo password next"
+      # The controller command that adds this VM, from values read here and nothing
+      # else, so it is a single add-target.sh line you can check before running it.
+      # Without the controller's address, only a single global IPv4 address is used.
+      inventory_name=$(hostname -s 2>/dev/null)
+      [[ $inventory_name =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || inventory_name=NAME
+      mapfile -t global_addresses < <(ip -o -4 addr show scope global 2>/dev/null | awk '{sub(/\/.*/, "", $4); print $4}')
+      target_address=ADDRESS
+      if [ "${#global_addresses[@]}" -eq 1 ] && [[ ${global_addresses[0]} =~ ^[0-9A-Fa-f.:]+$ ]]; then
+        target_address=${global_addresses[0]}
+      fi
+      rsa_fingerprint=$(ssh-keygen -lf /etc/ssh/ssh_host_rsa_key.pub 2>/dev/null | awk '{print $2}')
+      [[ $rsa_fingerprint =~ ^SHA256:[A-Za-z0-9+/]+$ ]] || rsa_fingerprint=FINGERPRINT
+      echo "onboard: then add it on the controller, in the guide checkout (replace NAME, ADDRESS or FINGERPRINT if shown, and add --lab-dir DIR for a lab folder other than /opt/ansible-lab):"
+      echo "onboard:   sudo bash scripts/add-target.sh --name $inventory_name --address $target_address --group $inventory_group --fingerprint $rsa_fingerprint"

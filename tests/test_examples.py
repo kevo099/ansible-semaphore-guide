@@ -151,18 +151,26 @@ class BootstrapKeyPathTests(unittest.TestCase):
     """bootstrap-existing-vm.yml must read sshd's AuthorizedKeysFile the way Ansible renders it.
 
     Plain Jinja and ansible-core treat backslash escapes in this expression differently, so
-    the expression runs through ansible-playbook itself.
+    the expression runs through ansible-playbook itself. CI runs these tests before it
+    installs any collection, so they use ansible-core alone, with an empty collections path:
+    each case writes its result to a file, because the JSON stdout callback is in ansible.posix.
     """
 
+    HOME = "/home/svc_ansible"
     CASES = [
-        (["authorizedkeysfile .ssh/authorized_keys"], ["/home/svc_ansible/.ssh/authorized_keys"]),
-        (["authorizedkeysfile .ssh/authorized_keys .ssh/authorized_keys2"],
+        (HOME, ["authorizedkeysfile .ssh/authorized_keys"], ["/home/svc_ansible/.ssh/authorized_keys"]),
+        (HOME, ["authorizedkeysfile .ssh/authorized_keys .ssh/authorized_keys2"],
          ["/home/svc_ansible/.ssh/authorized_keys", "/home/svc_ansible/.ssh/authorized_keys2"]),
-        (["authorizedkeysfile %h/.ssh/authorized_keys"], ["/home/svc_ansible/.ssh/authorized_keys"]),
-        (["authorizedkeysfile /etc/ssh/keys/%u"], ["/etc/ssh/keys/svc_ansible"]),
+        (HOME, ["authorizedkeysfile %h/.ssh/authorized_keys"], ["/home/svc_ansible/.ssh/authorized_keys"]),
+        (HOME, ["authorizedkeysfile /home/%u/.ssh/authorized_keys"], ["/home/svc_ansible/.ssh/authorized_keys"]),
+        (HOME, ["authorizedkeysfile /etc/ssh/keys/%u /etc/ssh/keys/%U"],
+         ["/etc/ssh/keys/svc_ansible", "/etc/ssh/keys/1001"]),
+        # The account's real home from getent, which need not be under /home.
+        ("/var/lib/svc_ansible", ["authorizedkeysfile .ssh/authorized_keys %h/.ssh/authorized_keys2"],
+         ["/var/lib/svc_ansible/.ssh/authorized_keys", "/var/lib/svc_ansible/.ssh/authorized_keys2"]),
         # No AuthorizedKeysFile line reads as "none", which is not the account's file, so the
         # playbook's check refuses the policy.
-        (["port 22"], ["/home/svc_ansible/none"]),
+        (HOME, ["port 22"], ["/home/svc_ansible/none"]),
     ]
 
     def test_relative_token_and_absolute_paths_resolve(self):
@@ -173,22 +181,30 @@ class BootstrapKeyPathTests(unittest.TestCase):
                 if "bootstrap_key_paths" in inner.get("vars", {}):
                     expression = inner["vars"]["bootstrap_key_paths"]
         self.assertIsNotNone(expression, "bootstrap_key_paths not found")
-        tasks = [{"name": f"case {index}", "ansible.builtin.debug": {"msg": "{{ bootstrap_key_paths }}"},
-                  "vars": {"bootstrap_sshd_policy": {"stdout_lines": lines}, "bootstrap_key_paths": expression}}
-                 for index, (lines, _expected) in enumerate(self.CASES)]
         with tempfile.TemporaryDirectory() as work:
+            tasks = [{"name": f"case {index}",
+                      "ansible.builtin.copy": {"content": "{{ bootstrap_key_paths | to_json }}",
+                                               "dest": f"{work}/case{index}.json", "mode": "0600"},
+                      "vars": {"bootstrap_sshd_policy": {"stdout_lines": lines}, "bootstrap_home": home,
+                               "bootstrap_uid": "1001", "bootstrap_key_paths": expression}}
+                     for index, (home, lines, _expected) in enumerate(self.CASES)]
             playbook = Path(work) / "paths.yml"
-            playbook.write_text(yaml.safe_dump([{"hosts": "localhost", "gather_facts": False, "tasks": tasks}]))
+            playbook.write_text(yaml.safe_dump([{
+                "hosts": "localhost", "gather_facts": False, "tasks": tasks,
+                "vars": {"ansible_python_interpreter": "{{ ansible_playbook_python }}"}}]))
             config = Path(work) / "ansible.cfg"
             config.write_text("[defaults]\n")
-            environment = dict(os.environ, ANSIBLE_STDOUT_CALLBACK="json", ANSIBLE_LOCALHOST_WARNING="False",
-                               ANSIBLE_INVENTORY_UNPARSED_WARNING="False", ANSIBLE_CONFIG=str(config))
+            collections = Path(work) / "collections"
+            collections.mkdir()
+            environment = dict(os.environ, ANSIBLE_LOCALHOST_WARNING="False",
+                               ANSIBLE_INVENTORY_UNPARSED_WARNING="False", ANSIBLE_CONFIG=str(config),
+                               ANSIBLE_COLLECTIONS_PATH=str(collections), ANSIBLE_COLLECTIONS_SCAN_SYS_PATH="False")
             result = subprocess.run(["ansible-playbook", "-i", "localhost,", "-c", "local", str(playbook)],
                                     capture_output=True, text=True, timeout=120, cwd=work, env=environment)
-        self.assertEqual(result.returncode, 0, result.stdout[-2000:] + result.stderr[-2000:])
-        report = json.loads(result.stdout[result.stdout.index("{"):])
-        rendered = [task["hosts"]["localhost"]["msg"] for task in report["plays"][0]["tasks"]]
-        self.assertEqual(rendered, [expected for _lines, expected in self.CASES])
+            self.assertEqual(result.returncode, 0, result.stdout[-2000:] + result.stderr[-2000:])
+            rendered = [json.loads((Path(work) / f"case{index}.json").read_text())
+                        for index in range(len(self.CASES))]
+        self.assertEqual(rendered, [expected for _home, _lines, expected in self.CASES])
 
 
 if __name__ == "__main__":
