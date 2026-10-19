@@ -110,7 +110,7 @@ password_encryption = 'scram-sha-256'
 EOF
 chmod 0644 /etc/postgresql/16/main/conf.d/ansible-guide.conf
 # Prepend rules specific to this database and role; retain distribution defaults.
-python3.12 - <<'PY'
+python3.12 -I - <<'PY'
 from pathlib import Path
 p=Path('/etc/postgresql/16/main/pg_hba.conf')
 original=p.read_text()

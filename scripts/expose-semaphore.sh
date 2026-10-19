@@ -58,15 +58,17 @@ marker=/etc/semaphore/exposure
 tls_dir=/etc/semaphore/tls
 
 current_interface() {
-  python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("interface", ""))' /etc/semaphore/config.json
+  python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1])).get("interface", ""))' /etc/semaphore/config.json
 }
 
 # True when Semaphore listens on port 3000 at exactly $1, or listens nowhere (stopped).
 # A run interrupted before its restart, or a hand edit, leaves config.json ahead of it.
+# Semaphore serves the any-address from one dual-stack socket, which ss shows as *;
+# [::] is an IPv6-only socket, which does not serve IPv4.
 running_with() {
   local live
   live=$(ss -H -lnt 'sport = :3000' | awk '{h = $4; sub(/:3000$/, "", h); gsub(/[][]/, "", h); print h}')
-  [[ -z "$live" || "$live" == "$1" ]]
+  [[ -z "$live" || "$live" == "$1" || ( "$1" == "$any_address" && "$live" == '*' ) ]]
 }
 
 # A restart stops every task Semaphore runs, which can leave a host half changed.
@@ -88,7 +90,7 @@ set_interface() {
     return
   fi
   refuse_while_tasks_run
-  python3 - "$1" <<'PY'
+  python3 -I - "$1" <<'PY'
 import json, sys
 from pathlib import Path
 p = Path('/etc/semaphore/config.json')
@@ -164,7 +166,7 @@ primary_address() {
     exit 1
   }
   if [[ "$address" =~ ^[0-9.]+$ || "$address" == *:* ]]; then
-    if [[ "$address" == *%* ]] || ! python3 -c 'import ipaddress, sys; ipaddress.ip_address(sys.argv[1])' "$address" 2>/dev/null; then
+    if [[ "$address" == *%* ]] || ! python3 -I -c 'import ipaddress, sys; ipaddress.ip_address(sys.argv[1])' "$address" 2>/dev/null; then
       echo "Not a valid IP address: $address. Pass an address without a %zone suffix, or a DNS name."; exit 1
     fi
     san="IP:$address"

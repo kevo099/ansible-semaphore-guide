@@ -130,12 +130,14 @@
         state: present
         update_cache: true
         cache_valid_time: 3600
+        lock_timeout: 600
       when: ansible_facts['os_family'] == 'Debian'
 
     - name: Ensure the Enterprise Linux prerequisites
       ansible.builtin.dnf:
         name: [python3, python3-dnf, python3-libselinux, sudo, openssh-server]
         state: present
+        lock_timeout: 600
       when: ansible_facts['os_family'] == 'RedHat'
 
     - name: Create or complete the automation account

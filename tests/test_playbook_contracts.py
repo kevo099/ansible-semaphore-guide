@@ -4,8 +4,14 @@ import ast
 import datetime
 import importlib.util
 import json
+import os
 from pathlib import Path
 import re
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
 import unittest
 
 import jinja2
@@ -380,14 +386,212 @@ class PackageLockTests(unittest.TestCase):
             text = (ROOT / path).read_text()
             onboarding |= {int(seconds) for seconds in re.findall(r"DPkg::Lock::Timeout=(\d+)", text)}
         (timeout,) = onboarding
-        modules = set()
-        for path in sorted((ROOT / "playbooks").rglob("*.yml")):
+        modules, files = set(), set()
+        # The lessons, and the examples, such as the bootstrap playbook that onboards a VM.
+        for path in sorted((ROOT / "playbooks").rglob("*.yml")) + sorted((ROOT / "examples").rglob("*.yml")):
             for task in package_tasks(yaml.safe_load(path.read_text())):
                 module = next(key for key in task if key in ("ansible.builtin.apt", "ansible.builtin.dnf"))
                 modules.add(module)
+                files.add(str(path.relative_to(ROOT)))
                 with self.subTest(path=str(path.relative_to(ROOT)), task=task["name"]):
                     self.assertEqual(task[module].get("lock_timeout"), timeout)
         self.assertEqual(modules, {"ansible.builtin.apt", "ansible.builtin.dnf"})
+        self.assertIn("examples/bootstrap-existing-vm.yml", files)
+
+
+class PreflightPathTests(unittest.TestCase):
+    """The preflight loads a vars file on the controller. A target reports its own facts, so they
+    may choose between the reviewed files and never name one."""
+
+    SYSTEMS = (("Ubuntu", "24.04", "24", "Debian"), ("AlmaLinux", "9.8", "9", "RedHat"),
+               ("Rocky", "9.6", "9", "RedHat"), ("RedHat", "9.8", "9", "RedHat"))
+    # What a taken-over target could report to load another host's variables, such as its sudo password.
+    CRAFTED = "../../inventories/host_vars/lab-alma"
+
+    def facts(self, distribution, version, major, family):
+        return {"distribution": distribution, "distribution_version": version,
+                "distribution_major_version": major, "os_family": family}
+
+    def accepted(self, facts):
+        task = named(tasks("playbooks/tasks/preflight.yml"), "Reject operating systems outside this lesson")
+        return native("{{ " + task["ansible.builtin.assert"]["that"][0] + " }}", ansible_facts=facts)
+
+    def loaded(self, facts):
+        task = named(tasks("playbooks/tasks/preflight.yml"), "Load the reviewed names for this OS family")
+        template = jinja2.Environment(undefined=jinja2.StrictUndefined).from_string(
+            task["ansible.builtin.include_vars"]["file"])
+        return template.render(playbook_dir="/lab/playbooks", ansible_facts=facts)
+
+    def test_each_supported_system_loads_its_own_family_file(self):
+        for system in self.SYSTEMS:
+            with self.subTest(system=system[0]):
+                self.assertIs(self.accepted(self.facts(*system)), True)
+                self.assertEqual(self.loaded(self.facts(*system)), f"/lab/playbooks/vars/{system[3]}.yml")
+                self.assertTrue((ROOT / "playbooks" / "vars" / f"{system[3]}.yml").is_file())
+
+    def test_a_family_that_does_not_match_the_distribution_is_refused(self):
+        for distribution, version, major, family in self.SYSTEMS:
+            for other in sorted({"Debian", "RedHat", "debian", self.CRAFTED} - {family}):
+                with self.subTest(distribution=distribution, family=other):
+                    self.assertIs(self.accepted(self.facts(distribution, version, major, other)), False)
+
+    def test_no_string_the_target_reports_becomes_part_of_the_path(self):
+        task = named(tasks("playbooks/tasks/preflight.yml"), "Load the reviewed names for this OS family")
+        self.assertNotIn("os_family", task["ansible.builtin.include_vars"]["file"])
+        for distribution in ("Ubuntu", "AlmaLinux", self.CRAFTED, ""):
+            with self.subTest(distribution=distribution):
+                path = self.loaded(self.facts(distribution, self.CRAFTED, self.CRAFTED, self.CRAFTED))
+                self.assertIn(path, {"/lab/playbooks/vars/Debian.yml", "/lab/playbooks/vars/RedHat.yml"})
+
+
+# Runs in place of a target's interpreter: it runs each module with the test's Python, then
+# reports the facts in the file it is given instead of the module's own.
+REPORT_FACTS = """import json
+import sys
+
+text = sys.stdin.read()
+try:
+    result = json.loads(text)
+except ValueError:
+    result = None
+if isinstance(result, dict) and "ansible_os_family" in result.get("ansible_facts", {}):
+    with open(sys.argv[1]) as stream:
+        result["ansible_facts"].update(json.load(stream))
+    text = json.dumps(result)
+sys.stdout.write(text)
+"""
+
+
+@unittest.skipUnless(shutil.which("ansible-playbook") and os.access("/usr/bin/python3", os.X_OK),
+                     "needs ansible-playbook, as CI installs it, and /usr/bin/python3")
+class ReportedFactsTests(unittest.TestCase):
+    """ping.yml and its preflight, run by ansible-playbook against a stand-in target.
+
+    The target reports the facts each test gives it, as one whose root or svc_ansible account
+    was taken over could, and its package-binding check finds stand-in apt and dnf modules.
+    Nothing contacts a host.
+    """
+
+    UBUNTU = {"ansible_distribution": "Ubuntu", "ansible_distribution_version": "24.04",
+              "ansible_distribution_major_version": "24", "ansible_os_family": "Debian",
+              "ansible_service_mgr": "systemd"}
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.work = Path(directory.name)
+        (self.work / "stubs").mkdir()
+        for module in ("apt", "dnf"):
+            (self.work / "stubs" / f"{module}.py").write_text("")
+        (self.work / "report.py").write_text(REPORT_FACTS)
+        python, report, facts = (shlex.quote(str(path)) for path in
+                                 (sys.executable, self.work / "report.py", self.work / "facts.json"))
+        interpreter = self.work / "python"
+        interpreter.write_text(f"#!/bin/bash\nset -o pipefail\nPYTHONPATH={shlex.quote(str(self.work / 'stubs'))}"
+                               f' {python} "$@" | {python} -I {report} {facts}\n')
+        interpreter.chmod(0o755)
+        (self.work / "inventory.ini").write_text(
+            f"[ubuntu]\nlab-ubuntu ansible_host=ubuntu.example.test ansible_connection=local"
+            f" ansible_python_interpreter={interpreter}\n\n[lab:children]\nubuntu\n")
+        # Another host's variables, which only the inventory may give to lab-alma.
+        (self.work / "host_vars").mkdir()
+        (self.work / "host_vars" / "lab-alma.yml").write_text("ansible_host: alma.example.test\n")
+        (self.work / "collections").mkdir()
+
+    def ping(self, **facts):
+        (self.work / "facts.json").write_text(json.dumps(dict(self.UBUNTU, **facts)))
+        environment = dict(os.environ, ANSIBLE_CONFIG=str(ROOT / "ansible.cfg"),
+                           ANSIBLE_COLLECTIONS_PATH=str(self.work / "collections"),
+                           ANSIBLE_COLLECTIONS_SCAN_SYS_PATH="False")
+        return subprocess.run(["ansible-playbook", "-i", str(self.work / "inventory.ini"),
+                               str(ROOT / "playbooks" / "ping.yml"), "--limit", "lab-ubuntu"],
+                              capture_output=True, text=True, timeout=180, cwd=self.work, env=environment)
+
+    def test_a_target_that_reports_its_system_passes(self):
+        result = self.ping()
+        self.assertEqual(result.returncode, 0, result.stdout[-3000:] + result.stderr[-2000:])
+        self.assertIn("lab-ubuntu (ubuntu.example.test) runs Ubuntu 24.04.", result.stdout)
+
+    def test_a_crafted_os_family_stops_before_any_file_is_loaded(self):
+        crafted = os.path.relpath(self.work / "host_vars" / "lab-alma", ROOT / "playbooks" / "vars")
+        result = self.ping(ansible_os_family=crafted)
+        self.assertNotEqual(result.returncode, 0, result.stdout[-3000:])
+        self.assertIn("TASK [Reject operating systems outside this lesson]", result.stdout)
+        self.assertIn(f"Found Ubuntu 24.04 of the {crafted} family using systemd.", result.stdout)
+        self.assertNotIn("TASK [Load the reviewed names for this OS family]", result.stdout)
+        self.assertNotIn("alma.example.test", result.stdout)
+
+
+class ControllerPathTests(unittest.TestCase):
+    """No file on the controller is named by what a target reports: its facts, or the output of
+    a task that ran on it.
+
+    The values the controller acts on are those of tasks delegated to it, include_vars, the
+    sources of copy and template, fetch destinations, vars_files and lookups, each with the
+    play variables, set_fact values and task variables it names. The playbooks read facts
+    only through ansible_facts. The preflight's include_vars, where a fact chooses between two
+    reviewed files, is the one exception; PreflightPathTests renders it.
+    """
+
+    TARGET = re.compile(r"\bansible_facts\b|\bhostvars\b")
+
+    def values(self, play):
+        """Yield each value the controller acts on, and each definition of a variable it names, by task."""
+        lookups = re.compile(r"(?:lookup|query)\([^)]*\)")
+        definitions = {name: [json.dumps(value)] for name, value in play.get("vars", {}).items()}
+        found = [("vars_files", json.dumps(play.get("vars_files", [])))]
+        found += [("play vars", call) for call in lookups.findall(json.dumps(play.get("vars")))]
+        for task in walk(play.get("pre_tasks", []) + play.get("tasks", []) + play.get("handlers", [])):
+            module = next((key for key in task if key.startswith("ansible.builtin.")), None)
+            arguments = task.get(module) if isinstance(task.get(module), dict) else {}
+            assigned = dict(task.get("vars", {}))
+            if module == "ansible.builtin.set_fact":
+                assigned.update(arguments)
+            for name, value in assigned.items():
+                definitions.setdefault(name, []).append(json.dumps(value))
+            on_controller = task.get("delegate_to") == "localhost"
+            if "register" in task:
+                # The output of a task that ran on a target is the target's word.
+                definitions.setdefault(task["register"], []).append(
+                    json.dumps([task.get(module), task.get("args")]) if on_controller else "ansible_facts")
+            if on_controller:
+                found.append((task["name"], json.dumps([task.get(module), task.get("args"), task.get("loop")])))
+            elif module == "ansible.builtin.include_vars":
+                found.append((task["name"], json.dumps(task[module])))
+            elif module in ("ansible.builtin.copy", "ansible.builtin.template") and not arguments.get("remote_src"):
+                found.append((task["name"], json.dumps(arguments.get("src"))))
+            elif module == "ansible.builtin.fetch":
+                found.append((task["name"], json.dumps(arguments["dest"])))
+            found += [(task["name"], call) for call in lookups.findall(json.dumps(task))]
+        for name, text in found:
+            seen, pending = set(), [text]
+            while pending:
+                current = pending.pop()
+                yield name, current
+                for word in set(re.findall(r"\b[a-z_]\w*", current)) - seen:
+                    seen.add(word)
+                    pending += definitions.get(word, [])
+
+    def test_only_the_preflight_lets_a_fact_choose_a_file(self):
+        named_by_target, checked = set(), set()
+        # The per-system STIG playbooks only import the shared ones.
+        for pattern in ("playbooks/*.yml", "examples/*.yml", "examples/semaphore/*.yml"):
+            for path in sorted(ROOT.glob(pattern)):
+                for play in yaml.safe_load(path.read_text()):
+                    # A play on the controller itself has no target.
+                    if play["hosts"] == "localhost":
+                        continue
+                    for name, text in self.values(play):
+                        checked.add(name)
+                        if self.TARGET.search(text):
+                            named_by_target.add(name)
+        self.assertEqual(named_by_target, {"Load the reviewed names for this OS family"})
+        # Among them the STIG evidence the controller fetches and reads, and the keys it measures.
+        for name in ("Fetch the results and report to the controller for phase {{ stig_phase }}",
+                     "Summarize the fetched XCCDF result on the controller",
+                     "Look for the local content file on the controller", "Measure each listed key on the controller",
+                     "vars_files", "play vars"):
+            self.assertIn(name, checked)
 
 
 class LabFolderTests(unittest.TestCase):

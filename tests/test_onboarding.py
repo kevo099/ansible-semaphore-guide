@@ -108,6 +108,9 @@ APT_GET = ('echo "apt-get $*" >>"$LOG"; n=0; [ -f "$LOG.n" ] && read -r n <"$LOG
 # The checks add-target.sh applies, read from the script so they cannot drift apart.
 CHECKS = dict(re.findall(r'\[\[ "\$(name|address|fingerprint)" =~ (\^\S+\$) \]\]', ADD_TARGET))
 GROUPS = re.findall(r'"\$group" == (\w+)', ADD_TARGET)
+# Names add-target.sh refuses with the inventory the installers seed: localhost, Ansible's
+# name for the controller, Ansible's own groups and the guide's.
+RESERVED_NAMES = ("localhost", "all", "ungrouped", "lab", "ubuntu", "enterprise_linux")
 
 
 class AddTargetLineMixin:
@@ -238,6 +241,33 @@ class SharedSettingsTests(unittest.TestCase):
             with self.subTest(function=name):
                 self.assertEqual(function(CLOUD_SCRIPT, name), function(ONBOARD, name))
 
+    def test_the_scripts_leave_out_every_name_add_target_refuses(self):
+        # Printed, such a name would be refused, and so would --name next to it, as a value
+        # given both ways; left out, the output asks for --name.
+        common = (ROOT / "scripts" / "controller-common.sh").read_text()
+        seeded = re.search(r"<<'INVENTORY'\n(.*?)^INVENTORY$", common, re.S | re.M)[1]
+        groups = {header.split(":")[0] for header in re.findall(r"^\[([^]]+)\]$", seeded, re.M)}
+        self.assertEqual(set(RESERVED_NAMES), {"localhost", "all", "ungrouped"} | groups)
+        for source, text in (("onboard-linux.sh", ONBOARD), ("cloud-init", CLOUD_SCRIPT)):
+            self.assertEqual(re.findall(r'case "?\$inventory_name"? in ([\w|]+)\) inventory_name= ;; esac', text),
+                             ["|".join(RESERVED_NAMES)], source)
+        with tempfile.TemporaryDirectory() as work:
+            lab = Path(work, "lab")
+            (lab / "inventories").mkdir(parents=True)
+            (lab / "inventories" / "lab.ini").write_text(seeded)
+            Path(work, "known_hosts").write_text("")
+            path = stand_ins(work, {"id": "echo 0"})
+            for name in RESERVED_NAMES:
+                with self.subTest(name=name):
+                    result = subprocess.run(
+                        [BASH, str(ROOT / "scripts" / "add-target.sh"), "--name", name, "--address", f"{TEST_NET}.12",
+                         "--group", "ubuntu", "--fingerprint", FINGERPRINT, "--lab-dir", str(lab),
+                         "--known-hosts", str(Path(work, "known_hosts"))],
+                        capture_output=True, text=True, env=dict(os.environ, PATH=path), timeout=60)
+                    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                    self.assertRegex(result.stdout, r"^\S+ is (the name Ansible gives the controller|also the name of"
+                                                    r" an inventory group); choose another name\.\n$")
+
 
 class CloudInitTests(AddTargetInfoMixin, unittest.TestCase):
     """The first-boot script, which runs unattended on every new VM."""
@@ -353,9 +383,11 @@ class CloudInitTests(AddTargetInfoMixin, unittest.TestCase):
                              fingerprint=None)
         self.assertInfoLines(self.final_lines([]), prefix="onboard: ", name="lab-alma", address=None,
                              group="enterprise_linux", fingerprint=FINGERPRINT)
-        # localhost is Ansible's name for the controller, which add-target.sh refuses.
-        self.assertInfoLines(self.final_lines([f"{TEST_NET}.12"], name="localhost"), prefix="onboard: ", name=None,
-                             address=f"{TEST_NET}.12", group="enterprise_linux", fingerprint=FINGERPRINT)
+        # Names add-target.sh refuses, such as the ubuntu an Ubuntu cloud image without metadata takes.
+        for name in RESERVED_NAMES:
+            with self.subTest(name=name):
+                self.assertInfoLines(self.final_lines([f"{TEST_NET}.12"], name=name), prefix="onboard: ", name=None,
+                                     address=f"{TEST_NET}.12", group="enterprise_linux", fingerprint=FINGERPRINT)
 
     def test_the_log_pasted_whole_adds_the_vm(self):
         # As sudo grep onboard /var/log/cloud-init-output.log shows it, with the ready message.
@@ -554,12 +586,13 @@ class OnboardScriptTests(AddTargetInfoMixin, unittest.TestCase):
              {"name": "lab-vm", "address": f"{TEST_NET}.10", "group": "ubuntu", "fingerprint": FINGERPRINT}),
             ("family=debian\n", "lab_vm!", f"{TEST_NET}.10 {TEST_NET}.11", "", "",
              {"name": None, "address": None, "group": "ubuntu", "fingerprint": None}),
-            # localhost is Ansible's name for the controller, which add-target.sh refuses.
-            ("family=el\n", "localhost", f"{TEST_NET}.12", "", FINGERPRINT,
-             {"name": None, "address": f"{TEST_NET}.12", "group": "enterprise_linux", "fingerprint": FINGERPRINT}),
+            # Names add-target.sh refuses, such as the ubuntu an Ubuntu cloud image without metadata takes.
+            *[("family=debian\n", name, f"{TEST_NET}.12", "", FINGERPRINT,
+               {"name": None, "address": f"{TEST_NET}.12", "group": "ubuntu", "fingerprint": FINGERPRINT})
+              for name in RESERVED_NAMES],
         ]
         for setup, name, addresses, source, fingerprint, expected in cases:
-            with self.subTest(setup=setup, addresses=addresses):
+            with self.subTest(setup=setup, name=name, addresses=addresses):
                 lines = self.closing_lines(setup, name, addresses, source, fingerprint)
                 # The block ends just before the result line.
                 self.assertInfoLines(lines[lines.index("Add this VM on the controller: in the guide's folder, run"):-1],

@@ -486,8 +486,10 @@ if [ -z "$target_address" ]; then
 fi
 rsa_fingerprint=$({ ssh-keygen -lf /etc/ssh/ssh_host_rsa_key.pub 2>/dev/null || true; } | awk '{print $2}')
 info=() options=()
-# localhost is Ansible's name for the controller, so it counts as unreadable here.
-if [[ "$inventory_name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ && "$inventory_name" != localhost ]]; then
+# add-target.sh refuses localhost, Ansible's name for the controller, and group names:
+# Ansible's all and ungrouped and the guide's own. They count as unreadable here.
+case "$inventory_name" in localhost|all|ungrouped|lab|ubuntu|enterprise_linux) inventory_name= ;; esac
+if [[ "$inventory_name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
   info+=("name=$inventory_name")
 else
   options+=("--name with the name the inventory should use")

@@ -165,12 +165,14 @@ class ExposureTests(unittest.TestCase):
         return self.config_file.read_text()
 
     def test_a_mode_that_keeps_the_bind_address_never_restarts_semaphore(self):
-        # Even while a task runs, since nothing needs a restart.
-        for interface, mode in (("127.0.0.1", "https"), ("127.0.0.1", "loopback"), (ANY, "http")):
-            with self.subTest(interface=interface, mode=mode):
+        # Even while a task runs, since nothing needs a restart. Semaphore serves the
+        # any-address from one dual-stack socket, which ss shows as *.
+        for interface, mode, live in (("127.0.0.1", "https", "127.0.0.1"), ("127.0.0.1", "loopback", "127.0.0.1"),
+                                      (ANY, "http", ANY), (ANY, "http", "*")):
+            with self.subTest(interface=interface, mode=mode, live=live):
                 self.log.write_text("")
                 original = self.set_interface(interface)
-                result = self.run_mode(mode, MOCK_TASK_RUNNING_FROM="1", MOCK_SS_LISTEN=interface)
+                result = self.run_mode(mode, MOCK_TASK_RUNNING_FROM="1", MOCK_SS_LISTEN=live)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertIn(f"Semaphore already listens on {interface}; it was not restarted.", result.stdout)
                 commands = self.commands()
@@ -182,10 +184,11 @@ class ExposureTests(unittest.TestCase):
 
     def test_a_process_still_on_the_old_address_is_restarted(self):
         # config.json already names the wanted address, but the running Semaphore
-        # listens on the old one, as after a run interrupted before its restart.
+        # listens on the old one, as after a run interrupted before its restart. An
+        # IPv6-only socket, which ss shows as [::], does not serve the IPv4 any-address.
         for interface, mode, live in (("127.0.0.1", "https", ANY), ("127.0.0.1", "loopback", ANY),
-                                      (ANY, "http", "127.0.0.1")):
-            with self.subTest(interface=interface, mode=mode):
+                                      ("127.0.0.1", "https", "*"), (ANY, "http", "127.0.0.1"), (ANY, "http", "[::]")):
+            with self.subTest(interface=interface, mode=mode, live=live):
                 self.log.write_text("")
                 self.set_interface(interface)
                 result = self.run_mode(mode, MOCK_SS_LISTEN=live)
