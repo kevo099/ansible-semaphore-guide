@@ -377,4 +377,24 @@ note "host keys to compare with ssh-keyscan from the controller:"
 for pub in /etc/ssh/ssh_host_*_key.pub; do
   ssh-keygen -lf "$pub" | awk '{print "  " $1, $2, $NF}'
 done
+# The controller command that adds this VM, from values read here and nothing
+# else, so it is a single add-target.sh line you can check before running it.
+inventory_group=enterprise_linux
+[ "$family" = debian ] && inventory_group=ubuntu
+inventory_name=$(hostname -s 2>/dev/null || true)
+[[ "$inventory_name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || inventory_name=NAME
+target_address=
+if [ -n "$CONTROLLER_ADDRESS" ]; then
+  target_address=$({ ip -o route get "$CONTROLLER_ADDRESS" 2>/dev/null || true; } \
+    | sed -n 's/.* src \([0-9A-Fa-f.:]*\).*/\1/p' | head -n 1)
+fi
+if [ -z "$target_address" ]; then
+  mapfile -t global_addresses < <(ip -o -4 addr show scope global 2>/dev/null | awk '{sub(/\/.*/, "", $4); print $4}')
+  [ "${#global_addresses[@]}" -eq 1 ] && target_address=${global_addresses[0]}
+fi
+[[ "$target_address" =~ ^[0-9A-Fa-f.:]+$ ]] || target_address=ADDRESS
+rsa_fingerprint=$({ ssh-keygen -lf /etc/ssh/ssh_host_rsa_key.pub 2>/dev/null || true; } | awk '{print $2}')
+[[ "$rsa_fingerprint" =~ ^SHA256:[A-Za-z0-9+/]+$ ]] || rsa_fingerprint=FINGERPRINT
+note "add it on the controller, in the guide's folder (replace NAME or ADDRESS if shown; add --lab-dir if yours differs):"
+note "  sudo bash scripts/add-target.sh --name $inventory_name --address $target_address --group $inventory_group --fingerprint $rsa_fingerprint"
 note "RESULT: OK"

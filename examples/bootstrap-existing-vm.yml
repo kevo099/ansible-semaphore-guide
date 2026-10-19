@@ -217,12 +217,14 @@
             fail_msg: Another SSH setting overrides the svc_ansible policy; resolve it before reloading SSH.
             quiet: true
           vars:
-            # AuthorizedKeysFile entries with their tokens resolved; relative ones are in the home.
+            # AuthorizedKeysFile entries with their tokens resolved; relative ones are in the
+            # home. A lookahead adds the home: in this expression ansible-core 2.21 passes a
+            # backreference to regex_replace as literal text, which broke every relative path.
             bootstrap_key_paths: >-
               {{ (bootstrap_sshd_policy.stdout_lines | select('match', '^authorizedkeysfile ')
                   | first | default('authorizedkeysfile none')).split()[1:]
                  | map('replace', '%h', '/home/svc_ansible') | map('replace', '%u', 'svc_ansible')
-                 | map('regex_replace', '^([^/])', '/home/svc_ansible/\\1') | list }}
+                 | map('regex_replace', '^(?=[^/])', '/home/svc_ansible/') | list }}
 
         - name: Schedule the SSH reload only after every check has passed
           ansible.builtin.debug:

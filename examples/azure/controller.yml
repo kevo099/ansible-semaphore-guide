@@ -79,12 +79,13 @@
         network_interface_names:
           - "nic-{{ azure_controller.name }}"
         image: "{{ azure_controller.image }}"
+        plan: "{{ azure_controller.plan | default(omit) }}"
         managed_disk_type: StandardSSD_LRS
         # Azure refuses an OS disk smaller than its image, and Red Hat's RHEL 9
         # images are 64 GB. azure_controller.os_disk_size_gb chooses another size.
         os_disk_size_gb: >-
           {{ azure_controller.os_disk_size_gb
-             | default(64 if azure_controller.image.publisher | lower == 'redhat' else 32) }}
+             | default(64 if azure_controller.image.publisher | default('') | lower == 'redhat' else 32) }}
         os_disk_delete_option: Delete
         tags: "{{ azure_tags }}"
 

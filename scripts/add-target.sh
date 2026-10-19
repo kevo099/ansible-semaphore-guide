@@ -9,6 +9,7 @@
 # The script scans the target, compares every scanned key against that fingerprint, and
 # keeps only the matching key. It adds the inventory line first and records that key
 # only after the edit succeeds, so a mismatch or a missing group section changes nothing.
+# Running it again for a host it added, with the same values, changes nothing.
 set -euo pipefail
 umask 077
 
@@ -32,19 +33,44 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -n "$name" && -n "$address" && -n "$group" && -n "$fingerprint" ]] || { usage; exit 2; }
 [[ $(id -u) == 0 ]] || { echo 'Run with sudo: the service known-hosts file is root-owned.'; exit 1; }
+# The values end up in the inventory and in ssh-keyscan's arguments: plain tokens only.
 [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo 'Inventory name must be a plain hostname-like token.'; exit 1; }
+[[ "$address" =~ ^[A-Za-z0-9:][A-Za-z0-9.:-]*$ ]] || { echo 'Address must be an IP address or a DNS name.'; exit 1; }
 [[ "$group" == ubuntu || "$group" == enterprise_linux ]] || { echo 'Group must be ubuntu or enterprise_linux.'; exit 1; }
-[[ "$fingerprint" == SHA256:* ]] || { echo 'Fingerprint must be the SHA256:... form printed by ssh-keygen -l.'; exit 1; }
+[[ "$fingerprint" =~ ^SHA256:[A-Za-z0-9+/]+$ ]] || { echo 'Fingerprint must be the SHA256:... form printed by ssh-keygen -l.'; exit 1; }
 inventory="$lab_dir/inventories/lab.ini"
 [[ -f "$inventory" && -f "$known_hosts" ]] || { echo 'Missing inventory or known-hosts file.'; exit 1; }
-# Compare the whole first field as text: a dot in the name is not a wildcard, and
-# names that look like numbers (10 and 010) stay different.
-if awk -v n="$name" '$1 == (n "") {found = 1} END {exit !found}' "$inventory"; then
-  echo "Inventory already contains $name; edit it by hand instead."; exit 1
+# A host named like a group, such as lab, would make --limit lab select that host alone.
+if [[ "$name" == all || "$name" == ungrouped ]] || awk -v n="$name" '
+    match($0, /^[[:space:]]*\[[^]]+\]/) {
+      header = substr($0, RSTART, RLENGTH); sub(/^[[:space:]]*\[/, "", header); sub(/\]$/, "", header)
+      sub(/:.*/, "", header); if (header == n) found = 1
+    }
+    END {exit !found}' "$inventory"; then
+  echo "$name is also the name of an inventory group; choose another name."; exit 1
 fi
-if ssh-keygen -F "$address" -f "$known_hosts" >/dev/null; then
-  echo "Known-hosts already contains $address. After verifying why its key changed, remove the old"
-  echo "entry and give the rewritten file back to the service before re-adding:"
+# Compare whole fields as text: a dot in the name is not a wildcard, and names that
+# look like numbers (10 and 010) stay different.
+existing=$(awk -v n="$name" '$1 == (n "") {print $1, $2; exit}' "$inventory")
+owner=$(awk -v a="ansible_host=$address" -v n="$name" '$1 != (n "") {for (i = 2; i <= NF; i++) if ($i == a) {print $1; exit}}' "$inventory")
+trusted=$(ssh-keygen -F "$address" -f "$known_hosts" 2>/dev/null | grep -v '^#' || true)
+trusted_matches=no
+if [[ -n "$trusted" ]] && printf '%s\n' "$trusted" | ssh-keygen -lf - 2>/dev/null | grep -qF -- " $fingerprint "; then
+  trusted_matches=yes
+fi
+if [[ -n "$existing" ]]; then
+  if [[ "$existing" == "$name ansible_host=$address" && $trusted_matches == yes ]]; then
+    echo "Already present: $name ($address) is in $inventory and its verified key is trusted; nothing changed."
+    exit 0
+  fi
+  echo "Inventory already contains $name with other settings ($existing); edit it by hand instead."; exit 1
+fi
+if [[ -n "$owner" ]]; then
+  echo "Inventory already lists $address as $owner; edit it by hand instead."; exit 1
+fi
+if [[ -n "$trusted" && $trusted_matches == no ]]; then
+  echo "Known-hosts already contains a different key for $address. After verifying why its key changed,"
+  echo "remove the old entry and give the rewritten file back to the service before re-adding:"
   echo "  sudo ssh-keygen -R $address -f $known_hosts"
   echo "  sudo chown root:semaphore $known_hosts && sudo chmod 0640 $known_hosts"
   exit 1
@@ -87,7 +113,8 @@ lines.insert(index, f"{name} ansible_host={address}")
 Path(path).write_text("\n".join(lines) + "\n")
 PY
 # Trust the key only now, so a refused inventory edit leaves known_hosts unchanged.
-cat "$matched" >> "$known_hosts"
+[[ $trusted_matches == yes ]] || cat "$matched" >> "$known_hosts"
 echo "Added $name ($address) to $inventory under [$group] and trusted its verified host key."
-echo "Next: authorize the key shown by 'sudo cat /etc/semaphore/svc_ansible.pub' for svc_ansible"
-echo "on $name (chapter 4, step 3, or examples/onboard/onboard-linux.sh), then run the Ping template."
+echo "Next: run the Ping template with Limit $name. If it fails with Permission denied (publickey),"
+echo "svc_ansible on $name lacks the key 'sudo cat /etc/semaphore/svc_ansible.pub' shows; if sudo asks for a"
+echo "password, give Semaphore the targets' sudo password, as chapter 3b shows."

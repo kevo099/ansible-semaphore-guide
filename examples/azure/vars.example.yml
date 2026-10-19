@@ -17,6 +17,8 @@ azure_subnet_prefix: REPLACE_WITH_SUBNET_PREFIX        # a /24 inside azure_vnet
 # Where SSH to the targets may come from: your controller's address or prefix.
 azure_target_ssh_source: REPLACE_WITH_CONTROLLER_PREFIX
 
+# A size your subscription has quota for (az vm list-usage --location REGION).
+# Some subscriptions have none for this family; Standard_D2als_v7 is one alternative.
 azure_vm_size: Standard_D2als_v6
 azure_admin_user: azadmin
 azure_admin_public_key_file: ~/.ssh/azure_bootstrap.pub   # bootstrap administrator, your workstation key
@@ -35,6 +37,13 @@ azure_targets:
   # - name: lab-rhel
   #   private_ip: REPLACE_WITH_ADDRESS_IN_SUBNET
   #   image: {publisher: RedHat, offer: RHEL, sku: 9-lvm-gen2, version: latest}
+  # Optional: Rocky Linux 9, the Rocky Enterprise Software Foundation's own image. It
+  # is a Marketplace image with a plan, so accept its terms once per subscription:
+  #   az vm image terms accept --urn resf:rockylinux-x86_64:9-base:latest
+  # - name: lab-rocky
+  #   private_ip: REPLACE_WITH_ADDRESS_IN_SUBNET
+  #   image: {publisher: resf, offer: rockylinux-x86_64, sku: 9-base, version: latest}
+  #   plan: {name: 9-base, product: rockylinux-x86_64, publisher: resf}
 
 # Optional: a controller VM in Azure (controller.yml). It is the only VM with a
 # public address, and its SSH is open to operator_cidr alone.
