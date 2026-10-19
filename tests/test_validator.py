@@ -130,9 +130,12 @@ class PublicationBoundaryTests(unittest.TestCase):
     def test_ipv6_loopback_listen_specs_tunnels_times_and_hardware_addresses_are_accepted(self):
         for text in ("[::1]:3000 and ::1", "listen [::]:443", "ssh -L 8088:127.0.0.1:8088 host",
                      "at 10:30:00 or 2026-10-19T02:22:10Z", "52:54:00:12:34:56", "::ffff:127.0.0.1",
-                     "std::vector", "|:---|:---:|"):
+                     "std::vector", "|:---|:---:|", "words[::2] and words[1::2]", "rows[2:10:3]"):
             with self.subTest(text=text):
                 self.assertEqual(self.rules(text), [])
+
+    def test_a_bracketed_ipv6_address_is_not_taken_for_a_slice(self):
+        self.assertIn(ADDRESS_RULE, self.rules("[" + ":".join(["2001", "db8", "", "1"]) + "]:22"))
 
     def test_macos_and_windows_home_directories_are_rejected(self):
         for text in ("/Users/" + "someone/lab", "`/Users/" + "someone`", "C:" + "\\Users\\" + "someone\\.ssh",

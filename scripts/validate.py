@@ -111,7 +111,11 @@ def publication_boundary(path, text):
     ipv4 = r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?!\w|\.\d)"
     # IPv6 likewise. "::" alone is the unspecified address of listen examples such as [::]:443.
     ipv6 = r"(?<![\w:.])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?![\w:]|\.\d)"
+    # Python's extended slices, such as words[1::2], are digits and colons in brackets.
+    slices = {m.group(1) for m in re.finditer(r"\[([0-9:]*:[0-9:]*)\]", text)}
     for match in re.findall(ipv4, text) + re.findall(ipv6, text):
+        if match in slices and re.fullmatch(r"[0-9:]+", match):
+            continue
         try:
             address = ipaddress.ip_address(match)
         except ValueError:
