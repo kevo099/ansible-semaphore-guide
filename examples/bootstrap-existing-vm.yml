@@ -4,7 +4,8 @@
 # 4, steps 3 and 4. It creates or completes svc_ansible, authorizes the listed
 # public keys, ensures the target prerequisites, sets the sudo password you type,
 # and adds the dedicated sudoers and SSH drop-ins. It is safe to run again, and
-# ends with the add-target.sh line that adds the host on the controller.
+# ends with the add-target.sh command that adds the host on the controller. Unlike
+# the scripts that run on a VM, it builds that command on the controller itself.
 #
 # The VM must already accept SSH from the controller for an administrator whose
 # sudo works, and have Python 3; mainstream cloud images do.
@@ -395,14 +396,15 @@
       changed_when: false
       failed_when: false
 
-    # Only values that pass add-target.sh's own checks, or a placeholder to replace,
-    # so it is a single line you can check before running it.
+    # Built here on the controller, from its inventory and a fingerprint checked here:
+    # only values that pass add-target.sh's own checks, or a placeholder to replace,
+    # so it is a single command you can check before running it.
     - name: Show the controller command that adds this host
       ansible.builtin.debug:
         msg:
           - >-
-            Add it on the controller, in the guide checkout (replace NAME, ADDRESS or FINGERPRINT if shown,
-            and add --lab-dir DIR for a lab folder other than /opt/ansible-lab):
+            Add this VM on the controller: in the guide's folder, run this command (replace NAME, ADDRESS
+            or FINGERPRINT if shown, and add --lab-dir DIR for a lab folder other than /opt/ansible-lab):
           - "{{ bootstrap_add_line }}"
       vars:
         bootstrap_add_name: "{{ inventory_hostname }}"

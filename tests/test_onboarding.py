@@ -105,28 +105,89 @@ APT_GET = ('echo "apt-get $*" >>"$LOG"; n=0; [ -f "$LOG.n" ] && read -r n <"$LOG
            ' [ "$UPDATE_FAILURES" -eq 0 ] || [ "$n" -gt "$UPDATE_FAILURES" ]')
 
 
+# The checks add-target.sh applies, read from the script so they cannot drift apart.
+CHECKS = dict(re.findall(r'\[\[ "\$(name|address|fingerprint)" =~ (\^\S+\$) \]\]', ADD_TARGET))
+GROUPS = re.findall(r'"\$group" == (\w+)', ADD_TARGET)
+
+
 class AddTargetLineMixin:
     """Checks that a line is one add-target.sh command with values that script accepts."""
 
-    # The checks add-target.sh applies, read from the script so they cannot drift apart.
-    CHECKS = dict(re.findall(r'\[\[ "\$(name|address|fingerprint)" =~ (\^\S+\$) \]\]', ADD_TARGET))
-    GROUPS = re.findall(r'"\$group" == (\w+)', ADD_TARGET)
-
     def assertAddTargetLine(self, line, **expected):
-        self.assertEqual(sorted(self.CHECKS), ["address", "fingerprint", "name"])
-        self.assertEqual(self.GROUPS, ["ubuntu", "enterprise_linux"])
+        self.assertEqual(sorted(CHECKS), ["address", "fingerprint", "name"])
+        self.assertEqual(GROUPS, ["ubuntu", "enterprise_linux"])
         words = shlex.split(line)
         self.assertEqual(words[:3], ["sudo", "bash", "scripts/add-target.sh"], line)
         options = dict(zip(words[3::2], words[4::2]))
         self.assertEqual(len(words), 3 + 2 * len(options), line)
         self.assertEqual(set(options) - {"--lab-dir"}, {"--name", "--address", "--group", "--fingerprint"}, line)
-        self.assertIn(options["--group"], self.GROUPS)
-        for field, pattern in self.CHECKS.items():
+        self.assertIn(options["--group"], GROUPS)
+        for field, pattern in CHECKS.items():
             # FINGERPRINT stands in when the host key cannot be read; add-target.sh refuses it.
             if options["--" + field] != "FINGERPRINT":
                 self.assertIsNotNone(re.fullmatch(pattern, options["--" + field]), line)
         for field, value in expected.items():
             self.assertEqual(options["--" + field], value, line)
+
+
+class AddTargetInfoMixin:
+    """Checks the lines a script on the VM prints for add-target.sh --from-info: data, not a command."""
+
+    # What the scripts ask for when they cannot read a value; never a placeholder.
+    OPTIONS = {"name": "--name with the name the inventory should use",
+               "address": "--address with the address the controller reaches",
+               "fingerprint": "--fingerprint with the RSA host key's fingerprint, read from the console"}
+
+    def assertInfoLines(self, lines, prefix="", **expected):
+        """The block from its first line; each of the four values expected, or None where it is left out."""
+        self.assertEqual(list(expected), ["name", "address", "group", "fingerprint"])
+        for line in lines:
+            self.assertTrue(line.startswith(prefix), lines)
+        lines = [line.removeprefix(prefix) for line in lines]
+        left_out = [key for key, value in expected.items() if value is None]
+        self.assertEqual(lines[:2], ["Add this VM on the controller: in the guide's folder, run",
+                                     "  sudo bash scripts/add-target.sh --from-info"])
+        self.assertEqual(lines[2:2 + len(left_out)], [f"and add {self.OPTIONS[key]}," for key in left_out])
+        self.assertEqual(lines[2 + len(left_out)], "then paste these lines and press Ctrl-D:")
+        values = dict(line.split("=", 1) for line in lines[3 + len(left_out):])
+        self.assertEqual(values, {key: value for key, value in expected.items() if value is not None})
+        self.assertEqual(sorted(CHECKS), ["address", "fingerprint", "name"])
+        self.assertIn(values["group"], GROUPS)
+        for field, pattern in CHECKS.items():
+            if field in values:
+                self.assertIsNotNone(re.fullmatch(pattern, values[field]), lines)
+        # A placeholder such as ADDRESS would pass add-target.sh's checks as a DNS name.
+        for placeholder in ("NAME", "ADDRESS", "FINGERPRINT"):
+            self.assertNotIn(placeholder, "\n".join(lines))
+
+    def host_key(self):
+        """A real RSA host key: its public line and the fingerprint add-target.sh compares with a scan."""
+        if not shutil.which("ssh-keygen"):
+            self.skipTest("needs ssh-keygen")
+        work = tempfile.TemporaryDirectory()
+        self.addCleanup(work.cleanup)
+        path = Path(work.name, "ssh_host_rsa_key")
+        subprocess.run(["ssh-keygen", "-q", "-t", "rsa", "-b", "2048", "-N", "", "-f", str(path)], check=True)
+        fingerprint = subprocess.run(["ssh-keygen", "-lf", f"{path}.pub"], capture_output=True, text=True,
+                                     check=True).stdout.split()[1]
+        return " ".join(Path(f"{path}.pub").read_text().split()[:2]), fingerprint
+
+    def assertAddTargetAdds(self, output, key, entry, options=()):
+        """add-target.sh --from-info, given the whole output as pasted, adds the inventory entry."""
+        with tempfile.TemporaryDirectory() as work:
+            inventory = Path(work, "lab", "inventories", "lab.ini")
+            inventory.parent.mkdir(parents=True)
+            inventory.write_text("[ubuntu]\n\n[enterprise_linux]\n")
+            Path(work, "known_hosts").write_text("")
+            # add-target.sh needs root and scans the target; stand-ins answer for both.
+            path = stand_ins(work, {"id": "echo 0", "ssh-keyscan": f'for last; do :; done; echo "$last {key}"'})
+            result = subprocess.run([BASH, str(ROOT / "scripts" / "add-target.sh"), "--from-info", *options,
+                                     "--lab-dir", str(Path(work, "lab")),
+                                     "--known-hosts", str(Path(work, "known_hosts"))],
+                                    input=output, capture_output=True, text=True, env=dict(os.environ, PATH=path),
+                                    timeout=60)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn(entry + "\n", inventory.read_text())
 
 
 class SharedSettingsTests(unittest.TestCase):
@@ -178,7 +239,7 @@ class SharedSettingsTests(unittest.TestCase):
                 self.assertEqual(function(CLOUD_SCRIPT, name), function(ONBOARD, name))
 
 
-class CloudInitTests(AddTargetLineMixin, unittest.TestCase):
+class CloudInitTests(AddTargetInfoMixin, unittest.TestCase):
     """The first-boot script, which runs unattended on every new VM."""
 
     def test_the_first_boot_script_is_valid_bash(self):
@@ -266,7 +327,7 @@ class CloudInitTests(AddTargetLineMixin, unittest.TestCase):
         self.assertLess(CLOUD_SCRIPT.index('sshd_access "$policy"'), CLOUD_SCRIPT.index('systemctl reload "$ssh_unit"'))
 
     def final_lines(self, addresses, name="lab-alma", fingerprint=FINGERPRINT):
-        block = section(CLOUD_SCRIPT, "# The controller command that adds this VM")
+        block = section(CLOUD_SCRIPT, "# The values add-target.sh --from-info reads")
         with tempfile.TemporaryDirectory() as work:
             commands = {
                 "hostname": 'echo "$NAME"',
@@ -278,28 +339,35 @@ class CloudInitTests(AddTargetLineMixin, unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         return result.stdout.splitlines()
 
-    def test_a_successful_run_ends_with_the_add_target_line(self):
+    def test_a_successful_run_ends_with_the_lines_for_add_target(self):
         # The block follows the ready message and ends the script.
         ready = 'echo "onboard: svc_ansible is ready; set its sudo password next"\n'
-        closing = section(CLOUD_SCRIPT, "# The controller command that adds this VM")
+        closing = section(CLOUD_SCRIPT, "# The values add-target.sh --from-info reads")
         self.assertTrue(CLOUD_SCRIPT.endswith(ready + closing))
-        lines = self.final_lines([f"{TEST_NET}.12"])
-        self.assertEqual(len(lines), 2)
-        self.assertTrue(lines[0].startswith("onboard: then add it on the controller, in the guide checkout"))
-        self.assertTrue(lines[1].startswith("onboard:   sudo bash scripts/add-target.sh "))
-        self.assertAddTargetLine(lines[1].removeprefix("onboard:"), name="lab-alma", address=f"{TEST_NET}.12",
-                                 group="enterprise_linux", fingerprint=FINGERPRINT)
+        self.assertInfoLines(self.final_lines([f"{TEST_NET}.12"]), prefix="onboard: ", name="lab-alma",
+                             address=f"{TEST_NET}.12", group="enterprise_linux", fingerprint=FINGERPRINT)
 
-    def test_unknown_values_become_placeholders(self):
-        line = self.final_lines([f"{TEST_NET}.12", f"{TEST_NET}.13"], name="bad_name!", fingerprint="")[1]
-        self.assertAddTargetLine(line.removeprefix("onboard:"), name="NAME", address="ADDRESS",
-                                 fingerprint="FINGERPRINT")
-        line = self.final_lines([])[1]
-        self.assertAddTargetLine(line.removeprefix("onboard:"), name="lab-alma", address="ADDRESS")
+    def test_unknown_values_are_left_out_and_their_options_named(self):
+        lines = self.final_lines([f"{TEST_NET}.12", f"{TEST_NET}.13"], name="bad_name!", fingerprint="")
+        self.assertInfoLines(lines, prefix="onboard: ", name=None, address=None, group="enterprise_linux",
+                             fingerprint=None)
+        self.assertInfoLines(self.final_lines([]), prefix="onboard: ", name="lab-alma", address=None,
+                             group="enterprise_linux", fingerprint=FINGERPRINT)
+
+    def test_the_log_pasted_whole_adds_the_vm(self):
+        # As sudo grep onboard /var/log/cloud-init-output.log shows it, with the ready message.
+        key, fingerprint = self.host_key()
+        log = "onboard: svc_ansible is ready; set its sudo password next\n"
+        lines = self.final_lines([f"{TEST_NET}.12"], fingerprint=fingerprint)
+        self.assertAddTargetAdds(log + "\n".join(lines) + "\n", key, f"lab-alma ansible_host={TEST_NET}.12")
+        # An address it could not tell comes from the option the output names.
+        lines = self.final_lines([], fingerprint=fingerprint)
+        self.assertAddTargetAdds(log + "\n".join(lines) + "\n", key, f"lab-alma ansible_host={TEST_NET}.14",
+                                 options=("--address", f"{TEST_NET}.14"))
 
 
-class OnboardScriptTests(AddTargetLineMixin, unittest.TestCase):
-    """onboard-linux.sh's helpers, result line and closing add-target.sh line."""
+class OnboardScriptTests(AddTargetInfoMixin, unittest.TestCase):
+    """onboard-linux.sh's helpers, result line and closing lines for add-target.sh --from-info."""
 
     # Its settings, traps and helpers, up to the root check, and the inputs set above them.
     PREAMBLE = ("PUBLIC_KEYS=key\nPASSWORD_HASH=\nCONTROLLER_ADDRESS=\n"
@@ -456,33 +524,47 @@ class OnboardScriptTests(AddTargetLineMixin, unittest.TestCase):
             result = run_bash(function(ONBOARD, "sshd_files") + 'sshd_files 1 "$1" | sort -u', args=[str(main)])
         self.assertEqual(result.stdout.split(), sorted(str(p) for p in (main, extra, nested)))
 
-    def test_the_closing_line_adds_this_vm_on_the_controller(self):
-        block = section(ONBOARD, "# The controller command that adds this VM")
-        commands = {
-            "hostname": 'echo "$NAME"',
-            "ip": 'case "$2" in route) [ -z "$SOURCE" ] || echo "$4 via gw dev eth0 src $SOURCE uid 0" ;;'
-                  ' *) for a in $ADDRESSES; do printf "2: eth0    inet %s/24 brd x scope global eth0\\n" "$a"; done ;;'
-                  ' esac',
-            "ssh-keygen": '[ -n "$FP" ] || exit 1; echo "3072 $FP root@lab (RSA)"',
-        }
+    # Stand-ins for the commands the closing block reads its values from.
+    CLOSING_COMMANDS = {
+        "hostname": 'echo "$NAME"',
+        "ip": 'case "$2" in route) [ -z "$SOURCE" ] || echo "$4 via gw dev eth0 src $SOURCE uid 0" ;;'
+              ' *) for a in $ADDRESSES; do printf "2: eth0    inet %s/24 brd x scope global eth0\\n" "$a"; done ;;'
+              ' esac',
+        "ssh-keygen": '[ -n "$FP" ] || exit 1; echo "3072 $FP root@lab (RSA)"',
+    }
+
+    def closing_lines(self, setup, name, addresses, source, fingerprint):
+        """The closing block's output, from values the stand-in commands give."""
+        result = self.run_onboard(setup + section(ONBOARD, "# The values add-target.sh --from-info reads"),
+                                  self.CLOSING_COMMANDS,
+                                  {"NAME": name, "ADDRESSES": addresses, "SOURCE": source, "FP": fingerprint})
+        lines = result.stdout.splitlines()
+        self.assertEqual(lines[-1], "RESULT: OK", result.stdout + result.stderr)
+        return lines
+
+    def test_the_closing_lines_are_the_values_for_add_target(self):
         cases = [
             ("family=el\nCONTROLLER_ADDRESS=" + TEST_NET + ".5\n", "lab-vm", f"{TEST_NET}.12 {TEST_NET}.13",
              f"{TEST_NET}.13", FINGERPRINT,
              {"name": "lab-vm", "address": f"{TEST_NET}.13", "group": "enterprise_linux", "fingerprint": FINGERPRINT}),
             ("family=debian\n", "lab-vm", f"{TEST_NET}.10", "", FINGERPRINT,
-             {"address": f"{TEST_NET}.10", "group": "ubuntu"}),
+             {"name": "lab-vm", "address": f"{TEST_NET}.10", "group": "ubuntu", "fingerprint": FINGERPRINT}),
             ("family=debian\n", "lab_vm!", f"{TEST_NET}.10 {TEST_NET}.11", "", "",
-             {"name": "NAME", "address": "ADDRESS", "fingerprint": "FINGERPRINT"}),
+             {"name": None, "address": None, "group": "ubuntu", "fingerprint": None}),
         ]
         for setup, name, addresses, source, fingerprint, expected in cases:
             with self.subTest(setup=setup, addresses=addresses):
-                result = self.run_onboard(setup + block, commands, {"NAME": name, "ADDRESSES": addresses,
-                                                                    "SOURCE": source, "FP": fingerprint})
-                lines = result.stdout.splitlines()
-                self.assertEqual(lines[-1], "RESULT: OK", result.stdout + result.stderr)
-                self.assertTrue(lines[-3].startswith("add it on the controller, in the guide checkout (replace NAME,"
-                                                     " ADDRESS or FINGERPRINT if shown"))
-                self.assertAddTargetLine(lines[-2], **expected)
+                lines = self.closing_lines(setup, name, addresses, source, fingerprint)
+                # The block ends just before the result line.
+                self.assertInfoLines(lines[lines.index("Add this VM on the controller: in the guide's folder, run"):-1],
+                                     **expected)
+
+    def test_the_output_pasted_whole_adds_the_vm(self):
+        key, fingerprint = self.host_key()
+        lines = self.closing_lines("family=el\nCONTROLLER_ADDRESS=" + TEST_NET + ".5\n", "lab-vm",
+                                   f"{TEST_NET}.12 {TEST_NET}.13", f"{TEST_NET}.13", fingerprint)
+        self.assertAddTargetAdds("host: lab-vm (AlmaLinux 9.8)\n" + "\n".join(lines) + "\n", key,
+                                 f"lab-vm ansible_host={TEST_NET}.13")
 
 
 # sshd -T lines, the account's groups, then the reasons sshd would refuse it and the entries
@@ -652,13 +734,63 @@ class PlaybookTests(AddTargetLineMixin, unittest.TestCase):
         ]
         first, second, third = self.render("bootstrap_lines", cases,
                                            f"lab-alma ansible_host={TEST_NET}.12 ansible_connection=local\n")
-        self.assertEqual(first[0], "Add it on the controller, in the guide checkout (replace NAME, ADDRESS or"
-                         " FINGERPRINT if shown, and add --lab-dir DIR for a lab folder other than /opt/ansible-lab):")
+        self.assertEqual(first[0], "Add this VM on the controller: in the guide's folder, run this command (replace"
+                         " NAME, ADDRESS or FINGERPRINT if shown, and add --lab-dir DIR for a lab folder other than"
+                         " /opt/ansible-lab):")
         self.assertAddTargetLine(first[1], name="lab-alma", address=f"{TEST_NET}.12", group="enterprise_linux",
                                  fingerprint=FINGERPRINT)
         for rendered in (second, third):
             self.assertAddTargetLine(rendered[1], name="NAME", address="ADDRESS", group="ubuntu",
                                      fingerprint="FINGERPRINT")
+
+    def test_the_key_check_reads_the_policy_as_sshd_reports_it(self):
+        # The pre-task that stops the play before keys the server refuses replace the account's
+        # own, for sshd -T lines and keys measured as ssh-keygen -l reports them.
+        usable = playbook_task("Require at least one listed key that can log in")
+        [condition] = usable["ansible.builtin.assert"]["that"]
+        stock = ["requiredrsasize 1024", "pubkeyacceptedalgorithms ssh-ed25519-cert-v01@openssh.com,"
+                 "ecdsa-sha2-nistp256-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,"
+                 "rsa-sha2-256-cert-v01@openssh.com,ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,"
+                 "ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,rsa-sha2-512,rsa-sha2-256"]
+        rsa_only = "pubkeyacceptedalgorithms rsa-sha2-512,rsa-sha2-256"
+        rsa_4096 = {"item": "ssh-rsa AAAAB3NzaC1yc2E= four", "stdout": f"4096 {FINGERPRINT} four (RSA)"}
+        rsa_2048 = {"item": "ssh-rsa AAAAB3NzaC1yc2E= two", "stdout": f"2048 {FINGERPRINT} two (RSA)"}
+        ed25519 = {"item": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 ed", "stdout": f"256 {FINGERPRINT} ed (ED25519)"}
+        # sshd -T lines, the listed keys, then whether one can log in and the RSA minimum.
+        cases = [
+            (stock, [rsa_4096], True, 2048),
+            ([rsa_only], [ed25519], False, 2048),
+            ([rsa_only, "requiredrsasize 3072"], [rsa_2048], False, 3072),
+            ([rsa_only, "requiredrsasize 3072"], [rsa_4096], True, 3072),
+            # SHA-1 ssh-rsa only, with which the controller's client never signs.
+            (["pubkeyacceptedalgorithms ssh-rsa"], [rsa_4096], False, 2048),
+        ]
+        given = [dict(usable["vars"], bootstrap_sshd_before={"stdout_lines": lines},
+                      bootstrap_key_sizes={"results": keys}, automation_public_keys=[key["item"] for key in keys])
+                 for lines, keys, *_ in cases]
+        rendered = self.render("{'usable': (" + condition + "), 'min_rsa': bootstrap_min_rsa | int}", given)
+        self.assertEqual([(case["usable"], case["min_rsa"]) for case in rendered],
+                         [(can_log_in, size) for _lines, _keys, can_log_in, size in cases])
+
+    def test_the_sudo_check_refuses_another_accounts_password(self):
+        # The assert as the play runs it: its regular expression's doubled backslashes are the
+        # kind of escape that ansible-core 2.21 once read differently.
+        check = playbook_task("Check that sudo requires the password")
+        failed_for = {"env_reset, rootpw, use_pty": True, "env_reset, !rootpw, use_pty": False,
+                      "env_reset, use_pty, targetpw": True}
+        rights = ("Matching Defaults entries for svc_ansible on lab-alma:\n    {}\n\n"
+                  "User svc_ansible may run the following commands on lab-alma:\n    (ALL : ALL) ALL\n")
+        tasks = [dict(check, name=f"case {index}", ignore_errors=True, register=f"bootstrap_case{index}",
+                      vars={"bootstrap_sudo_rights": {"stdout": rights.format(defaults)},
+                            "bootstrap_sudo_nopass": {"rc": 1}})
+                 for index, defaults in enumerate(failed_for)]
+        results = ", ".join(f"bootstrap_case{index}.failed" for index in range(len(tasks)))
+        with tempfile.TemporaryDirectory() as work:
+            tasks.append({"name": "Save the results", "ansible.builtin.copy": {
+                "content": "{{ [" + results + "] | to_json }}", "dest": f"{work}/results.json", "mode": "0600"}})
+            self.run_play(tasks, work)
+            failed = json.loads(Path(work, "results.json").read_text())
+        self.assertEqual(dict(zip(failed_for, failed)), failed_for)
 
     def test_a_link_in_place_of_the_ssh_directory_or_key_file_stops_the_play(self):
         look = playbook_task("Look at the account's SSH directory and key file without following links")

@@ -116,15 +116,15 @@ The runnable files, one by one:
 | [`playbooks/stig-apply.yml`](playbooks/stig-apply.yml) | Applies the vendor's own STIG remediation to exactly one target per run after an explicit recovery-point approval, with before and after scans. |
 | [`playbooks/stig/`](playbooks/stig/) | One folder per operating system and version, `rhel/9`, `almalinux/9`, `rocky/9` and `ubuntu/24.04`, each with an `audit.yml` and `apply.yml` that run the two STIG playbooks for that system only; the seeded Semaphore tabs use them. |
 | [`examples/onboard/cloud-init.yaml`](examples/onboard/cloud-init.yaml) | Prepares a new VM for the automation account at first boot; insert the controller's public key. |
-| [`examples/onboard/onboard-linux.sh`](examples/onboard/onboard-linux.sh) | Prepares an existing VM as root, through Azure Run Command or `sudo bash`, and prints the `add-target.sh` line for the controller. See [chapter 13](docs/13-azure.md#do-onboard-an-existing-vm-with-run-command). |
+| [`examples/onboard/onboard-linux.sh`](examples/onboard/onboard-linux.sh) | Prepares an existing VM as root, through Azure Run Command or `sudo bash`, and prints the values that `add-target.sh --from-info` reads on the controller. See [chapter 13](docs/13-azure.md#do-onboard-an-existing-vm-with-run-command). |
 | [`examples/bootstrap-existing-vm.yml`](examples/bootstrap-existing-vm.yml) | Prepares an existing VM from the controller over SSH: chapter 4, steps 3 and 4, in one run per host. |
-| [`examples/onboard/inventory-info.sh`](examples/onboard/inventory-info.sh) | Reads a prepared VM through Azure Run Command, read-only, and prints the `add-target.sh` line for the controller. See [chapter 13](docs/13-azure.md#do-generate-the-controller-inventory-command). |
+| [`examples/onboard/inventory-info.sh`](examples/onboard/inventory-info.sh) | Reads a prepared VM through Azure Run Command, read-only, and prints the values that `add-target.sh --from-info` reads on the controller. See [chapter 13](docs/13-azure.md#do-read-a-vms-values-for-the-controller). |
 | [`examples/azure/`](examples/azure/README.md) | Creates, stops and removes an Azure lab network, optional controller and cloud-init targets; see [chapter 13](docs/13-azure.md). |
 | [`scripts/install-controller.sh`](scripts/install-controller.sh) | Shows a plan by default; `--apply` bootstraps a fresh Ubuntu 24.04 controller and seeds a local-folder practice project through the API. Supports `--editor`, `--lab-dir`, `--expose` and `--address`. |
 | [`scripts/install-controller-el9.sh`](scripts/install-controller-el9.sh) | Same seeded installation and options for RHEL, AlmaLinux or Rocky Linux 9.4 or later. |
 | [`scripts/seed-semaphore.py`](scripts/seed-semaphore.py) | Creates the practice project, keys, local repository, file inventory and templates on loopback; prints names and ids only. |
 | [`scripts/expose-semaphore.sh`](scripts/expose-semaphore.sh) | Publishes the UI on the VM's address behind an nginx TLS proxy, or in plain HTTP, or reverts to loopback. It restarts Semaphore only when the bind address changes or the running process still uses an earlier one, and refuses that while a task runs unless you add `--force`. |
-| [`scripts/add-target.sh`](scripts/add-target.sh) | Adds a host to the local inventory only when its scanned host key matches the fingerprint you read from its console or from the onboarding output; a repeat changes nothing. |
+| [`scripts/add-target.sh`](scripts/add-target.sh) | Adds a host to the local inventory only when its scanned host key matches the fingerprint you read from its console or from the onboarding output; a repeat changes nothing. With `--from-info` it reads the lines a VM printed as data, never as commands, and checks each value. |
 | [`scripts/check-controller.py`](scripts/check-controller.py) | Checks controller services, permissions and loopback listeners without printing credentials. |
 | [`scripts/validate.py`](scripts/validate.py) | Checks repository links, examples and publication boundaries locally. |
 
@@ -189,8 +189,9 @@ Follow [the Ubuntu chapter](docs/03-controller.md) or
 `--apply`. Both installers create `/opt/ansible-lab` by default, with an empty
 inventory and 22 Semaphore templates. Then onboard each target as
 [the onboarding page](docs/ONBOARDING.md) shows: prepare it with the
-controller's key, add its verified host key with `scripts/add-target.sh`, and
-run **Ping**. A Git remote is optional.
+controller's key, paste the lines it prints into
+`scripts/add-target.sh --from-info`, which adds it with its verified host key,
+and run **Ping**. A Git remote is optional.
 To bring a controller installed from an earlier release up to date, run
 `scripts/update-controller.sh` from the newer copy; see
 [update a controller](docs/03-controller.md#update-a-controller-to-a-newer-guide-release).

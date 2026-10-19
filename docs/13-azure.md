@@ -207,8 +207,9 @@ pay-as-you-go example in `vars.example.yml` explains. At first boot it:
   out. It checks the SSH policy from loopback, because the controller's
   address is unknown at first boot, and reports an error if a `Match` rule
   depends on the client's address;
-- ends its log with the `add-target.sh` line for the controller, with this
-  VM's name, address and RSA host-key fingerprint.
+- ends its log with this VM's name, address, group and RSA host-key
+  fingerprint, as lines to paste into `add-target.sh --from-info` on the
+  controller.
 
 It sets no password: Azure advises against secrets in custom data. Until you
 set one, as [finish access](#do-finish-access-with-one-playbook) or
@@ -218,8 +219,9 @@ key comment is safe. It also refuses `svc_ansible` as `azure_admin_user`,
 because cloud-init gives the administrator passwordless sudo.
 
 **Check:** `sudo grep onboard /var/log/cloud-init-output.log` on a target
-shows `onboard: svc_ansible is ready; set its sudo password next`. Run it
-through Run Command if you have no SSH path yet.
+shows `onboard: svc_ansible is ready; set its sudo password next`, followed by
+the lines for `add-target.sh`. Run it through Run Command if you have no SSH
+path yet.
 
 **Rocky Linux** comes from the Rocky Enterprise Software Foundation's
 Marketplace image, which carries a plan: give the target the `plan` line that
@@ -269,8 +271,8 @@ rerun it. For a VM that exists already, use
 ## Do: pin the targets' host keys
 
 **Where: the controller, as your administrator account.** On a controller made
-by either installer, the `add-target.sh` line that each way of preparing a VM
-prints does this for Semaphore: it carries the fingerprint read through the
+by either installer, `add-target.sh` does this for Semaphore with the values
+each way of preparing a VM prints: it takes the fingerprint read through the
 control plane, scans the VM over the private network, and trusts only the
 matching key. For your own terminal runs, or without a seeded controller, read
 each target's fingerprint through the control plane, scan it and compare before
@@ -308,7 +310,11 @@ images have. It then:
   keeps `svc_ansible` out, before any SSH reload;
 - runs `sudo -k -n` as `svc_ansible` and fails if that succeeds, which catches
   a `NOPASSWD` rule elsewhere that would override the password requirement;
-- ends with the `add-target.sh` line for the controller.
+- ends with the whole `add-target.sh` command for the controller, built there
+  from its inventory and the fingerprint it read. It is the one way whose
+  output you run as a command; the scripts on a VM print data instead, as
+  [the onboarding page](ONBOARDING.md#why-the-vm-prints-lines-not-a-command)
+  explains.
 
 By default it authorizes `~/.ssh/ansible_lab.pub`. On a controller made by
 either installer ([Ubuntu](03-controller.md) or
@@ -395,9 +401,9 @@ does what `bootstrap-existing-vm.yml` does, and is safe to run again:
   keep `svc_ansible` out, and restores the previous drop-in and leaves SSH alone
   when a check fails;
 - prints each change, the authorized key fingerprints and the host-key
-  fingerprints, then the `add-target.sh` line for the controller, with
-  `RESULT: OK` or `RESULT: FAILED: reason` as the last line, also when an
-  unexpected command fails.
+  fingerprints, then the lines for `add-target.sh --from-info` on the
+  controller, with `RESULT: OK` or `RESULT: FAILED: reason` as the last line,
+  also when an unexpected command fails.
 
 Edit the copy you run: replace `REPLACE_WITH_AUTOMATION_PUBLIC_KEY` with the
 controller's public key, one key per line, between the two `END_OF_KEYS`
@@ -427,7 +433,8 @@ output to `/var/log/ansible-lab-onboard.log` on the VM and prints the result
 line last. Compare the host-key fingerprints it prints with `ssh-keyscan` from
 the controller, as [pin the host keys](#do-pin-the-targets-host-keys) shows;
 this output comes through the authenticated control plane. On a seeded
-controller, it is the fingerprint `add-target.sh --fingerprint` asks for.
+controller, its `fingerprint=` line is the one `add-target.sh` compares the
+scan with.
 
 ### Set the sudo password without SSH
 
@@ -476,10 +483,10 @@ Without a hash the script keeps an existing password, and a new account has
 none: its output then says `password: NOT SET`, and sudo waits until you set
 one this way or with the bootstrap playbook.
 
-## Do: generate the controller inventory command
+## Do: read a VM's values for the controller
 
 **Where: the target VM's Azure Run Command → RunShellScript.** Every way of
-preparing a VM above already ends with the line to run on the controller. For a
+preparing a VM above already ends with the values the controller needs. For a
 VM that cloud-init prepared, or whose output you no longer have, paste the whole
 [`examples/onboard/inventory-info.sh`](../examples/onboard/inventory-info.sh)
 file into Run Command instead. It changes nothing: it only reads the VM's
@@ -490,24 +497,36 @@ Set `CONTROLLER_ADDRESS` at the top to the controller's IP. The collector select
 the target's source address for that route; this does not send a network probe.
 If you leave it empty, the VM must have exactly one global-scope IPv4 address.
 For multiple addresses you can instead set `TARGET_ADDRESS` explicitly; it must
-belong to this VM. `INVENTORY_NAME` defaults to the short hostname, and `LAB_DIR`
-is the controller's seeded lab folder, `/opt/ansible-lab` by default.
+belong to this VM. `INVENTORY_NAME` defaults to the short hostname. The script
+no longer takes the lab folder: for one other than `/opt/ansible-lab`, add
+`--lab-dir DIR` on the controller.
 
-The output ends with one line for the **controller**, in the guide's folder:
+The output ends with data for the **controller**, not a command:
 
 ```text
-sudo bash scripts/add-target.sh --name NAME --address ADDRESS --group GROUP --fingerprint SHA256:...
+Add this VM on the controller: in the guide's folder, run
+  sudo bash scripts/add-target.sh --from-info
+then paste these lines and press Ctrl-D:
+name=NAME
+address=ADDRESS
+group=GROUP
+fingerprint=SHA256:...
 ```
 
-It prints data, not a program: check that what you paste is that single
-`add-target.sh` command, then run it. [`scripts/add-target.sh`](../scripts/add-target.sh)
-scans the VM, keeps only the host key that matches the fingerprint read through
-authenticated Run Command, refuses a name or address already in use and a
-different key already trusted for the address, adds the inventory entry and
-records the key in `/etc/semaphore/known_hosts`. Running the same line again
-reports `Already present` and changes nothing. This updates the seeded **local
-file inventory**; a Static inventory saved in Semaphore or an inventory fetched
-from Git is a separate source.
+On the controller, in the guide's folder, run that command, paste the four
+lines or the whole output, and press Ctrl-D. A VM's output is untrusted, so
+only reviewed code on the controller acts on it, as
+[the onboarding page](ONBOARDING.md#why-the-vm-prints-lines-not-a-command)
+explains. [`scripts/add-target.sh`](../scripts/add-target.sh) reads the whole
+paste first, takes only the `name=`, `address=`, `group=` and `fingerprint=`
+values, refuses one that is not a plain name, address or fingerprint, and
+ignores every other line. It then scans the VM, keeps only the host key that
+matches the fingerprint read through authenticated Run Command, refuses a name
+or address already in use and a different key already trusted for the address,
+adds the inventory entry and records the key in `/etc/semaphore/known_hosts`.
+Pasting the same lines again reports `Already present` and changes nothing.
+This updates the seeded **local file inventory**; a Static inventory saved in
+Semaphore or an inventory fetched from Git is a separate source.
 
 The collector prints warnings if the automation account, password, authorized
 keys or sudo validation is incomplete. Resolve them, give Semaphore the sudo
@@ -540,12 +559,14 @@ their sudo passwords differ. What the test saw on all three targets:
   clone step.
 
 - In the October test, on a new pay-as-you-go subscription, every way of
-  preparing a VM above ended with its `add-target.sh` line, and each line,
-  pasted on an AlmaLinux 9.8 controller, added its target: RHEL 9.8 through
-  pasted Run Command, AlmaLinux 9.8 through cloud-init and a managed Run
-  Command, Rocky Linux 9.8 through cloud-init and the bootstrap playbook, and
-  Ubuntu 24.04 Pro through the bootstrap playbook alone. Ping and Baseline
-  preview then succeeded on all four.
+  preparing a VM above gave the values `add-target.sh` needs, and
+  `add-target.sh`, on an AlmaLinux 9.8 controller, added each target with
+  them: RHEL 9.8 through pasted Run Command, AlmaLinux 9.8 through cloud-init
+  and the bootstrap playbook, Rocky Linux 9.8 through cloud-init and a managed
+  Run Command, and Ubuntu 24.04 Pro through the bootstrap playbook alone.
+  Ping and Baseline preview then succeeded on all four. At the time, the
+  scripts on the VMs printed a whole command rather than lines for
+  `--from-info`.
 
 Repeat the provisioning playbooks, too: in the test, `network.yml`,
 `controller.yml` and `targets.yml` reported `changed=0` on a second run, and the

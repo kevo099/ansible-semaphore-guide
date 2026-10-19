@@ -1,17 +1,19 @@
 #!/bin/sh
 # Paste this WHOLE file into the TARGET VM's Azure Run Command > RunShellScript.
-# It reads local information only and prints data: the VM's status, then one
-# scripts/add-target.sh line to run in the guide checkout on the controller.
+# It reads local information only and prints data: the VM's status, then the
+# name=, address=, group= and fingerprint= lines to paste into
+# scripts/add-target.sh --from-info in the guide's folder on the controller.
+# It no longer takes the controller's lab folder (LAB_DIR): for a folder other
+# than /opt/ansible-lab, add --lab-dir DIR to that command on the controller.
 CONTROLLER_ADDRESS=''              # Set the controller IP to select the route's source address.
 TARGET_ADDRESS=''                  # Optional: choose an assigned target IPv4 explicitly.
 INVENTORY_NAME=''                  # Optional: otherwise use this VM's short hostname.
-LAB_DIR='/opt/ansible-lab'           # The controller's seeded lab folder.
 
 command -v python3 >/dev/null 2>&1 || {
     echo 'INFO FAILED: python3 is missing; finish the target bootstrap first.'
     exit 1
 }
-python3 - "$CONTROLLER_ADDRESS" "$TARGET_ADDRESS" "$INVENTORY_NAME" "$LAB_DIR" <<'PY_INFO'
+python3 - "$CONTROLLER_ADDRESS" "$TARGET_ADDRESS" "$INVENTORY_NAME" <<'PY_INFO'
 import ipaddress
 import json
 import os
@@ -22,9 +24,6 @@ import shlex
 import socket
 import subprocess
 import sys
-
-# add-target.sh looks here unless it is given --lab-dir.
-DEFAULT_LAB_DIR = "/opt/ansible-lab"
 
 def run(args):
     try:
@@ -75,22 +74,21 @@ def group_for(release):
         return "enterprise_linux"
     raise ValueError("Guide targets supported here: Ubuntu 24.04 or RHEL/AlmaLinux/Rocky 9.")
 
-def build_command(name, address, group, fingerprint, folder):
-    # Plain tokens only, each passing add-target.sh's own checks, so the line is
-    # data for reviewed code on the controller and you can read it before running it.
+def build_info(name, address, group, fingerprint):
+    # Data, not a command: the controller does not trust this VM, so only its own
+    # reviewed add-target.sh reads these values, and checks them again there.
     require(bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}", name)),
             "INVENTORY_NAME must be a plain hostname, at most 63 characters.")
     ipv4(address)
     require(group in ("ubuntu", "enterprise_linux"), "Unsupported inventory group.")
     require(bool(re.fullmatch(r"SHA256:[A-Za-z0-9+/]{43}", fingerprint)), "Invalid RSA fingerprint.")
-    require(bool(re.fullmatch(r"/[A-Za-z0-9._/-]{0,199}", folder)),
-            "LAB_DIR must be an absolute path of letters, digits and . _ - /, at most 200 characters.")
-    command = ("sudo bash scripts/add-target.sh --name " + name + " --address " + address
-               + " --group " + group + " --fingerprint " + fingerprint)
-    return command if folder == DEFAULT_LAB_DIR else command + " --lab-dir " + folder
+    return ("Add this VM on the controller: in the guide's folder, run\n"
+            "  sudo bash scripts/add-target.sh --from-info\n"
+            "then paste these lines and press Ctrl-D:\n"
+            "name=" + name + "\naddress=" + address + "\ngroup=" + group + "\nfingerprint=" + fingerprint + "\n")
 
 def main(args):
-    controller, explicit, requested_name, folder = args
+    controller, explicit, requested_name = args
     controller = ipv4(controller) if controller else ""
     interfaces = run(["ip", "-j", "-4", "address", "show", "scope", "global"])
     require(interfaces.returncode == 0, "Cannot read the VM's network addresses.")
@@ -112,7 +110,7 @@ def main(args):
     require(hostkey.returncode == 0 and hostkey.stdout.rstrip().endswith("(RSA)"),
             "Cannot read the target's RSA host public key. Finish SSH setup first.")
     fingerprint = hostkey.stdout.split()[1]
-    command = build_command(name, address, group, fingerprint, folder)
+    info = build_info(name, address, group, fingerprint)
     states = []
     try:
         account = pwd.getpwnam("svc_ansible")
@@ -132,11 +130,10 @@ def main(args):
         states.append("WARNING: sudo validation unavailable")
     summary = ("VM: " + name + " | " + address + " | " + release["ID"] + " " + release["VERSION_ID"]
                + "\nRSA: " + fingerprint + "\n" + "; ".join(states))
-    output = (summary + "\nInventory setup only; access still needs Ping/sudo testing."
-              + "\nAdd it on the controller, in the guide checkout:\n  " + command + "\n")
+    output = summary + "\nInventory setup only; access still needs Ping/sudo testing.\n" + info
     # Azure action Run Command keeps the last 4 KB. Never emit a truncated line.
     require(len(output.encode()) <= 3900,
-            "Output would exceed Azure's 4 KB limit. Shorten INVENTORY_NAME/LAB_DIR.")
+            "Output would exceed Azure's 4 KB limit. Shorten INVENTORY_NAME.")
     print(output, end="")
 
 if __name__ == "__main__":

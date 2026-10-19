@@ -36,8 +36,8 @@ flowchart TD
     rc --> line
     ssh --> line
     console --> line
-    line["Each of them prints one line:<br/>sudo bash scripts/add-target.sh --name ... --fingerprint SHA256:..."]
-    line --> add["Run that line on the controller, in the guide's folder:<br/>it checks the host key and adds the inventory entry"]
+    line["Each prints name=, address=, group= and fingerprint= lines:<br/>data, not a command. The bootstrap playbook,<br/>built on the controller, prints the whole command."]
+    line --> add["On the controller, in the guide's folder, paste the lines into<br/>sudo bash scripts/add-target.sh --from-info, or run the playbook's command:<br/>it checks the host key and adds the inventory entry"]
     add --> cred{"Does Semaphore have<br/>the sudo password?"}
     cred -- no --> setcred["Add it once: Key Store login,<br/>then the inventory's sudo credentials"]
     setcred --> ping
@@ -55,17 +55,29 @@ flowchart TD
 | --- | --- | --- | --- |
 | 1. Controller | The controller VM, as its administrator | Install once with [`install-controller.sh`](../scripts/install-controller.sh) on Ubuntu 24.04 ([chapter 3](03-controller.md)) or [`install-controller-el9.sh`](../scripts/install-controller-el9.sh) on RHEL, AlmaLinux or Rocky Linux 9 ([chapter 3b](03-controller-el9.md)). | The readiness report says `"passed": true`, and Semaphore lists 22 templates. |
 | 2. Service key | The controller | `sudo cat /etc/semaphore/svc_ansible.pub` prints the key Semaphore logs in with. Insert it wherever the next step asks for the controller's key. | One line starting with `ssh-rsa`. |
-| 3. Prepare `svc_ansible` | The VM, or the controller for the playbook | One of the four ways in [prepare the account](#prepare-the-account). | The run ends with `RESULT: OK`, `svc_ansible is ready`, or a play recap without failures, then the `add-target.sh` line. |
+| 3. Prepare `svc_ansible` | The VM, or the controller for the playbook | One of the four ways in [prepare the account](#prepare-the-account). | `RESULT: OK` or `svc_ansible is ready`, with the `name=`, `address=`, `group=` and `fingerprint=` lines for step 5; from the playbook, the whole `add-target.sh` command and a play recap without failures. |
 | 4. Sudo password | The VM, through the same channel | A SHA-512 hash from `openssl passwd -6` given to `onboard-linux.sh`, or the bootstrap playbook's prompt. cloud-init sets none. | The output says `password: set`. |
-| 5. Add the target | The controller, in the guide's folder | Paste the printed `add-target.sh` line, after checking it is that one command. | `Added NAME ... and trusted its verified host key`, or `Already present` on a repeat. |
+| 5. Add the target | The controller, in the guide's folder | Run `sudo bash scripts/add-target.sh --from-info`, paste the lines the VM printed, or its whole output, and press Ctrl-D on a new line. Add any option the output names, such as `--address`, and `--lab-dir DIR` for a lab folder other than `/opt/ansible-lab`. After the bootstrap playbook, run the command it printed instead. | The values it uses, then `Added NAME ... and trusted its verified host key`, or `Already present` on a repeat. |
 | 6. Semaphore's sudo password | Semaphore, once per password | [Give the templates the targets' sudo password](03-controller-el9.md#do-give-the-templates-the-targets-sudo-password): one shared password, or one per target with Vault. | The **Lab inventory file** shows the sudo credential. |
 | 7. Verify | Semaphore | Run **Ping**, then **Baseline preview**. Both cover every host in the `lab` group, the new one included. | Both succeed for the new host; Ping names its distribution. |
+
+### Why the VM prints lines, not a command
+
+Whoever controls a VM controls what it prints, so the guide treats that output
+as untrusted. Pasted into a root shell on the controller, a line that only
+looks like the expected command could run anything there. The scripts on the
+VM therefore print data, and only reviewed code on the controller acts on it:
+`add-target.sh --from-info` reads the whole paste before it does anything,
+takes the four values, checks each as it checks its options, and ignores every
+other line. The bootstrap playbook is the one exception: it runs on the
+controller and builds its command there, from the controller's inventory and a
+fingerprint it checks.
 
 ### Prepare the account
 
 | Your VM | Use | How |
 | --- | --- | --- |
-| You are creating it and can give it custom data | [`examples/onboard/cloud-init.yaml`](../examples/onboard/cloud-init.yaml) | Replace the quoted key placeholder with the service key and pass the file as custom data, or let [`examples/azure/targets.yml`](../examples/azure/targets.yml) do it. Set the password afterwards with one of the next two ways, then read the add-target line with [`inventory-info.sh`](../examples/onboard/inventory-info.sh) through Run Command or from the end of `/var/log/cloud-init-output.log`. |
+| You are creating it and can give it custom data | [`examples/onboard/cloud-init.yaml`](../examples/onboard/cloud-init.yaml) | Replace the quoted key placeholder with the service key and pass the file as custom data, or let [`examples/azure/targets.yml`](../examples/azure/targets.yml) do it. Set the password afterwards with one of the next two ways, then read the lines for `add-target.sh --from-info` with [`inventory-info.sh`](../examples/onboard/inventory-info.sh) through Run Command, or from the end of `/var/log/cloud-init-output.log`. |
 | It exists, and Azure Run Command can reach it | [`examples/onboard/onboard-linux.sh`](../examples/onboard/onboard-linux.sh) | Paste the edited script into **Run command → RunShellScript**, or run it with `az vm run-command`, as [chapter 13](13-azure.md#do-onboard-an-existing-vm-with-run-command) shows. No SSH is needed. |
 | It exists, and the controller can log in as its administrator | [`examples/bootstrap-existing-vm.yml`](../examples/bootstrap-existing-vm.yml) | Run it from the controller, one host at a time, as [chapter 13](13-azure.md#do-finish-access-with-one-playbook) shows; it asks for the sudo password. |
 | It exists, and you have a console or SSH with sudo | `onboard-linux.sh` | Copy the edited script to the VM and run `sudo bash onboard-linux.sh`. |
@@ -83,9 +95,12 @@ controller from either installer and VMs created in the portal:
    service key between the `END_OF_KEYS` lines and a hash from
    `openssl passwd -6` in `PASSWORD_HASH`, and run it. Set
    `CONTROLLER_ADDRESS` to the controller's private address, so the printed
-   line carries the address the controller reaches.
-2. On the controller, in the guide's folder, run the `add-target.sh` line
-   that the output ends with.
+   `address=` line is the address the controller reaches.
+2. On the controller, in the guide's folder, run
+   `sudo bash scripts/add-target.sh --from-info`, paste the `name=`,
+   `address=`, `group=` and `fingerprint=` lines from the end of the output,
+   and press Ctrl-D. Pasting the whole output works too: every other line is
+   ignored.
 3. In Semaphore, add the sudo password once, then run **Ping**, which covers
    every host in the `lab` group.
 
@@ -101,6 +116,7 @@ for; [chapter 13](13-azure.md) has both.
 | Symptom | Likely cause | Next step |
 | --- | --- | --- |
 | `RESULT: FAILED: ...` from `onboard-linux.sh` | The message names it: a key the SSH policy refuses, a `NOPASSWD` rule, an SSH setting that overrides the account's | Fix what it names and run the script again; it changed nothing that would lock you out. |
+| `add-target.sh` refuses the pasted lines | A line is missing because the VM could not read its value, a line appears twice, a value is also given as an option, or a value is not a plain name, address or fingerprint | Nothing changed. Add the option the VM's output named, such as `--address`, paste one VM's lines at a time, and read a refused value again through Run Command or the console. |
 | `add-target.sh` says `No scanned key matched` | The fingerprint is from another VM, or the VM was rebuilt | Read the fingerprint again through Run Command or the console; never take it from the scan. |
 | `add-target.sh` says `Known-hosts already contains a different key` | The address belonged to an earlier VM | Verify why, then follow the commands it prints to remove the old key. |
 | Ping fails with `Permission denied (publickey)` | `svc_ansible` lacks the service key, or an `AllowUsers`/`AllowGroups` rule leaves it out | Compare `sudo ssh-keygen -lf /home/svc_ansible/.ssh/authorized_keys` on the VM with the service key; run the onboarding again with the right key. |

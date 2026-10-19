@@ -34,7 +34,7 @@ Run each playbook from this folder with
 | 2 | [`controller.yml`](controller.yml) | Optional controller with a static public address; SSH from your prefix only |
 | 3 | Install the controller | [Chapter 3](../../docs/03-controller.md) or [3b](../../docs/03-controller-el9.md); then copy its service key into `files/` |
 | 4 | [`targets.yml`](targets.yml) | Target VMs with private addresses, prepared by cloud-init |
-| 5 | Onboard each target | [The onboarding page](../../docs/ONBOARDING.md): sudo password, then `add-target.sh` on the controller |
+| 5 | Onboard each target | [The onboarding page](../../docs/ONBOARDING.md): sudo password, then `add-target.sh --from-info` on the controller with the lines each target prints |
 | 6 | [`power.yml`](power.yml) | `-e azure_power=deallocated` stops compute billing; `running` starts it again |
 | 7 | [`remove.yml`](remove.yml) | `-e remove_confirm=RESOURCE_GROUP` removes what the lab created |
 

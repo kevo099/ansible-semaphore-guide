@@ -42,7 +42,7 @@ write_files:
 # Package names differ by family, so install them here rather than in packages:.
 # Every check reports to the console log (/var/log/cloud-init-output.log), and
 # any failure makes cloud-init report an error. A successful run ends with the
-# add-target.sh line that adds this VM on the controller.
+# lines to paste into scripts/add-target.sh --from-info on the controller.
 runcmd:
   - - /bin/bash
     - -c
@@ -236,17 +236,34 @@ runcmd:
         exit 1
       fi
       echo "onboard: svc_ansible is ready; set its sudo password next"
-      # The controller command that adds this VM, from values read here and nothing
-      # else, so it is a single add-target.sh line you can check before running it.
-      # Without the controller's address, only a single global IPv4 address is used.
+      # The values add-target.sh --from-info reads on the controller, as data that only
+      # its reviewed code acts on, as in onboard-linux.sh. Without the controller's
+      # address, only a single global IPv4 address is used. A value that cannot be
+      # read here is left out, and the option that supplies it is named instead.
       inventory_name=$(hostname -s 2>/dev/null)
-      [[ $inventory_name =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || inventory_name=NAME
       mapfile -t global_addresses < <(ip -o -4 addr show scope global 2>/dev/null | awk '{sub(/\/.*/, "", $4); print $4}')
-      target_address=ADDRESS
-      if [ "${#global_addresses[@]}" -eq 1 ] && [[ ${global_addresses[0]} =~ ^[0-9A-Fa-f.:]+$ ]]; then
-        target_address=${global_addresses[0]}
-      fi
       rsa_fingerprint=$(ssh-keygen -lf /etc/ssh/ssh_host_rsa_key.pub 2>/dev/null | awk '{print $2}')
-      [[ $rsa_fingerprint =~ ^SHA256:[A-Za-z0-9+/]+$ ]] || rsa_fingerprint=FINGERPRINT
-      echo "onboard: then add it on the controller, in the guide checkout (replace NAME, ADDRESS or FINGERPRINT if shown, and add --lab-dir DIR for a lab folder other than /opt/ansible-lab):"
-      echo "onboard:   sudo bash scripts/add-target.sh --name $inventory_name --address $target_address --group $inventory_group --fingerprint $rsa_fingerprint"
+      info=() options=()
+      if [[ $inventory_name =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+        info+=("name=$inventory_name")
+      else
+        options+=("--name with the name the inventory should use")
+      fi
+      if [ "${#global_addresses[@]}" -eq 1 ] && [[ ${global_addresses[0]} =~ ^[0-9A-Fa-f.:]+$ ]]; then
+        info+=("address=${global_addresses[0]}")
+      else
+        options+=("--address with the address the controller reaches")
+      fi
+      info+=("group=$inventory_group")
+      if [[ $rsa_fingerprint =~ ^SHA256:[A-Za-z0-9+/]+$ ]]; then
+        info+=("fingerprint=$rsa_fingerprint")
+      else
+        options+=("--fingerprint with the RSA host key's fingerprint, read from the console")
+      fi
+      echo "onboard: Add this VM on the controller: in the guide's folder, run"
+      echo "onboard:   sudo bash scripts/add-target.sh --from-info"
+      for option in "${options[@]}"; do
+        echo "onboard: and add $option,"
+      done
+      echo "onboard: then paste these lines and press Ctrl-D:"
+      printf 'onboard: %s\n' "${info[@]}"
