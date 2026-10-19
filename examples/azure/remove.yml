@@ -67,7 +67,9 @@
       loop_control:
         label: "{{ item.name }}"
 
-    - name: Remove each VM only; its OS disk is deleted with it
+    # Remove the VMs at once; their network interfaces go only after every VM is gone.
+    # While it waits, Ansible prints "FAILED - RETRYING" lines; they only mean "not yet".
+    - name: Remove each VM only, all together; its OS disk is deleted with it
       azure.azcollection.azure_rm_virtualmachine:
         resource_group: "{{ azure_resource_group }}"
         name: "{{ item.name }}"
@@ -76,6 +78,29 @@
       loop: "{{ azure_remove_vms }}"
       loop_control:
         label: "{{ item.name }}"
+      async: 1800
+      poll: 0
+      register: azure_remove_jobs
+      changed_when: false
+
+    - name: Wait until each VM is removed; a failed one shows Azure's reason
+      ansible.builtin.async_status:
+        jid: "{{ item.ansible_job_id }}"
+      loop: "{{ azure_remove_jobs.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      register: azure_remove_job
+      until: azure_remove_job.finished
+      retries: 120
+      delay: 15
+
+    - name: Remove the finished jobs' results from ~/.ansible_async
+      ansible.builtin.async_status:
+        jid: "{{ item.ansible_job_id }}"
+        mode: cleanup
+      loop: "{{ azure_remove_jobs.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
 
     - name: Remove the lab's network interfaces by name
       azure.azcollection.azure_rm_networkinterface:
