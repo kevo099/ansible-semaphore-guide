@@ -395,12 +395,12 @@ from release `v1.5.0` on. An Ubuntu controller from an earlier release has no
 seeded project, so the script refuses it; build its project by hand as
 [chapter 6](06-semaphore.md) describes. The installers refuse to run a second
 time, so use [`scripts/update-controller.sh`](../scripts/update-controller.sh)
-instead of installing again. Get the newer copy of the guide first; replace
-`v1.7.0` with the release you want:
+instead of installing again. Get the newer copy of the guide first, in a new
+folder for each release; replace `v1.8.0` with the release you want:
 
 ```bash
-git clone --branch v1.7.0 https://github.com/kevo099/ansible-semaphore-guide.git ~/guide-new
-cd ~/guide-new
+git clone --branch v1.8.0 https://github.com/kevo099/ansible-semaphore-guide.git ~/guide-v1.8.0
+cd ~/guide-v1.8.0
 sudo bash scripts/update-controller.sh
 ```
 
@@ -454,16 +454,23 @@ swap is undone, your version stays, and the update stops. It writes the files
 as the lab folder's owner, so the `semaphore` group can still read them,
 restores SELinux labels on Enterprise Linux, and commits them in the folder's
 Git history with `.guide-files.json`, the record of the guide's own versions
-that the next update compares with. `git revert HEAD` in the folder undoes that
-commit; running the update again applies it again. A second run reports
-nothing to do.
+that the next update compares with. A second run reports nothing to do.
+
+`git revert HEAD` in the folder undoes that commit's files, not the Semaphore
+changes: the tabs and templates the update added stay and need those files,
+and templates removed with `--remove-replaced` stay removed. The next update
+then stops and names the revert commit; to apply the update again, revert that
+commit with `git revert COMMIT` as the folder's owner and run the update.
 
 **From one STIG tab to one per system.** Release `v1.7.0` replaced the single
 **STIG** tab with one tab per system and version. An update adds the new tabs
-and templates and keeps the four old STIG templates, the **STIG** tab and the
-**Local SCAP content** variable group, so nothing you ran disappears; the old
-templates still work and audit every supported system at once. The plan lists
-them as replaced. If you scanned with a SCAP file of your own, move it into its
+and templates and keeps the old STIG objects, so nothing you ran disappears;
+the old templates still work and audit every supported system at once. Which
+old objects a controller has depends on the release it was installed from or
+last updated to: from `v1.6.x`, four STIG templates, the **STIG** tab and the
+**Local SCAP content** variable group; from `v1.5.0`, the four templates and
+the variable group, without a tab; from earlier releases, three templates. The
+plan lists them as replaced. If you scanned with a SCAP file of your own, move it into its
 system's folder, for example with
 `mv /opt/ansible-lab/content/U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.xml /opt/ansible-lab/content/rhel/9/`
 as the folder's owner, where the variable group **DISA SCAP file · RHEL 9**
@@ -499,14 +506,18 @@ share the seeded project's name, pass `--project-id` with its ID.
 
 If you changed the administrator's password in the UI, the stored installer
 password no longer works, and it asks for a Semaphore administrator's login and
-password at the terminal. For an unattended run, create an API token as
+password at the terminal. A password login cannot pass a second factor, so
+when the administrator uses one, as [chapter 15](15-identity.md) sets up, use a
+token. For a token, or an unattended run, create an API token for an
+administrator or the project's owner as
 [chapter 17](17-api-and-integrations.md#do-inspect-swagger-and-token-access)
-shows and pass it as `SEMAPHORE_API_TOKEN` with
-`sudo --preserve-env=SEMAPHORE_API_TOKEN`.
+shows, pass it as `SEMAPHORE_API_TOKEN` with
+`sudo --preserve-env=SEMAPHORE_API_TOKEN`, and delete the token afterwards.
 
 **Check:** the **Task Templates** page shows the tabs **Lessons**, **Patching**
-and one **STIG ·** tab per system beside **All**, plus the old **STIG** tab
-until you remove it, and **Ping** still succeeds.
+and one **STIG ·** tab per system beside **All**, and **Ping** still succeeds.
+On a controller updated from `v1.6.x`, the old **STIG** tab stays until you
+remove it; older controllers keep their old STIG templates under **All**.
 
 ## Concept
 

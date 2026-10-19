@@ -28,7 +28,11 @@ Select a region and VM size that your subscription actually permits: check
 the regional vCPU quota with `az vm list-usage --location REGION` and the size
 list with `az vm list-skus`. Some subscriptions, such as free trials, allow only
 a few vCPUs per region, which is less than a controller and three targets at
-the guide's sizes need.
+the guide's sizes need. A size can also be missing from one subscription: in
+the October test a new pay-as-you-go subscription had no quota for
+`Standard_D2als_v6` and 10 vCPUs per region for `Standard_D2als_v7`, which
+held a controller and four targets. Both sizes attach disks over NVMe only, so
+the image must support NVMe; the Marketplace images the examples name do.
 
 Decide how the controller will reach the targets. The examples give the
 targets private addresses only and allow SSH to them from one address prefix,
@@ -95,11 +99,29 @@ $EDITOR examples/azure/vars.yml
 
 Replace every `REPLACE_` value: subscription, owner and expiry tags, a private
 address space you do not use elsewhere, a subnet inside it, one address per VM
-inside the subnet, and the address prefix the targets accept SSH from. The
-playbooks refuse to run while any `REPLACE_` value remains or the owner or
-expiry tag is missing. `azure_admin_public_key_file` is your bootstrap
-administrator's public key. `azure_automation_public_key_file` is a copy of the
-controller's `~/.ssh/ansible_lab.pub` from [chapter 4, step 1](04-access.md#step-1-generate-the-automation-key).
+inside the subnet, and the address prefix the targets accept SSH from. Keep
+the quotes around the expiry date. The playbooks refuse to run while any
+`REPLACE_` value remains or the owner or expiry tag is missing.
+
+The playbooks also need two public keys, and stop before creating anything
+when either file is missing or is not a public key:
+
+- `azure_admin_public_key_file` is the key of each VM's administrator, which
+  only your workstation holds. Make it an RSA key: after the vendor STIG,
+  Enterprise Linux refuses Ed25519 keys, which OpenSSH now makes by default.
+
+  ```bash
+  ssh-keygen -t rsa -b 4096 -f ~/.ssh/azure_bootstrap
+  ```
+
+- `azure_automation_public_key_file` is the key Semaphore logs in with,
+  copied into `examples/azure/files/`, which Git ignores. On a controller
+  made by either installer, that is the service key; copy the output of
+  `sudo cat /etc/semaphore/svc_ansible.pub` on the controller into
+  `examples/azure/files/svc_ansible.pub` and point the variable at it. Without
+  a seeded controller, use `~/.ssh/ansible_lab.pub` from
+  [chapter 4, step 1](04-access.md#step-1-generate-the-automation-key).
+  cloud-init takes one key; the password step can add more.
 
 ## Do: create the network
 
@@ -115,10 +137,15 @@ security group, the VNet and the subnet. The security group allows SSH from
 
 ## Optional Do: run the controller in Azure
 
-`controller.yml` creates an Ubuntu 24.04 controller with a static public
+`controller.yml` creates the controller from `azure_controller.image`, Ubuntu
+24.04 in the example (the tests also used AlmaLinux 9.8), with a static public
 address and a security group that allows SSH from `operator_cidr` and denies
 all other inbound traffic. The explicit deny matters: Azure's default rules
 would otherwise let every VM in the VNet reach every port on the controller.
+The playbook owns every rule in that security group, so a rule you add by hand
+disappears on its next run; to reach the UI over HTTPS, set
+`azure_controller.https_cidr` to your own address prefix instead, and it opens
+port 443 from there.
 
 ```bash
 ~/azure-venv/bin/ansible-playbook -i localhost, controller.yml
@@ -135,9 +162,16 @@ ssh-keyscan -t rsa CONTROLLER_PUBLIC_ADDRESS | ssh-keygen -lf -
 ```
 
 Continue only when the two fingerprints match. Then install the controller as
-[chapter 3](03-controller.md) describes. The test ran
-`sudo bash scripts/install-controller.sh --apply` from the guide at tag
-`v1.3.0`, and every readiness check passed.
+[chapter 3](03-controller.md) or [3b](03-controller-el9.md) describes, from
+the current release. To publish the UI over HTTPS in the same run, give the
+installer the public address the certificate must name:
+
+```bash
+sudo bash scripts/install-controller.sh --apply --expose https --address CONTROLLER_PUBLIC_ADDRESS
+```
+
+Without `--address`, the certificate names the VM's private address, which
+your browser does not use.
 
 ## Do: create the targets with cloud-init
 
@@ -181,6 +215,26 @@ because cloud-init gives the administrator passwordless sudo.
 **Check:** `sudo grep onboard /var/log/cloud-init-output.log` on a target
 shows `onboard: svc_ansible is ready; set its sudo password next`. Run it
 through Run Command if you have no SSH path yet.
+
+**Rocky Linux** comes from the Rocky Enterprise Software Foundation's
+Marketplace image, which carries a plan: give the target the `plan` line that
+`vars.example.yml` shows, and accept the image's terms once per subscription
+before the first run:
+
+```bash
+az vm image terms show --urn resf:rockylinux-x86_64:9-base:latest --query accepted -o tsv
+az vm image terms accept --urn resf:rockylinux-x86_64:9-base:latest
+```
+
+Without the plan, Azure refuses the VM with `VMMarketplaceInvalidInput`. The
+foundation's Community Gallery images need no terms but declare no NVMe
+support, so they do not start on the NVMe-only sizes above.
+
+An image is chosen when the VM is created; editing it in `vars.yml` later,
+for example to the Ubuntu Pro image the STIG lessons need, changes nothing on
+the existing VM. Recreate the VM instead. When a create fails, Azure can keep a
+VM in the `Failed` state that later runs cannot update; delete it with
+`az vm delete -g RESOURCE_GROUP -n VM_NAME --yes` and run `targets.yml` again.
 
 ### Paste it into the portal instead
 

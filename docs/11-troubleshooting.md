@@ -11,6 +11,7 @@ or loosen security controls without understanding what failed.
 
 | Symptom | Check first | Appropriate next step |
 | --- | --- | --- |
+| A newly onboarded target fails `add-target.sh`, Ping or its first sudo task | Which onboarding step did not finish | Follow [when a step fails](ONBOARDING.md#when-a-step-fails) on the onboarding page. |
 | SSH times out | Correct guest/address, route, firewall and listening SSH service | Use the trusted console to verify networking and daemon state. |
 | Host-key mismatch | Was the guest rebuilt, rolled back, or replaced at the same address? | Verify the current fingerprint through a trusted independent path before updating only its matching pin. |
 | Permission denied (publickey) | Login name, selected key, authorized-key permissions and algorithm policy | Compare the intended public key to the target's authorized key; inspect the SSH debug output privately. |

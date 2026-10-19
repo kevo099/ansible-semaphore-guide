@@ -304,8 +304,10 @@ packaged Ansible playbook applied on RHEL above.
   each skipped host and its system. On the hosts it keeps, it installs the
   scanner where missing, runs the assessment, keeps the XML and HTML on the
   target under `/var/log/stig-practice/`, fetches them to the controller under
-  `~/stig-reports/<system>/<version>/`, for example `~/stig-reports/rhel/9/`,
-  and prints outcome counts. If no host in the group runs that system, the run
+  `stig-reports/<system>/<version>/` in the home of the account that runs the
+  playbook, for example `/var/lib/semaphore/stig-reports/rhel/9/` for a
+  Semaphore run and `~/stig-reports/rhel/9/` for your own CLI run, and prints
+  outcome counts. If no host in the group runs that system, the run
   stops and says which systems the hosts run. It changes no policy. Ubuntu needs `usg` already
   installed through your own Ubuntu Pro attachment. Without it, that host fails
   with an explanation while the other hosts' scans still complete.
@@ -325,7 +327,10 @@ packaged Ansible playbook applied on RHEL above.
   [scan with a local SCAP content file](#scan-with-a-local-scap-content-file).
 
 From the CLI, run the playbook of the system you mean, for example
-`ansible-playbook playbooks/stig/rhel/9/audit.yml --limit enterprise_linux`.
+`ansible-playbook playbooks/stig/rhel/9/audit.yml --limit enterprise_linux -K`.
+`-K` sends the one password you type to every host that the run uses sudo on,
+so when your targets have different sudo passwords, limit the run to one host,
+such as `--limit lab-rhel`, or use the Vault option.
 The shared `playbooks/stig-audit.yml` still audits every supported system in
 its limit at once, with reports under `~/stig-reports/`, and
 `playbooks/stig-apply.yml` applies to whichever single host you name.
@@ -336,7 +341,16 @@ mode.
 **Check:** after an audit, the task log shows for each host a JSON summary of
 pass, fail, not-applicable and not-checked counts, then where its reports are:
 on the target, and under the controller home of the service or of your
-account, depending on where you ran it. If the summary shows
+account, depending on where you ran it. Only the `semaphore` account and root
+can read the service's home; copy a Semaphore run's reports to your own account
+to open them, with the stamp folder the log names:
+
+```bash
+sudo cp -r /var/lib/semaphore/stig-reports/rhel/9/STAMP ~/
+sudo chown -R "$USER": ~/STAMP
+```
+
+If the summary shows
 `has_scanner_errors_or_unknowns: true`, a warning follows it. Treat that scan
 as incomplete and see
 [chapter 11](11-troubleshooting.md#benchmark-result-surprises) before
@@ -409,7 +423,7 @@ and pass the same two variables:
 
 ```bash
 cd /opt/ansible-lab
-/opt/ansible-venv/bin/ansible-playbook playbooks/stig/rhel/9/audit.yml --limit enterprise_linux \
+/opt/ansible-venv/bin/ansible-playbook playbooks/stig/rhel/9/audit.yml --limit lab-rhel \
   --private-key ~/.ssh/ansible_lab -K \
   -e '{"stig_content_file": "content/rhel/9/U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.xml", "stig_content_profile": "xccdf_mil.disa.stig_profile_MAC-1_Classified"}'
 ```

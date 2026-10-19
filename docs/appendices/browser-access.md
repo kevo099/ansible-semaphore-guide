@@ -45,9 +45,8 @@ to browse to its address. **Where: the controller, from the repository root.**
 sudo bash scripts/expose-semaphore.sh --mode https
 ```
 
-The script works on both installation paths. The Enterprise Linux installer
-can also do it in the same run with `--expose https`; the Ubuntu installer has
-no such option.
+The script works on both installation paths, and either installer can also do
+it in the same run with `--expose https` (or `--expose http`).
 
 It installs nginx with a locally generated self-signed certificate on port
 443, proxies to the still loopback-only Semaphore, opens 443 in the host

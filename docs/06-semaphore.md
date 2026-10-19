@@ -219,8 +219,9 @@ Launch a template with its run (▶) button, then **Run** in the dialog. The
 dialog's **Dry Run** (`--check`) and **Diff** (`--diff`) switches apply to that
 one run only; the preview templates keep those arguments fixed so a preview is
 repeatable. Templates for the STIG playbooks, such as
-[the four that both installers seed](09-security-benchmarks.md#the-seeded-stig-templates), refuse Dry Run
-because the scanner does not run in check mode.
+[the 14 that both installers seed](09-security-benchmarks.md#the-seeded-stig-templates),
+three or four on each **STIG ·** tab, refuse Dry Run because the scanner does not
+run in check mode.
 
 1. Run **Ubuntu — Ping**. Verify target identity, `changed=0`, and no failures.
 2. Run **Baseline preview**. Read all predicted changes and skipped tasks.
