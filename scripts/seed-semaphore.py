@@ -10,13 +10,15 @@ With --update, scripts/update-controller.sh runs it on a controller that is
 already seeded: it adds the variable groups, template tabs and templates this
 release seeds that the project lacks, and puts untabbed seeded templates on
 their tab. Seeded objects that this release replaces are reported and kept;
---remove-replaced deletes them. It changes nothing else. --plan shows what an
-update would do.
+--remove-replaced deletes them, except a template that a schedule or
+integration still runs. It changes nothing else. --plan shows what an update
+would do.
 """
 
 import argparse
 import copy
 import getpass
+import http.client
 import http.cookiejar
 import json
 import os
@@ -24,10 +26,17 @@ from pathlib import Path
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 API = "http://127.0.0.1:3000/api"
 MARKER = Path("/etc/semaphore/.practice-project-seeded")
+PASSWORD_FILE = Path("/etc/semaphore/initial-admin-password")
+# Root-only template backups and records of unconfirmed edits, kept by updates.
+BACKUP_DIR = Path("/root/ansible-lab-update")
+# Semaphore's project permission to change templates, tabs and variable groups
+# (CanManageProjectResources): owners and managers have it; administrators need none.
+CAN_MANAGE_PROJECT_RESOURCES = 4
 
 RECOVERY_PROMPT = [{
     "name": "recovery_snapshot_ack",
@@ -111,11 +120,17 @@ VIEWS = [
 ] + [(stig_tab(system[0]), [lesson[0] for lesson in stig_lessons(*system)]) for system in STIG_SYSTEMS]
 VIEW_OF = {name: title for title, names in VIEWS for name in names}
 
-# What releases before 1.7.0 seeded and the per-system STIG tabs replace. Updates
-# report these and keep them; --remove-replaced deletes them, which also deletes
-# the templates' task history. The old templates still run the shared playbooks.
-REPLACED_TEMPLATES = ["STIG audit (vendor scan only)", "STIG apply (vendor fixes, approval required)",
-                      "STIG apply, allow required reboot", "STIG audit, local SCAP content"]
+# What releases before 1.7.0 seeded and the per-system STIG tabs replace, with the
+# name that each system's replacement has after "<system> · ". Updates report
+# these and keep them; --remove-replaced deletes them, which also deletes the
+# templates' task history. Semaphore would delete a template's schedules and
+# integrations with it too, so a template that any of them runs is kept. The old
+# templates still run the shared playbooks.
+REPLACED_BY = {"STIG audit (vendor scan only)": "STIG audit",
+               "STIG apply (vendor fixes, approval required)": "STIG apply (approval required)",
+               "STIG apply, allow required reboot": "STIG apply, allow required reboot",
+               "STIG audit, local SCAP content": "STIG audit, DISA SCAP file"}
+REPLACED_TEMPLATES = list(REPLACED_BY)
 REPLACED_VIEWS = ["STIG"]
 # A replaced variable group is removed only while it still holds what was seeded;
 # one you filled in keeps your values until you delete it yourself.
@@ -197,7 +212,8 @@ def update_plan(existing, repository_id, inventory_id):
     """Pure description of what an update adds, given the project's current objects.
 
     existing holds lists as the API returns them: "environments", "views" (id,
-    title, position) and "templates". Only templates bound to the lab folder's
+    title, position) and "templates", and "triggers", what triggers_of() found
+    for the replaced templates. Only templates bound to the lab folder's
     repository and inventory count as seeded; a template of yours with a seeded
     name elsewhere is never touched. Existing objects are never changed, except
     that a seeded template without a tab is put on its tab. Duplicate names that
@@ -205,13 +221,14 @@ def update_plan(existing, repository_id, inventory_id):
 
     Seeded objects this release replaces are listed under "replaced": the old
     templates, and the old tab and variable group when nothing else uses them.
-    A replaced variable group you filled in is listed under "edited" instead,
-    and kept. Only remove_replaced() deletes anything.
+    A replaced template that a schedule or integration runs, or whose schedules
+    and integrations could not be read, is listed under "in_use" instead, and
+    kept. A replaced variable group you filled in is listed under "edited"
+    instead, and kept. Only remove_replaced() deletes anything.
     """
     env_names = [env["name"] for env in existing["environments"]]
     view_titles = [view["title"] for view in existing["views"]]
-    seeded = [t for t in existing["templates"] if t["name"] in VIEW_OF
-              and t.get("repository_id") == repository_id and t.get("inventory_id") == inventory_id]
+    seeded = lab_templates(existing["templates"], VIEW_OF, repository_id, inventory_id)
     seeded_names = [t["name"] for t in seeded]
     duplicated = sorted({name for name in seeded_names if seeded_names.count(name) > 1})
     missing_templates = [lesson[0] for lesson in LESSONS if lesson[0] not in seeded_names]
@@ -221,8 +238,10 @@ def update_plan(existing, repository_id, inventory_id):
     needed_envs = {lesson[3] for lesson in LESSONS if lesson[0] in missing_templates}
     ambiguous = sorted([f"variable group {name!r}" for name in needed_envs if env_names.count(name) > 1]
                        + [f"tab {title!r}" for title in needed_views if view_titles.count(title) > 1])
-    replaced = [t for t in existing["templates"] if t["name"] in REPLACED_TEMPLATES
-                and t.get("repository_id") == repository_id and t.get("inventory_id") == inventory_id]
+    triggers = existing.get("triggers", {})
+    candidates = lab_templates(existing["templates"], REPLACED_TEMPLATES, repository_id, inventory_id)
+    in_use = [t for t in candidates if triggered(triggers.get(t["id"]))]
+    replaced = [t for t in candidates if t not in in_use]
     others = [t for t in existing["templates"] if t not in replaced]
     return {
         "environments": [name for name in VARIABLE_GROUPS if name not in env_names],
@@ -240,8 +259,29 @@ def update_plan(existing, repository_id, inventory_id):
                              if e["name"] in REPLACED_ENVIRONMENTS and not edited(e)
                              and not any(e["id"] in environments_of(t) for t in others)],
         },
+        "in_use": sorted(({"id": t["id"], "name": t["name"], **trigger_names(triggers.get(t["id"]))}
+                          for t in in_use), key=lambda t: (t["name"], t["id"])),
         "edited": [e["name"] for e in existing["environments"] if e["name"] in REPLACED_ENVIRONMENTS and edited(e)],
     }
+
+
+def lab_templates(templates, names, repository_id, inventory_id):
+    """The templates with these names that run from the lab folder's repository and inventory."""
+    return [t for t in templates if t["name"] in names
+            and t.get("repository_id") == repository_id and t.get("inventory_id") == inventory_id]
+
+
+def triggered(runs):
+    """Whether a replaced template must stay: something runs it, or that could not be read."""
+    return runs is None or bool(runs.get("error") or runs.get("schedules") or runs.get("integrations"))
+
+
+def trigger_names(runs):
+    """What triggers_of() found for one template, reduced to IDs and names."""
+    if runs is None or runs.get("error"):
+        return {"error": (runs or {}).get("error") or "not checked"}
+    return {kind: [{"id": item["id"], "name": item.get("name") or ""} for item in runs[kind]]
+            for kind in ("schedules", "integrations")}
 
 
 def edited(environment):
@@ -273,6 +313,29 @@ def replaced_names(plan):
             + [f"variable group {e['name']!r}" for e in replaced["environments"]])
 
 
+def in_use_names(plan):
+    """The replaced templates that stay because something runs them, as readable lines."""
+    return [f"template {t['name']!r}: {why_kept(t)}" for t in plan["in_use"]]
+
+
+def successors(name):
+    """The per-system templates that replace an old seeded template."""
+    return [lesson[0] for lesson in LESSONS if lesson[0].endswith(f" · {REPLACED_BY[name]}")]
+
+
+def why_kept(template):
+    """Why a replaced template stays, from its trigger_names(), and what to do about it."""
+    if template.get("error"):
+        return (f"its schedules and integrations could not be read ({template['error']}), and Semaphore "
+                "would delete them with it")
+    uses = [f"{kind} {item['name']!r} (ID {item['id']})" if item["name"] else f"{kind} ID {item['id']}"
+            for kind, items in (("schedule", template["schedules"]), ("integration", template["integrations"]))
+            for item in items]
+    return (f"{', '.join(uses)} {'runs' if len(uses) == 1 else 'run'} it. Move its schedules and integrations "
+            f"to the per-system templates that replace it, such as {successors(template['name'])[0]!r}, "
+            "then run the update with --remove-replaced")
+
+
 def first_free_position(views):
     return max((view.get("position") or 0 for view in views), default=-1) + 1
 
@@ -299,12 +362,37 @@ def parse_body(raw):
         return raw.decode("utf-8", "replace")
 
 
+def error_reason(raw):
+    """Semaphore's reason for refusing a request: the "error" field of its JSON answer, shortened."""
+    try:
+        reason = json.loads(raw).get("error")
+    except (ValueError, AttributeError):
+        return ""
+    if not isinstance(reason, str):
+        return ""
+    reason = " ".join("".join(c if c.isprintable() else " " for c in reason).split())
+    return reason if len(reason) <= 200 else reason[:197] + "..."
+
+
+class ApiError(SystemExit):
+    """Semaphore refused a request; the message gives its reason, never the request body."""
+
+    def __init__(self, method, path, status, reason=""):
+        super().__init__(f"{method} {path} failed with HTTP {status}" + (f": {reason}" if reason else ""))
+        self.status, self.reason = status, reason
+
+
 class Client:
     def __init__(self, base, token=None):
         self.base = base
         self.token = token
+        # Semaphore marks its session cookie Secure when its web_host is https. On
+        # loopback, plain http never leaves the controller, so the cookie goes back too.
+        loopback = urllib.parse.urlsplit(base).hostname in ("127.0.0.1", "::1")
+        policy = http.cookiejar.DefaultCookiePolicy(
+            secure_protocols=("https", "wss", "http") if loopback else ("https", "wss"))
         self.opener = urllib.request.build_opener(
-            urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar())
+            urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar(policy))
         )
 
     def call(self, method, path, body=None):
@@ -317,8 +405,13 @@ class Client:
             with self.opener.open(request, timeout=30) as response:
                 raw = response.read()
         except urllib.error.HTTPError as error:
-            # Never echo the request body; it may hold credentials.
-            raise SystemExit(f"{method} {path} failed with HTTP {error.code}") from None
+            # Show Semaphore's own reason from its answer. Never echo the request body;
+            # it may hold credentials.
+            try:
+                answer = error.read(4096)
+            except (OSError, http.client.HTTPException):
+                answer = b""
+            raise ApiError(method, path, error.code, error_reason(answer)) from None
         return parse_body(raw)
 
 
@@ -333,28 +426,36 @@ def wait_ready(client):
 
 
 def log_in(client, admin_login, ask=False):
-    """Use SEMAPHORE_API_TOKEN when set, otherwise the installer's admin password.
+    """Log in and return the user as GET /user describes it.
 
+    Uses SEMAPHORE_API_TOKEN when set, otherwise the installer's admin password.
     With ask, a password that is missing or no longer works (changed in the UI)
     is asked for at the terminal, without echo; it goes only to Semaphore on loopback.
     """
     if client.token:
-        client.call("GET", "/user")
-        return
+        try:
+            return client.call("GET", "/user")
+        except ApiError as error:
+            if error.status != 401:
+                raise
+            raise SystemExit("Semaphore does not accept SEMAPHORE_API_TOKEN: the token is wrong, expired or "
+                             "deleted. Nothing was changed.") from None
     try:
-        password = Path("/etc/semaphore/initial-admin-password").read_text().strip()
+        password = PASSWORD_FILE.read_text().strip()
     except OSError:
         password = None
     if password is not None:
         try:
             client.call("POST", "/auth/login", {"auth": admin_login, "password": password})
-            return
         except SystemExit:
             pass
+        else:
+            return session_user(client)
     if not (ask and sys.stdin.isatty()):
         raise SystemExit("The installer's admin password is missing or no longer logs in. Run this "
                          "from a terminal to be asked for a Semaphore administrator's login and "
-                         "password, or set SEMAPHORE_API_TOKEN to an API token. Nothing was changed.")
+                         "password, or set SEMAPHORE_API_TOKEN to an administrator's API token. "
+                         "Nothing was changed.")
     print("The installer's admin password is missing or no longer logs in (changed in the UI?).",
           file=sys.stderr)
     try:
@@ -366,6 +467,38 @@ def log_in(client, admin_login, ask=False):
         client.call("POST", "/auth/login", {"auth": login, "password": password})
     except SystemExit:
         raise SystemExit("That login and password did not work; nothing was changed.") from None
+    return session_user(client)
+
+
+def session_user(client):
+    """The user of the session a password login opened.
+
+    Semaphore accepts a password before it asks for a second factor, so the
+    login is complete only once GET /user answers.
+    """
+    try:
+        return client.call("GET", "/user")
+    except ApiError as error:
+        if error.status != 401:
+            raise
+        # TOTP_REQUIRED for an account with one-time codes; no reason when no session came back.
+        cause = (f"Semaphore also wants a second factor ({error.reason}), which this script cannot enter"
+                 if error.reason else "Semaphore did not accept the session it had just opened")
+        raise SystemExit(f"The password was accepted, but {cause}. Create an API token for a Semaphore "
+                         "administrator in the UI, set SEMAPHORE_API_TOKEN to it and run this again with "
+                         "sudo --preserve-env=SEMAPHORE_API_TOKEN. Nothing was changed.") from None
+
+
+def check_access(client, user, found):
+    """Stop before any change unless this login may change the project's templates."""
+    if user.get("admin"):
+        return
+    role = client.call("GET", f"{found['base']}/role") or {}
+    if not (role.get("permissions") or 0) & CAN_MANAGE_PROJECT_RESOURCES:
+        raise SystemExit(f"Semaphore user {user.get('username')!r} may not change the templates of project "
+                         f"{found['project']['name']!r} (project role: {role.get('role') or 'none'}). Use the "
+                         "login or API token of a Semaphore administrator, or of the project's owner or a "
+                         "manager. Nothing was changed.")
 
 
 def exactly_one(items, what, hint):
@@ -381,7 +514,10 @@ def resolve(client, project_name, lab_dir, project_id=None):
     matches = ([p for p in projects if p["id"] == project_id] if project_id
                else [p for p in projects if p.get("name") == project_name])
     project = exactly_one(matches, f"project named {project_name!r}",
-                          "Pass --project-id with the ID of the seeded one.")
+                          "Pass --project-id with the ID of the seeded one." if matches else
+                          "A login that is not a Semaphore administrator sees only the projects it belongs "
+                          "to; use the login or API token of an administrator, or of the project's owner or a "
+                          "manager" + (", and check --project-id." if project_id else "."))
     base = f"/project/{project['id']}"
     repository = exactly_one(
         [r for r in client.call("GET", f"{base}/repositories") or []
@@ -392,17 +528,58 @@ def resolve(client, project_name, lab_dir, project_id=None):
          if i.get("type") == "file" and i.get("repository_id") == repository["id"]
          and i.get("inventory") == "inventories/lab.ini"],
         "file inventory inventories/lab.ini in that repository", "Add missing templates by hand.")
+    templates = client.call("GET", f"{base}/templates") or []
+    replaced = lab_templates(templates, REPLACED_TEMPLATES, repository["id"], inventory["id"])
     return {
         "project": project, "base": base, "repository": repository, "inventory": inventory,
         "environments": client.call("GET", f"{base}/environment") or [],
         "views": client.call("GET", f"{base}/views") or [],
-        "templates": client.call("GET", f"{base}/templates") or [],
+        "templates": templates,
+        "triggers": triggers_of(client, base, [t["id"] for t in replaced]),
     }
 
 
 def plan_for(found):
-    return update_plan({key: found[key] for key in ("environments", "views", "templates")},
+    return update_plan({key: found[key] for key in ("environments", "views", "templates", "triggers")},
                        found["repository"]["id"], found["inventory"]["id"])
+
+
+def read_list(client, path):
+    """GET a list of objects; any other answer stops like a refused request."""
+    answer = client.call("GET", path)
+    if answer is None:
+        return []
+    if not isinstance(answer, list) or not all(isinstance(item, dict) for item in answer):
+        raise SystemExit(f"GET {path} did not answer with a list")
+    return answer
+
+
+def triggers_of(client, base, template_ids):
+    """The schedules and integrations that run each template, by template ID.
+
+    Semaphore deletes them with their template. Its project schedule list holds
+    only timed schedules, and a template's own schedule list only its commit
+    checks, so both are read. A template whose triggers could not be read maps
+    to {"error": reason} instead.
+    """
+    if not template_ids:
+        return {}
+    try:
+        timed = read_list(client, f"{base}/schedules")
+        integrations = read_list(client, f"{base}/integrations")
+    except SystemExit as error:
+        return {template_id: {"error": str(error)} for template_id in template_ids}
+    result = {}
+    for template_id in template_ids:
+        try:
+            commit_checks = read_list(client, f"{base}/templates/{template_id}/schedules")
+        except SystemExit as error:
+            result[template_id] = {"error": str(error)}
+            continue
+        schedules = {s["id"]: s for s in timed + commit_checks if s.get("template_id") == template_id}
+        result[template_id] = {"schedules": list(schedules.values()),
+                               "integrations": [i for i in integrations if i.get("template_id") == template_id]}
+    return result
 
 
 def pending_edits(backup_dir):
@@ -461,15 +638,16 @@ def seeded_vaults(client, base, found):
     """
     names = set(VIEW_OF) | set(REPLACED_TEMPLATES)
     shared = set()
-    for template in found["templates"]:
-        if (template["name"] in names and template.get("repository_id") == found["repository"]["id"]
-                and template.get("inventory_id") == found["inventory"]["id"]):
-            vaults = client.call("GET", f"{base}/templates/{template['id']}").get("vaults") or []
-            shared.add(tuple(sorted((v["vault_key_id"], v.get("type") or "password", v.get("script") or "")
-                                    for v in vaults)))
+    for template in lab_templates(found["templates"], names, found["repository"]["id"], found["inventory"]["id"]):
+        # Only GET of one template lists its vaults. A script vault has no key, and a
+        # vault's name is its vault ID for ansible-playbook, so both are kept.
+        vaults = client.call("GET", f"{base}/templates/{template['id']}").get("vaults") or []
+        shared.add(tuple(sorted(((v.get("vault_key_id"), v.get("type") or "password", v.get("script") or "",
+                                  v.get("name") or "") for v in vaults), key=repr)))
     if len(shared) == 1 and next(iter(shared)):
-        vaults = [{"vault_key_id": key, "type": kind, **({"script": script} if script else {})}
-                  for key, kind, script in next(iter(shared))]
+        vaults = [{"type": kind, **({"vault_key_id": key} if key is not None else {}),
+                   **({"script": script} if script else {}), **({"name": name} if name else {})}
+                  for key, kind, script, name in next(iter(shared))]
         return vaults, "The new templates use the same vault password as your seeded templates."
     if any(shared):
         return [], ("Your seeded templates use different vault passwords, so the new templates have none; "
@@ -499,19 +677,27 @@ def take_backup(client, base, found, backup_dir, prefix, extra=None):
 def remove_replaced(client, found, plan, backup_dir, say=print):
     """Delete what the plan lists as replaced, after a backup, checking each object again first.
 
-    Returns (backup path or None, the names of what was removed).
+    A template that a schedule or integration now runs is kept, because Semaphore
+    would delete those with it. Returns (backup path or None, the names of what
+    was removed).
     """
+    for template in plan["in_use"]:
+        say(f"Kept template {template['name']!r}: {why_kept(template)}")
     if not removable(plan):
         return None, []
     base = found["base"]
     replaced = plan["replaced"]
     view_ids = {v["id"] for v in replaced["views"]}
     environment_ids = {e["id"] for e in replaced["environments"]}
+    triggers = triggers_of(client, base, [t["id"] for t in replaced["templates"] + plan["in_use"]])
     backup = take_backup(client, base, found, backup_dir, "semaphore-before-removal", {
         "views": [v for v in client.call("GET", f"{base}/views") or [] if v["id"] in view_ids],
         "environments": [e for e in client.call("GET", f"{base}/environment") or [] if e["id"] in environment_ids],
+        # What runs the replaced templates. Their templates are kept, and these with them.
+        "schedules": [s for runs in triggers.values() for s in runs.get("schedules", [])],
+        "integrations": [i for runs in triggers.values() for i in runs.get("integrations", [])],
     })
-    say(f"Templates, tab and variable group as they were before: {backup}")
+    say(f"Templates, tab, variable group, schedules and integrations as they were before: {backup}")
     removed = []
     repository_id, inventory_id = found["repository"]["id"], found["inventory"]["id"]
     for template in replaced["templates"]:
@@ -519,6 +705,10 @@ def remove_replaced(client, found, plan, backup_dir, say=print):
         if (current.get("name") != template["name"] or current.get("repository_id") != repository_id
                 or current.get("inventory_id") != inventory_id):
             say(f"Kept template {template['name']!r}: it changed since the plan")
+            continue
+        runs = triggers_of(client, base, [template["id"]])[template["id"]]
+        if triggered(runs):
+            say(f"Kept template {template['name']!r}: {why_kept(dict(template, **trigger_names(runs)))}")
             continue
         client.call("DELETE", f"{base}/templates/{template['id']}")
         removed.append(f"template {template['name']!r}")
@@ -561,6 +751,10 @@ def apply_update(client, found, plan, backup_dir, say=print):
             f"{item['name']!r} (see {item['record']})" for item in pending)
             + ". Check that template in the UI, delete the record, and run again. Nothing was changed.")
     base, project_id = found["base"], found["project"]["id"]
+    # Read the vault passwords for the new templates first, so a failure changes nothing.
+    vaults, note = seeded_vaults(client, base, found) if plan["templates"] else ([], None)
+    if note:
+        say(note)
     backup = None
     if plan["tabs"]:
         # Semaphore rewrites a template's variable-group links when it saves one; keep
@@ -579,9 +773,6 @@ def apply_update(client, found, plan, backup_dir, say=print):
         body = {"project_id": project_id, "title": title, "position": position}
         ids["views"][title] = client.call("POST", f"{base}/views", body)["id"]
         position += 1
-    vaults, note = seeded_vaults(client, base, found) if plan["templates"] else ([], None)
-    if note:
-        say(note)
     for lesson in LESSONS:
         if lesson[0] in plan["templates"]:
             client.call("POST", f"{base}/templates", template_payload(project_id, ids, lesson, vaults))
@@ -595,20 +786,20 @@ def apply_update(client, found, plan, backup_dir, say=print):
     return backup
 
 
-def update(client, args):
+def update(client, args, user):
     """--update for seed-semaphore.py itself; update-controller.py calls the parts directly."""
     found = resolve(client, args.project_name, args.lab_dir, getattr(args, "project_id", None))
+    check_access(client, user, found)
     plan = plan_for(found)
     result = {"project": {"name": found["project"]["name"], "id": found["project"]["id"]},
               "planned" if args.plan else "done": plan}
     if not args.plan:
         notes = []
-        backup = apply_update(client, found, plan, Path("/root/ansible-lab-update"), say=notes.append)
+        backup = apply_update(client, found, plan, BACKUP_DIR, say=notes.append)
         if backup:
             result["template_backup"] = str(backup)
         if args.remove_replaced:
-            removal_backup, removed = remove_replaced(client, found, plan, Path("/root/ansible-lab-update"),
-                                                      say=notes.append)
+            removal_backup, removed = remove_replaced(client, found, plan, BACKUP_DIR, say=notes.append)
             result["removed"] = removed
             if removal_backup:
                 result["removal_backup"] = str(removal_backup)
@@ -629,7 +820,8 @@ def main():
     parser.add_argument("--project-id", type=int, help="with --update, the seeded project's ID when names repeat")
     parser.add_argument("--remove-replaced", action="store_true",
                         help="with --update, delete the seeded objects this release replaces, "
-                             "including the old templates' task history")
+                             "including the old templates' task history; a template that a schedule "
+                             "or integration runs is kept")
     args = parser.parse_args()
 
     if args.update:
@@ -637,8 +829,8 @@ def main():
             raise SystemExit("This controller was not seeded by the installer; there is no project to update")
         client = Client(API, os.environ.get("SEMAPHORE_API_TOKEN") or None)
         wait_ready(client)
-        log_in(client, args.admin_login, ask=True)
-        update(client, args)
+        user = log_in(client, args.admin_login, ask=True)
+        update(client, args, user)
         return 0
     if args.plan or args.remove_replaced:
         raise SystemExit("--plan and --remove-replaced apply only to --update")
@@ -654,9 +846,12 @@ def main():
     if "PRIVATE KEY-----" not in private_key:
         raise SystemExit("The key file does not look like an OpenSSH private key")
 
-    client = Client(API)
+    client = Client(API, os.environ.get("SEMAPHORE_API_TOKEN") or None)
     wait_ready(client)
-    log_in(client, args.admin_login)
+    user = log_in(client, args.admin_login, ask=True)
+    if not user.get("admin"):
+        raise SystemExit(f"Semaphore user {user.get('username')!r} is not an administrator; seeding needs "
+                         "the login or API token of one. Nothing was changed.")
 
     existing = client.call("GET", "/projects") or []
     if any(project.get("name") == args.project_name for project in existing):
