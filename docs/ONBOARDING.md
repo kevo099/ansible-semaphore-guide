@@ -36,7 +36,7 @@ flowchart TD
     how -- "the controller SSHes<br/>in as its admin,<br/>host key pinned" --> pb["On the controller, in the<br/>guide's folder: examples/<br/>bootstrap-existing-vm.yml<br/>--limit HOST -u ADMIN,<br/>~/svc_ansible.pub in<br/>automation_public_key_files"]
     rc --> lines
     sh --> lines[/"Data, not a command:<br/>name=, address=,<br/>group=, fingerprint=.<br/>Lost? inventory-info.sh<br/>prints them again"/]
-    lines --> fi["On the controller, in the<br/>guide's folder, type<br/>sudo bash scripts/<br/>add-target.sh --from-info,<br/>paste at its prompt,<br/>then press Ctrl-D"]
+    lines --> fi["On the controller, in the<br/>guide's folder, type<br/>sudo bash scripts/<br/>add-target.sh<br/>--from-info, paste at<br/>its prompt, then<br/>press Ctrl-D"]
     pb -- "sets the sudo<br/>password you type" --> cmd[/"It prints a whole<br/>add-target.sh command"/]
     cmd -- "run it, replacing<br/>any placeholder" --> added
     fi --> added["add-target.sh checks the<br/>values, trusts only the<br/>scanned key with that<br/>fingerprint: Added NAME"]

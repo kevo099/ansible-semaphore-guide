@@ -153,6 +153,8 @@ scanned fingerprints so you can investigate. A name the inventory already lists
 with another address or group, an address it lists under another name, and a
 group without a section in the inventory are refused, and none of them changes
 anything. Running it again with the same values reports `Already present`.
+Runs on the same lab folder take turns; one that waits more than two minutes
+for another stops and changes nothing.
 
 Each target also needs the `svc_ansible` account, its sudo rule and its SSH
 drop-in. Before the check below, do steps 2 to 4 of
