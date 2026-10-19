@@ -59,4 +59,33 @@ The controller was then updated from `v1.7.1` to this release with
 | No sudo before the scope check | During **RHEL 9 · STIG audit**, the skipped AlmaLinux and Rocky Linux hosts logged no sudo by `svc_ansible`; during AlmaLinux's own audit, its host logged twelve. |
 | Report folders and totals | Each audit wrote one folder per run, such as `rhel/9/20261019T060931Z`, and its summary added `selected_result_instances`: 477 on Enterprise Linux and 230 on Ubuntu. |
 
-RESULTS_PENDING
+## A second run, with the fixes
+
+Four new VMs were then created and prepared with the fixed scripts, one way
+each, on the AlmaLinux controller.
+
+| Step | Result |
+| --- | --- |
+| Azure playbooks | `network.yml`, `controller.yml` and `targets.yml` reported `changed=0` when repeated. `targets.yml` created its two VMs together in 43 seconds; `power.yml` deallocated them in 54 seconds and started them in 84. |
+| Refusals before any change | `targets.yml` refused another image for an existing VM and named the `az vm delete` command; a private key or a missing file given as the administrator's public key was refused with no Azure call. An unquoted expiry date was accepted. |
+| Four VMs, one way each | RHEL 9.8 from `az vm create`, prepared by `onboard-linux.sh` pasted into Run Command; AlmaLinux 9.8 by cloud-init, then a managed Run Command for the password; Rocky Linux 9.8 by cloud-init, then `bootstrap-existing-vm.yml` for the password; Ubuntu 24.04 Ubuntu Pro from `az vm create`, by the bootstrap playbook alone, whose repeat reported `changed=0`. Each ended with what the controller needed, at that point a whole `add-target.sh` command, and each added its VM. Ping and Baseline preview succeeded on all four. |
+| Rocky Linux STIG | **Rocky Linux 9 · STIG audit** and the apply with reboot on the new VM gave 264 → 27 failing rules again, and Ping succeeded afterwards. |
+
+## A fresh Ubuntu controller and the data handoff
+
+The VMs' last output then became data for `add-target.sh --from-info` instead
+of a command, and the AlmaLinux controller was replaced by an Ubuntu one built
+from this release.
+
+| Step | Result |
+| --- | --- |
+| Image guard | With the AlmaLinux controller in place, `controller.yml` given the Ubuntu 24.04 image stopped before any change and named `az vm delete`. |
+| Controller | After `az vm delete`, `controller.yml` created the Ubuntu 24.04 controller at the same private and public addresses in 56 seconds. Its new RSA host key was trusted only after it matched the fingerprint read through Run Command. |
+| Installer | `install-controller.sh --apply --expose https --address PUBLIC_ADDRESS` took 56 seconds. Readiness passed all 16 checks, Semaphore listed 22 templates on six tabs, the certificate named the public address, and from the operator's address `https://PUBLIC_ADDRESS/api/ping` returned `pong` while ports 3000 and 80 did not answer. SSH connection reuse was on without the `config.json` edit. |
+| Three VMs moved to it | Ubuntu: `onboard-linux.sh` pasted into Run Command with the new service key, `RESULT: OK` in 32 seconds. Rocky Linux, still STIG-hardened: a managed Run Command with the hash as a protected parameter replaced the old controller's key and reset the password, `RESULT: OK` in 32 seconds; `inventory-info.sh` then printed 510 bytes. AlmaLinux: `bootstrap-existing-vm.yml` run on the Ubuntu controller, `changed=2`, then `changed=0`. |
+| `add-target.sh --from-info` | In an interactive SSH session, through `sudo`, the Ubuntu VM's whole Run Command output was pasted at the prompt and Ctrl-D pressed. A command typed 0.3 seconds after Ctrl-D was discarded rather than run by the shell, and the VM was added. The Rocky Linux output, piped in, added its VM, and the command the playbook printed added AlmaLinux. A repeat printed `Already present`. |
+| Refusals | Ctrl-C, then Ctrl-D, printed `Cancelled; nothing changed.` A paste with a doctored command line, an extra `--known-hosts /etc/sudoers` line and values containing `$(...)`, `;` and backquotes was refused at the name check: nothing ran, and the sudoers file and the inventory stayed unchanged. The name `localhost` was refused. |
+| Semaphore | With the shared sudo password added, Ping and Baseline preview succeeded on all three. |
+| FIPS on Rocky Linux | After the STIG, `fips-mode-setup --check` reported the `FIPS:STIG` policy without FIPS mode, `fips_enabled` was 0, and SSH offered RSA and ECDSA host keys but no Ed25519 key, as on RHEL and AlmaLinux. |
+
+REMOVAL_PENDING

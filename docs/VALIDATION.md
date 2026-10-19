@@ -26,7 +26,8 @@ run; this page only summarizes them.
 | New chapters as written | Each new chapter's example files and command blocks were run as written on the campaign controller: inputs, other apps, identity, operations, API and webhooks, task identity, runners, export and syslog. Key rotation, identity providers and the upgrade drill rely on the feature tests. | [Rehearsal](validation/2026-09-community.md#rehearsal-of-the-new-chapters) |
 | Azure (chapter 13) | The example playbooks created a controller and two cloud-init targets; a one-shot playbook prepared a third VM created outside Ansible; all lessons, a Semaphore run, reboots, stop and start, and removal passed, with `changed=0` repeats. A review's fixes were retested on a second lab. | [Azure record](validation/2026-09-azure.md) |
 | Onboarding, STIG and seeded controllers on Azure | The universal cloud-init file and the Run Command script prepared Ubuntu 24.04, AlmaLinux 9.8 and RHEL 9.8 VMs, including existing VMs without SSH, and refused the unsafe inputs and configurations two reviews raised. The vendor STIG with reboot hardened Ubuntu Pro, AlmaLinux and RHEL targets, after which the lessons still repeated with `changed=0`. Both seeded installers, including all Ubuntu exposure modes, ran on Azure, and the local SCAP content template scanned with DISA's RHEL 9 and Ubuntu 24.04 benchmarks. | [Onboarding and STIG record](validation/2026-09-onboard-stig.md) |
-| Inventory info-grabber | Offline tests cover address selection, the printed values and how `add-target.sh --from-info` reads them, duplicate/conflict refusal, SSH fingerprint verification and the Azure output limit. The October Azure run used its earlier output, a whole `add-target.sh` command ([record](validation/2026-10-onboarding.md)); the `--from-info` handoff has not run live. | [Usage and limits](13-azure.md#do-read-a-vms-values-for-the-controller), `tests/test_inventory_info.py` and `tests/test_add_target.py` |
+| From a VM to an onboarded target | Every way of preparing a VM in [the onboarding map](ONBOARDING.md) ran on Azure in October, first from `v1.7.1` and then with this release, on RHEL, AlmaLinux and Rocky Linux 9.8 and Ubuntu 24.04 targets, with an AlmaLinux controller and then a fresh Ubuntu one. The review's fixes were checked live, including the bootstrap playbook's key-path fix, Rocky Linux's Marketplace plan, kept scheduled templates and SSH connection reuse. The vendor STIG with reboot ran on all four systems, Rocky Linux for the first time. | [October onboarding record](validation/2026-10-onboarding.md) |
+| Inventory info-grabber and `add-target.sh --from-info` | Offline tests cover address selection, the printed values and how `add-target.sh --from-info` reads them, duplicate/conflict refusal, SSH fingerprint verification and the Azure output limit. Live: the VMs' printed lines, pasted at the prompt on a real terminal or piped in, added three VMs; a late remainder never reached the shell, Ctrl-C cancelled, and hostile values were refused with nothing changed. | [Usage and limits](13-azure.md#do-read-a-vms-values-for-the-controller), [the record](validation/2026-10-onboarding.md#a-fresh-ubuntu-controller-and-the-data-handoff), `tests/test_inventory_info.py` and `tests/test_add_target.py` |
 | Updating a controller | Controllers installed from `v1.4.0` were updated in place: three guide files updated, the operator's own playbook and a committed `ansible.cfg` change kept across repeated updates, the new variable group, template and tabs added with every template setting intact; Ping, the vendor STIG audit and the local SCAP content audit then ran. Unsafe lab-folder states were refused with nothing changed, a fresh install seeded the tabs, and repeat updates changed nothing. | [Update record](validation/2026-09-update.md) |
 | STIG lessons per system | A controller installed from `v1.6.1` was updated to one STIG tab per system and version: per-system audits scanned only their own hosts and skipped the others, an audit with no host of its system and an apply on the wrong system stopped with explanations, both DISA SCAP file templates scanned from their system folders, and an AlmaLinux apply with reboot matched the earlier record. `--remove-replaced` deleted the old templates and tab after a backup, kept a variable group holding the operator's values, and took the old templates' task history with them. A fresh install seeded the same tabs. | [Per-system STIG record](validation/2026-10-stig-per-system.md) |
 | Reorganized chapters | Chapter 3b's exposure, STIG and repository-migration sections moved to [browser access](appendices/browser-access.md), [chapter 9](09-security-benchmarks.md#the-seeded-stig-templates) and [the Git migration appendix](appendices/git-migration.md) with their commands unchanged. The moves passed the offline checks. | This page |
@@ -34,10 +35,9 @@ run; this page only summarizes them.
 ## Not established
 
 - FIPS mode. On RHEL, AlmaLinux and Rocky Linux the vendor STIG sets the
-  `FIPS:STIG` crypto policy. On RHEL and AlmaLinux `fips-mode-setup --check`
-  then reported that FIPS mode is not enabled, and on Azure `fips_enabled`
-  stayed 0; Rocky Linux's FIPS mode and host-key offer were not checked. Ubuntu
-  was not switched to FIPS kernels.
+  `FIPS:STIG` crypto policy. On all three `fips-mode-setup --check` then
+  reported that FIPS mode is not enabled, and on Azure `fips_enabled` stayed 0.
+  Ubuntu was not switched to FIPS kernels.
 - Chapter 9's manual CIS remediation (the packaged RHEL playbook and `usg fix`
   with a CIS profile), its reboot and after-scan. Vendor STIG remediation was
   applied only through `stig-apply.yml`.
@@ -46,11 +46,12 @@ run; this page only summarizes them.
 - Enterprise Linux releases other than 9.8, as controller or target. The EL9
   installer's 9.4 minimum is where `python3.12` and the `postgresql:16` stream
   first appear, not a tested release.
-- ansible-core 2.21.4 against Rocky Linux targets and subscription-registered
-  RHEL targets, the Ubuntu manual path, and chapter 10's restore; those last
-  ran on 2.20.x. On 2.21.4 the lessons ran against Ubuntu 24.04, and, in
-  [Azure](validation/2026-09-azure.md), against AlmaLinux 9.8 and
-  pay-as-you-go RHEL 9.8.
+- ansible-core 2.21.4 against subscription-registered RHEL targets, the
+  Ubuntu manual path, and chapter 10's restore; those last ran on 2.20.x. On
+  2.21.4 the lessons ran against Ubuntu 24.04, and, in
+  [Azure](validation/2026-09-azure.md) and
+  [October's onboarding run](validation/2026-10-onboarding.md), against
+  AlmaLinux 9.8, Rocky Linux 9.8 and pay-as-you-go RHEL 9.8.
 - Offsite backup copies and high availability.
 - Delivery to real Slack, Microsoft Teams, Rocket.Chat, DingTalk, Gotify,
   Telegram or e-mail providers. Notifications were received by local test
