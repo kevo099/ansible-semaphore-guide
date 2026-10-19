@@ -1,6 +1,7 @@
 """Offline checks that the lesson playbooks agree with each other and with the seeder."""
 
 import ast
+import datetime
 import importlib.util
 import json
 from pathlib import Path
@@ -25,6 +26,31 @@ def tasks(relative):
 
 def named(task_list, prefix):
     return next(t for t in task_list if t.get("name", "").startswith(prefix))
+
+
+def walk(task_list, inherited=None):
+    """Yield each task with the become and delegate_to it inherits, through blocks and imports."""
+    for task in task_list or []:
+        effective = dict(inherited or {}, **{key: task[key] for key in ("become", "delegate_to") if key in task})
+        if "ansible.builtin.import_tasks" in task:
+            yield from walk(tasks(f"playbooks/{task['ansible.builtin.import_tasks']}"), effective)
+        elif "block" in task:
+            for section in ("block", "rescue", "always"):
+                yield from walk(task.get(section), effective)
+        else:
+            yield dict(task, **effective)
+
+
+def package_tasks(data):
+    """Yield every apt or dnf task in a parsed playbook or task file."""
+    if isinstance(data, list):
+        for item in data:
+            yield from package_tasks(item)
+    elif isinstance(data, dict):
+        if {"ansible.builtin.apt", "ansible.builtin.dnf"} & data.keys():
+            yield data
+        for value in data.values():
+            yield from package_tasks(value)
 
 
 def load(name):
@@ -137,6 +163,45 @@ class SummaryReportTests(unittest.TestCase):
                 self.assertFalse(self.warns(summary))
 
 
+class MissingResultsTests(unittest.TestCase):
+    """The usg scan never fails on its own, so the check for its results must carry usg's error."""
+
+    def message(self, usg_result):
+        task = named(tasks("playbooks/tasks/stig_scan.yml"), "Stop when no results were produced")
+        environment = jinja2.Environment(undefined=jinja2.StrictUndefined)
+        variables = {"inventory_hostname": "lab-ubuntu", "stig_usg_profile": "disa_stig", "stig_scan_usg": usg_result}
+        # Ansible templates fail_msg even when the assertion passes, so every path must render.
+        variables["stig_usg_output"] = environment.from_string(task["vars"]["stig_usg_output"]).render(**variables)
+        return environment.from_string(task["ansible.builtin.assert"]["fail_msg"]).render(**variables)
+
+    def test_a_failed_usg_scan_shows_its_exit_code_and_error(self):
+        error = "Error: profile disa_stig is not available in this channel"
+        message = self.message({"rc": 1, "stdout_lines": [], "stderr_lines": [error]})
+        self.assertIn("usg audit disa_stig exited 1.", message)
+        self.assertIn("usg list", message)
+        self.assertTrue(message.endswith(f"The end of its output: {error}"))
+
+    def test_long_usg_output_keeps_its_last_lines(self):
+        progress = [f"Checking rule {number} of 600" for number in range(600)]
+        error = "Error: cannot write the results file"
+        message = self.message({"rc": 1, "stdout_lines": progress, "stderr_lines": [error]})
+        output = message.split("The end of its output: ", 1)[1]
+        self.assertEqual(output, " ".join(progress[-9:] + [error]))
+        # One very long line is still cut to its last 800 characters.
+        message = self.message({"rc": 1, "stdout_lines": ["x" * 5000], "stderr_lines": [error]})
+        output = message.split("The end of its output: ", 1)[1]
+        self.assertEqual(len(output), 800)
+        self.assertTrue(output.endswith(error))
+
+    def test_silent_usg_and_the_oscap_scans_still_explain_themselves(self):
+        silent = self.message({"rc": 2, "stdout_lines": [], "stderr_lines": []})
+        self.assertTrue(silent.endswith("The end of its output: none"))
+        # On Enterprise Linux and with a local content file the usg task was skipped.
+        skipped = self.message({"changed": False, "skipped": True, "skip_reason": "Conditional result was False"})
+        self.assertEqual(skipped, "The vendor scanner produced no results on lab-ubuntu. "
+                                  "Rerun with -v to see the scanner output.")
+
+
 class PerSystemPlaybookTests(unittest.TestCase):
     """playbooks/stig/<system>/<version>/ hold thin wrappers around the shared STIG playbooks."""
 
@@ -218,6 +283,106 @@ class PerSystemPlaybookTests(unittest.TestCase):
                     rendered = jinja2.Environment().from_string(expression).render(
                         lookup=lambda _kind, _name: "/srv/u", stig_report_folder=folder, stig_stamp="S")
                     self.assertEqual(rendered.strip(), expected)
+
+    def test_every_host_of_one_run_shares_its_report_folder(self):
+        def now(utc=False, fmt=None):
+            self.assertIs(utc, True)
+            return datetime.datetime(2026, 10, 19, 14, 25, 30).strftime(fmt)
+
+        for playbook in STIG_PLAYBOOKS:
+            play = tasks(playbook)[0]
+            with self.subTest(playbook=playbook):
+                # A play variable is templated for each host from its own facts and clock.
+                self.assertNotIn("stig_stamp", play["vars"])
+                self.assertIn("{{ stig_stamp }}", play["vars"]["stig_remote_dir"])
+                stamp = named(play["pre_tasks"], "Use one report folder for the whole run")
+                # run_once sets the fact on every host of the batch, and tags keep it in tagged runs.
+                self.assertIs(stamp["run_once"], True)
+                self.assertIn("always", stamp["tags"])
+                # It must not run before the preflight gathers facts; see FactCacheTests.
+                names = [t["name"] for t in play["pre_tasks"]]
+                preflight = names.index("Check scope and supported operating system")
+                self.assertGreater(names.index(stamp["name"]), preflight)
+                expression = stamp["ansible.builtin.set_fact"]["stig_stamp"]
+                rendered = jinja2.Environment(undefined=jinja2.StrictUndefined).from_string(expression).render(now=now)
+                self.assertEqual(rendered, "20261019T142530Z")
+
+
+class FactCacheTests(unittest.TestCase):
+    """In ansible-core 2.21 a run_once task, even a debug, stores one shared object as the fact
+    cache of every host that has none yet. Those hosts then share the facts the preflight
+    gathers, and each sees the system of whichever host gathered last."""
+
+    def test_no_run_once_task_runs_before_the_hosts_have_facts(self):
+        checked = 0
+        for playbook in sorted((ROOT / "playbooks").glob("*.yml")):
+            for play in yaml.safe_load(playbook.read_text()):
+                gathered = play.get("gather_facts", True)
+                for task in walk(play.get("pre_tasks", []) + play.get("tasks", [])):
+                    if task.get("run_once"):
+                        checked += 1
+                        with self.subTest(playbook=playbook.name, task=task["name"]):
+                            self.assertTrue(gathered, "this run_once task runs before fact gathering")
+                    gathered = gathered or "ansible.builtin.setup" in task
+        self.assertGreaterEqual(checked, len(STIG_PLAYBOOKS))
+
+
+class PrivilegeTests(unittest.TestCase):
+    """Only the preflight's two reads, and tasks on the controller, run without sudo."""
+
+    PROBES = ("Gather operating-system facts", "Verify the operating system's package bindings are ready")
+    SUDO_PLAYBOOKS = ("playbooks/baseline.yml", "playbooks/users.yml", "playbooks/webserver.yml",
+                      "playbooks/patch.yml") + STIG_PLAYBOOKS
+    # Actions that run on the controller without opening a connection to the host.
+    CONTROLLER_ACTIONS = {"assert", "debug", "fail", "include_vars", "meta", "set_fact"}
+
+    def test_the_preflight_reads_run_without_sudo(self):
+        preflight = tasks("playbooks/tasks/preflight.yml")
+        for name in self.PROBES:
+            with self.subTest(task=name):
+                self.assertIs(named(preflight, name)["become"], False)
+
+    def test_stig_runs_use_no_sudo_before_choosing_their_hosts(self):
+        # A host of another system is skipped or refused at the decision, before any sudo password
+        # reaches it; a wrong one counts toward faillock on a STIG-hardened host.
+        for playbook, decision in (("playbooks/stig-audit.yml", "Leave hosts of other systems to their own playbook"),
+                                   ("playbooks/stig-apply.yml", "Refuse a host that another system's playbook covers")):
+            play = tasks(playbook)[0]
+            self.assertIs(play["gather_facts"], False)
+            names = [t["name"] for t in play["pre_tasks"]]
+            for task in walk(play["pre_tasks"][:names.index(decision)]):
+                action = next(key for key in task if key.startswith("ansible.builtin."))
+                with self.subTest(playbook=playbook, task=task["name"]):
+                    self.assertTrue(action.removeprefix("ansible.builtin.") in self.CONTROLLER_ACTIONS
+                                    or task.get("become") is False)
+
+    def test_every_other_task_on_a_target_keeps_the_plays_sudo(self):
+        for playbook in self.SUDO_PLAYBOOKS:
+            play = tasks(playbook)[0]
+            self.assertIs(play["become"], True)
+            for task in walk(play.get("pre_tasks", []) + play.get("tasks", []) + play.get("handlers", [])):
+                if task.get("become") is False:
+                    with self.subTest(playbook=playbook, task=task["name"]):
+                        self.assertTrue(task["name"] in self.PROBES or task.get("delegate_to") == "localhost")
+
+
+class PackageLockTests(unittest.TestCase):
+    """A fresh VM can hold the package lock for minutes while it installs the image's own updates."""
+
+    def test_package_tasks_wait_for_the_lock_as_long_as_onboarding(self):
+        onboarding = set()
+        for path in ("examples/onboard/cloud-init.yaml", "examples/onboard/onboard-linux.sh"):
+            text = (ROOT / path).read_text()
+            onboarding |= {int(seconds) for seconds in re.findall(r"DPkg::Lock::Timeout=(\d+)", text)}
+        (timeout,) = onboarding
+        modules = set()
+        for path in sorted((ROOT / "playbooks").rglob("*.yml")):
+            for task in package_tasks(yaml.safe_load(path.read_text())):
+                module = next(key for key in task if key in ("ansible.builtin.apt", "ansible.builtin.dnf"))
+                modules.add(module)
+                with self.subTest(path=str(path.relative_to(ROOT)), task=task["name"]):
+                    self.assertEqual(task[module].get("lock_timeout"), timeout)
+        self.assertEqual(modules, {"ansible.builtin.apt", "ansible.builtin.dnf"})
 
 
 class LabFolderTests(unittest.TestCase):

@@ -46,7 +46,7 @@
   ansible.builtin.dnf:
     name: "{{ ['openscap-scanner'] + ([] if stig_local_content else ['scap-security-guide']) }}"
     state: present
-    lock_timeout: 120
+    lock_timeout: 600
   when: ansible_facts['os_family'] == 'RedHat'
 
 - name: Install the OpenSCAP scanner on Ubuntu for local content
@@ -55,7 +55,7 @@
     state: present
     update_cache: true
     cache_valid_time: 3600
-    lock_timeout: 120
+    lock_timeout: 600
   when:
     - ansible_facts['os_family'] == 'Debian'
     - stig_local_content
@@ -169,6 +169,8 @@
     path: "{{ stig_remote_dir }}/{{ stig_phase }}.xml"
   register: stig_results_file
 
+# An oscap scan that fails stops at its own task, which prints its output. The usg
+# scan never fails, so this message carries the end of usg's output instead.
 - name: Stop when no results were produced
   ansible.builtin.assert:
     that:
@@ -176,8 +178,16 @@
       - stig_results_file.stat.size > 0
     fail_msg: >-
       The vendor scanner produced no results on {{ inventory_hostname }}.
-      Inspect the task output above for the scanner's own error.
+      {{ ('usg audit ' ~ stig_usg_profile ~ ' exited ' ~ stig_scan_usg.rc ~ '. If it rejected the profile, '
+          ~ 'run usg list on the target to see the profile IDs it accepts. The end of its output: '
+          ~ (stig_usg_output or 'none'))
+         if stig_scan_usg.rc is defined else 'Rerun with -v to see the scanner output.' }}
     quiet: true
+  vars:
+    # The last lines, where usg's error is, kept to 800 characters.
+    stig_usg_output: >-
+      {{ ((stig_scan_usg.stdout_lines | default([]) + stig_scan_usg.stderr_lines | default([]))[-10:]
+         | join(' '))[-800:] }}
 
 - name: Fetch the results and report to the controller for phase {{ stig_phase }}
   ansible.builtin.fetch:

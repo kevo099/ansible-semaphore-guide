@@ -28,7 +28,7 @@
         upgrade: dist
         fail_on_autoremove: true
         autoremove: false
-        lock_timeout: 120
+        lock_timeout: 600
         auto_install_module_deps: false
       when: ansible_facts['os_family'] == 'Debian'
 
@@ -36,7 +36,7 @@
       ansible.builtin.dnf:
         name: dnf-plugins-core
         state: present
-        lock_timeout: 120
+        lock_timeout: 600
       when: ansible_facts['os_family'] == 'RedHat'
 
     # Updating to repository versions is the explicit purpose of this lesson.
@@ -45,7 +45,7 @@
         name: '*'
         state: latest
         update_cache: true
-        lock_timeout: 120
+        lock_timeout: 600
       when: ansible_facts['os_family'] == 'RedHat'
 
     - name: Explain what check mode cannot predict
