@@ -138,6 +138,20 @@ class SeedPlanTests(unittest.TestCase):
                 self.assertRegex(values["stig_content_profile"], profile_pattern)
                 self.assertNotIn("REPLACE_WITH", json.dumps(values))
 
+    def test_each_replaced_template_names_the_per_system_templates_that_replace_it(self):
+        lessons = {lesson[0]: lesson for lesson in seed.LESSONS}
+        self.assertEqual(seed.REPLACED_TEMPLATES, list(seed.REPLACED_BY))
+        for old, new in seed.REPLACED_BY.items():
+            with self.subTest(old=old):
+                successors = seed.successors(old)
+                self.assertEqual(successors, [f"{label} · {new}" for label, *_rest in seed.STIG_SYSTEMS
+                                              if f"{label} · {new}" in lessons])
+                self.assertTrue(successors)
+                kind = "audit" if "audit" in old else "apply"
+                self.assertTrue(all(lessons[name][1].endswith(f"/{kind}.yml") for name in successors))
+                self.assertEqual({lessons[name][3] for name in successors} == {"Allow required reboot"},
+                                 "reboot" in old)
+
     def test_installers_create_a_content_folder_for_each_stig_system(self):
         common = (ROOT / "scripts/controller-common.sh").read_text()
         folders = re.search(r"for system in ([^;]+); do", common).group(1).split()
