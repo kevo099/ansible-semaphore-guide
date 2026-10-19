@@ -353,6 +353,9 @@ class CloudInitTests(AddTargetInfoMixin, unittest.TestCase):
                              fingerprint=None)
         self.assertInfoLines(self.final_lines([]), prefix="onboard: ", name="lab-alma", address=None,
                              group="enterprise_linux", fingerprint=FINGERPRINT)
+        # localhost is Ansible's name for the controller, which add-target.sh refuses.
+        self.assertInfoLines(self.final_lines([f"{TEST_NET}.12"], name="localhost"), prefix="onboard: ", name=None,
+                             address=f"{TEST_NET}.12", group="enterprise_linux", fingerprint=FINGERPRINT)
 
     def test_the_log_pasted_whole_adds_the_vm(self):
         # As sudo grep onboard /var/log/cloud-init-output.log shows it, with the ready message.
@@ -551,6 +554,9 @@ class OnboardScriptTests(AddTargetInfoMixin, unittest.TestCase):
              {"name": "lab-vm", "address": f"{TEST_NET}.10", "group": "ubuntu", "fingerprint": FINGERPRINT}),
             ("family=debian\n", "lab_vm!", f"{TEST_NET}.10 {TEST_NET}.11", "", "",
              {"name": None, "address": None, "group": "ubuntu", "fingerprint": None}),
+            # localhost is Ansible's name for the controller, which add-target.sh refuses.
+            ("family=el\n", "localhost", f"{TEST_NET}.12", "", FINGERPRINT,
+             {"name": None, "address": f"{TEST_NET}.12", "group": "enterprise_linux", "fingerprint": FINGERPRINT}),
         ]
         for setup, name, addresses, source, fingerprint, expected in cases:
             with self.subTest(setup=setup, addresses=addresses):

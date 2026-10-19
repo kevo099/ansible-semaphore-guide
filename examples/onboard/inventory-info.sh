@@ -79,6 +79,8 @@ def build_info(name, address, group, fingerprint):
     # reviewed add-target.sh reads these values, and checks them again there.
     require(bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}", name)),
             "INVENTORY_NAME must be a plain hostname, at most 63 characters.")
+    require(name not in ("localhost", "127.0.0.1"),
+            name + " is Ansible's name for the controller; set INVENTORY_NAME to another name.")
     ipv4(address)
     require(group in ("ubuntu", "enterprise_linux"), "Unsupported inventory group.")
     require(bool(re.fullmatch(r"SHA256:[A-Za-z0-9+/]{43}", fingerprint)), "Invalid RSA fingerprint.")

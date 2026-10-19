@@ -26,16 +26,21 @@ group=GROUP
 fingerprint=SHA256:...
 ```
 
-Run that command on the controller and paste the four lines, or the whole
-output. [`scripts/add-target.sh`](../../scripts/add-target.sh) takes only those
-values and checks them, scans the VM, keeps only the host key that matches the
+On the controller, run `sudo bash scripts/add-target.sh --from-info`, typed or
+copied from this page rather than from the VM's output, and after its prompt
+paste the four lines, or the whole output.
+[`scripts/add-target.sh`](../../scripts/add-target.sh) takes only those values
+and checks them, scans the VM, keeps only the host key that matches the
 fingerprint, and adds the VM to the lab inventory; it ignores every other line
 and runs none of it. cloud-init's copy starts each line with `onboard:`, which
-it accepts. A value the VM cannot read is left out, and the output names the
-option to add instead, such as `--address`. Add `--lab-dir DIR` for a lab
-folder other than `/opt/ansible-lab`. The bootstrap playbook runs on the
-controller and prints the whole `add-target.sh` command instead; run that as
-it is. [The onboarding page](../../docs/ONBOARDING.md#why-the-vm-prints-lines-not-a-command)
+it accepts. A value the VM cannot read is left out, and the output asks for
+`--name`, `--address` or `--fingerprint` instead; add only those, with a value
+you read yourself through Run Command or the console. Add `--lab-dir DIR` for
+a lab folder other than `/opt/ansible-lab`. The bootstrap playbook runs on the
+controller and prints the whole `add-target.sh` command instead; run that
+command, replacing `NAME`, `ADDRESS` or `FINGERPRINT` if shown and adding
+`--lab-dir DIR` for another lab folder, as its message says.
+[The onboarding page](../../docs/ONBOARDING.md#why-the-vm-prints-lines-not-a-command)
 explains why.
 
 Insert the controller's public key where each file says so. On a controller

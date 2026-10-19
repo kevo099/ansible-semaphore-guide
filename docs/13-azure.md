@@ -513,9 +513,11 @@ group=GROUP
 fingerprint=SHA256:...
 ```
 
-On the controller, in the guide's folder, run that command, paste the four
-lines or the whole output, and press Ctrl-D. A VM's output is untrusted, so
-only reviewed code on the controller acts on it, as
+On the controller, in the guide's folder, run
+`sudo bash scripts/add-target.sh --from-info` as this page shows it, not copied
+from the VM's output. After its prompt, paste the four lines or the whole
+output, and press Ctrl-D. A VM's output is untrusted, so only reviewed code on
+the controller acts on it, as
 [the onboarding page](ONBOARDING.md#why-the-vm-prints-lines-not-a-command)
 explains. [`scripts/add-target.sh`](../scripts/add-target.sh) reads the whole
 paste first, takes only the `name=`, `address=`, `group=` and `fingerprint=`

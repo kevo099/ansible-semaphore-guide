@@ -5,11 +5,12 @@
 #    or: sudo bash scripts/add-target.sh --from-info [--address ADDRESS] [--lab-dir DIR] [--known-hosts FILE]
 #
 # --from-info reads what the onboarding scripts print on the VM: paste their name=,
-# address=, group= and fingerprint= lines, then press Ctrl-D. A VM's output is not
-# trusted, so it is data for this script and never a command for a shell: the script
-# reads the whole paste before anything else, takes only those four values, checks
-# them as it checks the options, and ignores every other line. An option fills in a
-# value the paste lacks, such as --address; a value given both ways is refused.
+# address=, group= and fingerprint= lines, then press Ctrl-D; Ctrl-C and then Ctrl-D
+# cancels. A VM's output is not trusted, so it is data for this script and never a
+# command for a shell: the script reads the whole paste before anything else, on a
+# terminal discards whatever still arrives after it, takes only those four values,
+# checks them as it checks the options, and ignores every other line. An option fills
+# in a value the paste lacks, such as --address; a value given both ways is refused.
 #
 # The fingerprint comes from the target through a trusted channel: its console or
 # Azure Run Command. Prefer the RSA key: STIG and FIPS crypto policies can stop a
@@ -21,6 +22,8 @@
 # Running it again for a host it added, with the same values, changes nothing.
 set -euo pipefail
 umask 077
+# Match bytes: in a UTF-8 locale, [A-Za-z] also matches other alphabets' look-alike letters.
+export LC_ALL=C
 
 # Print the comment block at the top of this file.
 usage() { sed -n '2,/^[^#]/{/^#/p}' "$0"; }
@@ -32,26 +35,49 @@ from_info=no
 for argument in "$@"; do
   [[ $argument != --from-info ]] || from_info=yes
 done
-pasted=''
+pasted='' cancelled=no
 if [[ $from_info == yes ]]; then
   if [[ -t 0 ]]; then
-    # A control character in the paste, such as Ctrl-C, must not stop the reading.
-    trap '' INT QUIT TSTP
-    echo "Paste the name=, address=, group= and fingerprint= lines the VM printed, then press Ctrl-D:" >&2
+    # A control character in the paste must not stop the reading: Ctrl-\ and Ctrl-Z do
+    # nothing, and a Ctrl-C is only noted, so that it cancels once the input has ended.
+    trap 'cancelled=yes' INT
+    trap '' QUIT TSTP
   fi
   # Keep at most 64 KiB; one byte more means the paste is longer. A NUL becomes a space.
-  pasted=$(head -c 65537 | tr '\0' ' '; echo .)
+  # On a terminal the reader ignores Ctrl-C itself, and asks for the paste only then.
+  pasted=$(if [[ -t 0 ]]; then
+             trap '' INT
+             echo "To cancel, press Ctrl-C and then Ctrl-D." >&2
+             echo "Paste the name=, address=, group= and fingerprint= lines the VM printed, then press Ctrl-D:" >&2
+           fi
+           head -c 65537 | tr '\0' ' '; echo .)
   pasted=${pasted%.}
+  # The input has ended; from here Ctrl-C does nothing, so the rest is always discarded.
+  [[ ! -t 0 ]] || trap '' INT
   too_long=no
   if [[ $(printf '%s' "$pasted" | wc -c) -gt 65536 ]]; then
     too_long=yes
     cat > /dev/null
   fi
   if [[ -t 0 ]]; then
-    # Drop what is still queued on the terminal, such as text after a Ctrl-D inside the paste.
-    python3 -c 'import termios; termios.tcflush(0, termios.TCIFLUSH)' 2>/dev/null || true
+    # A Ctrl-D inside the paste ends the reading early, and the rest of a long paste, or
+    # of one over a slow link, can still be arriving: discard what comes, unechoed, until
+    # the terminal has been quiet for a second.
+    python3 -c '
+import os, termios
+saved = termios.tcgetattr(0)
+quiet = termios.tcgetattr(0)
+quiet[3] &= ~(termios.ICANON | termios.ECHO | termios.ISIG)
+quiet[6][termios.VMIN], quiet[6][termios.VTIME] = 0, 10
+termios.tcsetattr(0, termios.TCSANOW, quiet)
+try:
+    while os.read(0, 65536):
+        pass
+finally:
+    termios.tcsetattr(0, termios.TCSAFLUSH, saved)' 2>/dev/null || true
     trap - INT QUIT TSTP
   fi
+  [[ $cancelled == no ]] || { echo "Cancelled; nothing changed."; exit 130; }
   [[ $too_long == no ]] || { echo "The paste is longer than 64 KiB; paste one VM's lines at a time."; exit 2; }
 fi
 
@@ -102,6 +128,10 @@ fi
 [[ $from_info == no ]] || echo "Using name=$name address=$address group=$group fingerprint=$fingerprint"
 inventory="$lab_dir/inventories/lab.ini"
 [[ -f "$inventory" && -f "$known_hosts" ]] || { echo 'Missing inventory or known-hosts file.'; exit 1; }
+# Ansible runs delegate_to: localhost tasks on a host of that name instead of the controller.
+if [[ "$name" == localhost || "$name" == 127.0.0.1 ]]; then
+  echo "$name is the name Ansible gives the controller; choose another name."; exit 1
+fi
 # A host named like a group, such as lab, would make --limit lab select that host alone.
 if [[ "$name" == all || "$name" == ungrouped ]] || awk -v n="$name" '
     match($0, /^[[:space:]]*\[[^]]+\]/) {

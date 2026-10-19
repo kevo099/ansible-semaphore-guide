@@ -88,6 +88,8 @@ class CollectorTests(unittest.TestCase):
         for field, value in [
             ("name", "$(id)"), ("name", "a;id"), ("name", "a\nb"), ("name", "-option"),
             ("name", "a b"), ("name", "x" * 64),
+            # Ansible's names for the controller, which add-target.sh refuses.
+            ("name", "localhost"), ("name", "127.0.0.1"),
             ("address", "host.example.test"), ("address", f"{TEST_NET}.10;id"),
             ("group", "lab"),
             ("fingerprint", "SHA256:short"), ("fingerprint", FINGERPRINT + " x"),

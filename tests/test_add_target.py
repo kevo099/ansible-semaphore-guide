@@ -299,10 +299,13 @@ class AddTargetTests(unittest.TestCase):
                 self.assertEqual(process.returncode, expected, stdout + stderr)
                 self.assertEqual(self.calls.exists(), expected == 0)
 
-    @unittest.skipUnless(hasattr(termios, "TIOCSCTTY"), "needs a pseudo-terminal")
-    def test_on_a_terminal_control_characters_leave_nothing_for_the_shell(self):
-        # The pseudo-terminal is the script's controlling terminal, as the operator's is: a
-        # Ctrl-C in the paste sends SIGINT, and a Ctrl-D at the start of a line ends the input.
+    def on_a_terminal(self, *pieces):
+        """--from-info on a pseudo-terminal: write each text after the prompt, sleep for each number.
+
+        The pseudo-terminal is the script's controlling terminal, as the operator's is: a
+        Ctrl-C, Ctrl-\\ or Ctrl-Z in the paste sends a signal, and a Ctrl-D at the start of
+        a line ends the input. Returns the exit code and the output.
+        """
         master, terminal = os.openpty()
         self.addCleanup(os.close, master)
         self.addCleanup(os.close, terminal)
@@ -310,20 +313,83 @@ class AddTargetTests(unittest.TestCase):
                                    env=self.environment(), start_new_session=True,
                                    preexec_fn=lambda: fcntl.ioctl(0, termios.TIOCSCTTY, 0))
         prompt = b""
-        while not prompt.endswith(b"\n"):
+        while not prompt.endswith(b"Ctrl-D:\n"):
             self.assertTrue(select.select([process.stderr], [], [], 30)[0], prompt)
             prompt += os.read(process.stderr.fileno(), 4096)
-        self.assertEqual(prompt, b"Paste the name=, address=, group= and fingerprint= lines the VM printed,"
-                                 b" then press Ctrl-D:\n")
-        marker = self.work / "ran"
-        os.write(master, f"text\x03more text\n{self.info()}\x04touch {marker}\n".encode())
+        self.assertEqual(prompt, b"To cancel, press Ctrl-C and then Ctrl-D.\nPaste the name=, address=, group= and"
+                                 b" fingerprint= lines the VM printed, then press Ctrl-D:\n")
+        for piece in pieces:
+            if isinstance(piece, str):
+                os.write(master, piece.encode())
+            else:
+                time.sleep(piece)
         stdout, _ = process.communicate(timeout=60)
-        self.assertEqual(process.returncode, 0, stdout)
-        self.assertIn(b"Added lab-alma", stdout)
         # Nothing is left for whatever reads the terminal next, such as the shell.
         os.set_blocking(terminal, False)
         with self.assertRaises(BlockingIOError):
             os.read(terminal, 4096)
+        return process.returncode, stdout.decode()
+
+    @unittest.skipUnless(hasattr(termios, "TIOCSCTTY"), "needs a pseudo-terminal")
+    def test_on_a_terminal_text_after_the_end_is_left_for_nobody(self):
+        marker = self.work / "ran"
+        for pieces in ((f"text\x1cmore\x1aagain\n{self.info()}\x04touch {marker}\n",),
+                       # The rest of a long paste, or of one over a slow link, arrives after its Ctrl-D.
+                       (f"{self.info()}\x04#\n", 0.3, f"touch {marker}\n")):
+            with self.subTest(pieces=pieces):
+                self.reset()
+                returncode, stdout = self.on_a_terminal(*pieces)
+                self.assertEqual(returncode, 0, stdout)
+                self.assertIn("Added lab-alma", stdout)
+
+    @unittest.skipUnless(hasattr(termios, "TIOCSCTTY"), "needs a pseudo-terminal")
+    def test_on_a_terminal_ctrl_c_then_ctrl_d_cancels(self):
+        # Ctrl-C does not stop the reading, which would leave the rest for the shell; once
+        # the input ends, the script stops without changing anything.
+        for pieces in ((self.info(), 0.2, "\x03", 0.2, "\x04"), (f"text\x03more text\n{self.info()}\x04touch x\n",),
+                       ("\x03", 0.2, "\x04")):
+            with self.subTest(pieces=pieces):
+                returncode, stdout = self.on_a_terminal(*pieces)
+                self.assertEqual((returncode, stdout), (130, "Cancelled; nothing changed.\n"))
+                self.assertEqual(self.state(), (INVENTORY, ""))
+                self.assertFalse(self.calls.exists())
+
+    def test_the_names_ansible_gives_the_controller_are_refused(self):
+        # Ansible would run every delegate_to: localhost task, such as the STIG summary, on
+        # a host of that name instead of the controller.
+        for name in ("localhost", "127.0.0.1"):
+            for form, result in (("option", self.add(name=name)), ("paste", self.paste(self.info(name=name)))):
+                with self.subTest(name=name, form=form):
+                    self.assertEqual(result.returncode, 1, result.stdout)
+                    self.assertIn(f"{name} is the name Ansible gives the controller; choose another name.",
+                                  result.stdout)
+                    self.assertEqual(self.state(), (INVENTORY, ""))
+
+    @unittest.skipUnless(shutil.which("locale"), "needs locale")
+    def test_look_alike_letters_are_refused_in_a_utf8_locale(self):
+        # sudo keeps the operator's locale, in which bash's [A-Za-z] also matches letters
+        # such as a Latin alpha or fullwidth forms; the script compares bytes instead.
+        locales = subprocess.run(["locale", "-a"], capture_output=True, text=True).stdout.split()
+        utf8 = next((name for name in locales if name.lower().replace("-", "") == "en_us.utf8"), None)
+        if not utf8:
+            self.skipTest("needs the en_US.UTF-8 locale")
+        environment = {key: value for key, value in self.environment().items() if not key.startswith("LC_")}
+        for name in ("lab-\u0251lma", "\uff4c\uff41\uff42-alma"):
+            with self.subTest(name=name):
+                result = subprocess.run(self.from_info(), input=self.info(name=name), capture_output=True, text=True,
+                                        env=dict(environment, LANG=utf8), timeout=60)
+                self.assertEqual((result.returncode, result.stdout),
+                                 (1, "Inventory name must be a plain hostname-like token.\n"))
+                self.assertEqual(self.state(), (INVENTORY, ""))
+
+    def test_an_inventory_with_other_letters_is_still_edited(self):
+        # The byte-wise locale does not stop the edit from reading a UTF-8 comment.
+        inventory = "# Labor f\u00fcr \u00dcbungen\n" + INVENTORY
+        self.inventory.write_text(inventory, encoding="utf-8")
+        result = self.paste(self.info())
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.inventory.read_text(encoding="utf-8"), inventory.replace(
+            "[enterprise_linux]\n", f"[enterprise_linux]\nlab-alma ansible_host={TEST_NET}.12\n"))
 
 
 if __name__ == "__main__":

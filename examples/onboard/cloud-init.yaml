@@ -244,7 +244,8 @@ runcmd:
       mapfile -t global_addresses < <(ip -o -4 addr show scope global 2>/dev/null | awk '{sub(/\/.*/, "", $4); print $4}')
       rsa_fingerprint=$(ssh-keygen -lf /etc/ssh/ssh_host_rsa_key.pub 2>/dev/null | awk '{print $2}')
       info=() options=()
-      if [[ $inventory_name =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+      # localhost is Ansible's name for the controller, so it counts as unreadable here.
+      if [[ $inventory_name =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ && $inventory_name != localhost ]]; then
         info+=("name=$inventory_name")
       else
         options+=("--name with the name the inventory should use")
