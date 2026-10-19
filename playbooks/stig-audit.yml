@@ -20,7 +20,7 @@
     # benchmark in the lab folder's content/ directory, and one of its profile IDs.
     stig_content_file: ''
     stig_content_profile: ''
-    stig_stamp: "{{ ansible_facts['date_time']['iso8601_basic_short'] }}"
+    # stig_stamp is set once for every host of the run; see pre_tasks.
     stig_remote_dir: "/var/log/stig-practice/{{ stig_stamp }}"
     stig_fetch_dir: >-
       {{ lookup('env', 'HOME') }}/stig-reports/{{ stig_report_folder ~ '/' if stig_report_folder else '' }}{{ stig_stamp }}
@@ -40,6 +40,16 @@
 
     - name: Check scope and supported operating system
       ansible.builtin.import_tasks: tasks/preflight.yml
+      tags: always
+
+    # One folder for every host of the run, named once from the controller's UTC clock;
+    # the default linear strategy gives the fact to every host. This must follow the
+    # preflight's fact gathering: in ansible-core 2.21 a run_once task gives hosts with
+    # no facts yet one shared fact cache, so each would see another host's facts.
+    - name: Use one report folder for the whole run # noqa: run-once[task]
+      ansible.builtin.set_fact:
+        stig_stamp: "{{ now(utc=true, fmt='%Y%m%dT%H%M%SZ') }}"
+      run_once: true
       tags: always
 
     # The per-system playbooks under playbooks/stig/ set stig_os_scope, such as

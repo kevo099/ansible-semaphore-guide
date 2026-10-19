@@ -111,6 +111,25 @@ class AssessmentTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             xccdf.summarize(self.result([]))
 
+    def test_selected_totals_leave_out_rules_the_profile_did_not_select(self):
+        report = xccdf.summarize(self.result([("patch", "pass"), ("patch", "fail"), ("banner", "notapplicable"),
+                                              ("usb", "notselected"), ("wifi", "notselected")]))
+        self.assertEqual((report["result_instances"], report["unique_rule_ids"]), (5, 4))
+        self.assertEqual((report["selected_result_instances"], report["selected_rule_ids"]), (3, 2))
+        self.assertEqual(report["outcome_instances"]["notselected"], 2)
+        # Readers of earlier summaries still find every key they used.
+        self.assertLessEqual({"result_id", "profile", "result_instances", "unique_rule_ids",
+                              "rules_with_repeated_instances", "outcome_instances",
+                              "distinct_rule_ids_per_outcome", "has_scanner_errors_or_unknowns", "note"},
+                             set(report))
+
+    def test_assessment_that_selected_no_rule_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "notselected"):
+            xccdf.summarize(self.result([("usb", "notselected"), ("wifi", "notselected")]))
+        # A selected rule that does not apply to this system was still assessed.
+        report = xccdf.summarize(self.result([("usb", "notselected"), ("wifi", "notapplicable")]))
+        self.assertEqual((report["selected_result_instances"], report["selected_rule_ids"]), (1, 1))
+
     def test_multiple_results_require_selection(self):
         root = ET.Element("container")
         root.append(self.result([("rule", "fail")], "before"))
