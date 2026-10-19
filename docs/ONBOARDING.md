@@ -41,7 +41,7 @@ flowchart TD
     add --> cred{"Does Semaphore have<br/>the sudo password?"}
     cred -- no --> setcred["Add it once: Key Store login,<br/>then the inventory's sudo credentials"]
     setcred --> ping
-    cred -- yes --> ping["Run Ping, then Baseline preview,<br/>with Limit set to the new host"]
+    cred -- yes --> ping["Run Ping, then Baseline preview;<br/>both cover every host in the lab group"]
     ping --> ok{Both succeed?}
     ok -- yes --> done([Onboarded])
     ok -- no --> trouble["When a step fails, below"]
@@ -59,7 +59,7 @@ flowchart TD
 | 4. Sudo password | The VM, through the same channel | A SHA-512 hash from `openssl passwd -6` given to `onboard-linux.sh`, or the bootstrap playbook's prompt. cloud-init sets none. | The output says `password: set`. |
 | 5. Add the target | The controller, in the guide's folder | Paste the printed `add-target.sh` line, after checking it is that one command. | `Added NAME ... and trusted its verified host key`, or `Already present` on a repeat. |
 | 6. Semaphore's sudo password | Semaphore, once per password | [Give the templates the targets' sudo password](03-controller-el9.md#do-give-the-templates-the-targets-sudo-password): one shared password, or one per target with Vault. | The **Lab inventory file** shows the sudo credential. |
-| 7. Verify | Semaphore | Run **Ping**, then **Baseline preview**, with **Limit** set to the new host. | Both succeed; Ping names the host's distribution. |
+| 7. Verify | Semaphore | Run **Ping**, then **Baseline preview**. Both cover every host in the `lab` group, the new one included. | Both succeed for the new host; Ping names its distribution. |
 
 ### Prepare the account
 
@@ -86,8 +86,8 @@ controller from either installer and VMs created in the portal:
    line carries the address the controller reaches.
 2. On the controller, in the guide's folder, run the `add-target.sh` line
    that the output ends with.
-3. In Semaphore, add the sudo password once, then run **Ping** with the VM in
-   **Limit**.
+3. In Semaphore, add the sudo password once, then run **Ping**, which covers
+   every host in the `lab` group.
 
 To create the VMs with Ansible as well, follow
 [`examples/azure/`](../examples/azure/README.md): `network.yml`,

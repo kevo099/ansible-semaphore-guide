@@ -13,9 +13,9 @@ compute deliberately.
 
 | Edition and evidence | Scope |
 | --- | --- |
-| Tested with | `azure.azcollection` 4.0.0, ansible-core 2.21.4, `Standard_D2als_v6` in `eastus2`; targets Ubuntu 24.04 (plain and Ubuntu Pro images), AlmaLinux 9.8 and RHEL 9.8 (pay-as-you-go image); controllers Ubuntu 24.04 and AlmaLinux 9.8 in the same VNet |
-| Files | [`examples/azure/`](../examples/azure/), [`examples/onboard/`](../examples/onboard/) and [`examples/bootstrap-existing-vm.yml`](../examples/bootstrap-existing-vm.yml) |
-| Evidence | [Azure validation record](validation/2026-09-azure.md) and [onboarding and STIG record](validation/2026-09-onboard-stig.md) |
+| Tested with | `azure.azcollection` 4.0.0, ansible-core 2.21.4, `Standard_D2als_v6` and, in October in a new pay-as-you-go subscription, `Standard_D2als_v7`, in `eastus2`; targets Ubuntu 24.04 (plain and Ubuntu Pro images), AlmaLinux 9.8, Rocky Linux 9.8 (Marketplace image with a plan) and RHEL 9.8 (pay-as-you-go image); controllers Ubuntu 24.04 and AlmaLinux 9.8 in the same VNet |
+| Files | [`examples/azure/`](../examples/azure/README.md), [`examples/onboard/`](../examples/onboard/README.md) and [`examples/bootstrap-existing-vm.yml`](../examples/bootstrap-existing-vm.yml); [the onboarding page](ONBOARDING.md) maps them |
+| Evidence | [Azure validation record](validation/2026-09-azure.md), [onboarding and STIG record](validation/2026-09-onboard-stig.md) and [the October onboarding record](validation/2026-10-onboarding.md) |
 | Known limits | One region and VM size; no Trusted Launch; targets reached inside one VNet, not across a VPN |
 
 The playbooks create billable resources. Nothing in the starter lab calls
@@ -192,8 +192,9 @@ pay-as-you-go example in `vars.example.yml` explains. At first boot it:
 
 - creates `svc_ansible` with the automation public key and no password;
 - writes chapter 4's sudoers rule and SSH drop-in;
-- installs the Python package bindings the lessons need: `python3-apt` on
-  Ubuntu; `python3-dnf` and `python3-libselinux` on Enterprise Linux;
+- installs the Python package bindings the lessons need when they are
+  missing: `python3-apt` on Ubuntu; `python3-dnf` and `python3-libselinux` on
+  Enterprise Linux;
 - checks the sudo configuration and the effective SSH policy for
   `svc_ansible`, including that an authorized key is of a type and RSA size
   the server accepts and that `AuthorizedKeysFile` reads the file it wrote;
@@ -201,9 +202,13 @@ pay-as-you-go example in `vars.example.yml` explains. At first boot it:
   only if the drop-in is what breaks `sshd -t`, and starts SSH if neither its
   service nor, on Ubuntu, its socket is running;
 - makes cloud-init report an error when anything failed, including a key that
-  is missing because the placeholder was not replaced. It checks the SSH
-  policy from loopback, because the controller's address is unknown at first
-  boot, and reports an error if a `Match` rule depends on the client's address.
+  is missing because the placeholder was not replaced, or an `AllowUsers`,
+  `AllowGroups`, `DenyUsers` or `DenyGroups` rule that keeps `svc_ansible`
+  out. It checks the SSH policy from loopback, because the controller's
+  address is unknown at first boot, and reports an error if a `Match` rule
+  depends on the client's address;
+- ends its log with the `add-target.sh` line for the controller, with this
+  VM's name, address and RSA host-key fingerprint.
 
 It sets no password: Azure advises against secrets in custom data. Until you
 set one, as [finish access](#do-finish-access-with-one-playbook) or
@@ -263,10 +268,13 @@ rerun it. For a VM that exists already, use
 
 ## Do: pin the targets' host keys
 
-**Where: the controller, as your administrator account.** Read each target's
-fingerprint through the control plane, as above or from the output of the
-[Run Command script](#do-onboard-an-existing-vm-with-run-command), then scan it
-over the private network and compare before trusting it:
+**Where: the controller, as your administrator account.** On a controller made
+by either installer, the `add-target.sh` line that each way of preparing a VM
+prints does this for Semaphore: it carries the fingerprint read through the
+control plane, scans the VM over the private network, and trusts only the
+matching key. For your own terminal runs, or without a seeded controller, read
+each target's fingerprint through the control plane, scan it and compare before
+trusting it:
 
 ```bash
 ssh-keyscan -t rsa TARGET_PRIVATE_ADDRESS | ssh-keygen -lf -
@@ -287,15 +295,20 @@ images have. It then:
 
 - ensures the package bindings, `sudo` and the SSH server are installed;
 - creates or completes `svc_ansible` and authorizes exactly the public keys in
-  `automation_public_key_files`, restoring SELinux labels on Enterprise Linux;
+  `automation_public_key_files`, writing the key file as that account and
+  refusing a link in place of its `.ssh` folder or key file, and restores
+  SELinux labels on Enterprise Linux;
 - sets the sudo password you type at its prompt, stored only as a hash;
 - writes `/etc/sudoers.d/90-ansible-lab`, checked with `visudo`;
 - writes the SSH drop-in and checks the whole configuration and the effective
   policy for `svc_ansible` before any reload. If another setting overrides the
   policy, it restores the previous drop-in, or removes the one it created, and
   stops without reloading SSH, so it cannot lock the account out;
+- refuses an `AllowUsers`, `AllowGroups`, `DenyUsers` or `DenyGroups` rule that
+  keeps `svc_ansible` out, before any SSH reload;
 - runs `sudo -k -n` as `svc_ansible` and fails if that succeeds, which catches
-  a `NOPASSWD` rule elsewhere that would override the password requirement.
+  a `NOPASSWD` rule elsewhere that would override the password requirement;
+- ends with the `add-target.sh` line for the controller.
 
 By default it authorizes `~/.ssh/ansible_lab.pub`. On a controller made by
 either installer ([Ubuntu](03-controller.md) or
@@ -377,10 +390,14 @@ does what `bootstrap-existing-vm.yml` does, and is safe to run again:
 - writes and enforces the sudoers rule and the SSH drop-in, checks the whole
   sudo configuration and rejects any `NOPASSWD` or `!authenticate` rule for the
   account, or a `rootpw`, `targetpw` or `runaspw` default;
-- checks `sshd -t` and the effective SSH policy before reloading, and restores
-  the previous drop-in and leaves SSH alone when a check fails;
+- checks `sshd -t` and the effective SSH policy before reloading, including
+  any `AllowUsers`, `AllowGroups`, `DenyUsers` or `DenyGroups` rule that would
+  keep `svc_ansible` out, and restores the previous drop-in and leaves SSH alone
+  when a check fails;
 - prints each change, the authorized key fingerprints and the host-key
-  fingerprints, with `RESULT: OK` or `RESULT: FAILED: reason` as the last line.
+  fingerprints, then the `add-target.sh` line for the controller, with
+  `RESULT: OK` or `RESULT: FAILED: reason` as the last line, also when an
+  unexpected command fails.
 
 Edit the copy you run: replace `REPLACE_WITH_AUTOMATION_PUBLIC_KEY` with the
 controller's public key, one key per line, between the two `END_OF_KEYS`
@@ -461,11 +478,13 @@ one this way or with the bootstrap playbook.
 
 ## Do: generate the controller inventory command
 
-**Where: the target VM's Azure Run Command → RunShellScript.** After preparing
-the target, paste the whole
+**Where: the target VM's Azure Run Command → RunShellScript.** Every way of
+preparing a VM above already ends with the line to run on the controller. For a
+VM that cloud-init prepared, or whose output you no longer have, paste the whole
 [`examples/onboard/inventory-info.sh`](../examples/onboard/inventory-info.sh)
-file into Run Command. It only reads the VM's hostname, OS, local IPv4 addresses,
-RSA host public key, account status and sudo validation result.
+file into Run Command instead. It changes nothing: it only reads the VM's
+hostname, OS, local IPv4 addresses, RSA host public key, account status and
+sudo validation result.
 
 Set `CONTROLLER_ADDRESS` at the top to the controller's IP. The collector selects
 the target's source address for that route; this does not send a network probe.
@@ -474,34 +493,28 @@ For multiple addresses you can instead set `TARGET_ADDRESS` explicitly; it must
 belong to this VM. `INVENTORY_NAME` defaults to the short hostname, and `LAB_DIR`
 is the controller's seeded lab folder, `/opt/ansible-lab` by default.
 
-The output ends with a complete block beginning with `sudo python3` and ending
-with `ADD_ANSIBLE_TARGET`. Copy that entire block into the **controller's**
-terminal. It needs no guide checkout. It:
+The output ends with one line for the **controller**, in the guide's folder:
 
-- checks that the existing inventory has the target's OS group and includes
-  that group under `[lab:children]`;
-- connects to target SSH on port 22, compares its RSA fingerprint with the one
-  read through authenticated Run Command, and refuses a mismatch;
-- refuses conflicting inventory entries or an existing different RSA host key;
-- backs up each file it changes with a `.before-add-TIMESTAMP` suffix, adds
-  the inventory entry, and records the verified key in
-  `/etc/semaphore/known_hosts`, preserving the original files' permissions.
+```text
+sudo bash scripts/add-target.sh --name NAME --address ADDRESS --group GROUP --fingerprint SHA256:...
+```
 
-Repeating an unchanged successful add does not add duplicates or new backups.
-This updates the seeded **local file inventory**; a Static inventory saved in
-Semaphore or an inventory fetched from Git is a separate source.
+It prints data, not a program: check that what you paste is that single
+`add-target.sh` command, then run it. [`scripts/add-target.sh`](../scripts/add-target.sh)
+scans the VM, keeps only the host key that matches the fingerprint read through
+authenticated Run Command, refuses a name or address already in use and a
+different key already trusted for the address, adds the inventory entry and
+records the key in `/etc/semaphore/known_hosts`. Running the same line again
+reports `Already present` and changes nothing. This updates the seeded **local
+file inventory**; a Static inventory saved in Semaphore or an inventory fetched
+from Git is a separate source.
 
 The collector prints warnings if the automation account, password, authorized
-keys or sudo validation is incomplete. Generating an inventory command does not
-prove onboarding or connectivity. Resolve those warnings, select the SSH and
-sudo credentials in Semaphore, and run **Ping** and **Baseline preview** with
-the template's Limit set to this host. The script prints no password, password
-hash or private key.
-
-The output is capped below Azure action Run Command's last 4 KB limit.
-The collector and generated command have offline tests with temporary inventory
-files and simulated SSH scans; a live Azure/controller run of this helper has
-not been established.
+keys or sudo validation is incomplete. Resolve them, give Semaphore the sudo
+password, and run **Ping** and **Baseline preview**, which cover every host in
+the `lab` group. The script prints no password, password hash or private key.
+In the October test its output was under 500 bytes, well below Run Command's
+4 KB limit.
 
 ## Check: the same three layers, then the lessons
 
@@ -526,9 +539,19 @@ their sudo passwords differ. What the test saw on all three targets:
   a STIG apply with the approved reboot ran from the local lab folder with no
   clone step.
 
+- In the October test, on a new pay-as-you-go subscription, every way of
+  preparing a VM above ended with its `add-target.sh` line, and each line,
+  pasted on an AlmaLinux 9.8 controller, added its target: RHEL 9.8 through
+  pasted Run Command, AlmaLinux 9.8 through cloud-init and a managed Run
+  Command, Rocky Linux 9.8 through cloud-init and the bootstrap playbook, and
+  Ubuntu 24.04 Pro through the bootstrap playbook alone. Ping and Baseline
+  preview then succeeded on all four.
+
 Repeat the provisioning playbooks, too: in the test, `network.yml`,
 `controller.yml` and `targets.yml` reported `changed=0` on a second run, and the
-resource group held the same resources before and after.
+resource group held the same resources before and after. `targets.yml` creates
+its VMs together, so two took 43 seconds in October, and `power.yml`
+deallocated and started them together.
 
 ## Optional Do: the vendor STIG lessons on Azure targets
 

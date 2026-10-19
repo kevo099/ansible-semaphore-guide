@@ -57,6 +57,10 @@ elif name == "pgrep":
     # A Semaphore task runs from the Nth check on; 0 means never.
     running_from = int(os.environ.get("MOCK_TASK_RUNNING_FROM", "0"))
     sys.exit(0 if running_from and count_call("pgrep") >= running_from else 1)
+elif name == "ss":
+    # What listens on port 3000, comma-separated; empty means Semaphore is stopped.
+    for address in filter(None, os.environ.get("MOCK_SS_LISTEN", "").split(",")):
+        print(f"LISTEN 0      4096      {address}:3000      *:*")
 elif name == "nginx" and args == ["-T"]:
     for path in Path(os.environ["MOCK_NGINX"]).glob("sites-enabled/*"):
         print(path.read_text())
@@ -93,7 +97,7 @@ class ExposureTests(unittest.TestCase):
         self.bin = self.directory / "bin"
         self.bin.mkdir()
         for name in ("id", "chown", "install", "systemctl", "ufw", "apt-get", "nginx",
-                     "openssl", "curl", "dnf", "setsebool", "firewall-cmd", "pgrep", "sleep"):
+                     "openssl", "curl", "dnf", "setsebool", "firewall-cmd", "pgrep", "sleep", "ss"):
             executable = self.bin / name
             executable.write_text(textwrap.dedent(MOCK_COMMAND))
             executable.chmod(0o755)
@@ -166,7 +170,7 @@ class ExposureTests(unittest.TestCase):
             with self.subTest(interface=interface, mode=mode):
                 self.log.write_text("")
                 original = self.set_interface(interface)
-                result = self.run_mode(mode, MOCK_TASK_RUNNING_FROM="1")
+                result = self.run_mode(mode, MOCK_TASK_RUNNING_FROM="1", MOCK_SS_LISTEN=interface)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertIn(f"Semaphore already listens on {interface}; it was not restarted.", result.stdout)
                 commands = self.commands()
@@ -175,6 +179,30 @@ class ExposureTests(unittest.TestCase):
                 self.assertIn(["systemctl", "start", "semaphore"], commands)
                 self.assertFalse(any(command[0] == "pgrep" for command in commands))
                 self.assertEqual(self.config_file.read_text(), original)
+
+    def test_a_process_still_on_the_old_address_is_restarted(self):
+        # config.json already names the wanted address, but the running Semaphore
+        # listens on the old one, as after a run interrupted before its restart.
+        for interface, mode, live in (("127.0.0.1", "https", ANY), ("127.0.0.1", "loopback", ANY),
+                                      (ANY, "http", "127.0.0.1")):
+            with self.subTest(interface=interface, mode=mode):
+                self.log.write_text("")
+                self.set_interface(interface)
+                result = self.run_mode(mode, MOCK_SS_LISTEN=live)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertNotIn("already listens", result.stdout)
+                commands = self.commands()
+                self.assertIn(["pgrep", "-u", "semaphore", "-f", "ansible-playbook"], commands)
+                self.assertIn(["systemctl", "restart", "semaphore"], commands)
+                self.assertEqual(json.loads(self.config_file.read_text())["interface"], interface)
+
+    def test_a_process_still_on_the_old_address_waits_for_a_running_task(self):
+        original = self.set_interface("127.0.0.1")
+        result = self.run_mode("https", MOCK_SS_LISTEN=ANY, MOCK_TASK_RUNNING_FROM="1")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("A Semaphore task is running", result.stdout)
+        self.assertNotIn(["systemctl", "restart", "semaphore"], self.commands())
+        self.assertEqual(self.config_file.read_text(), original)
 
     def test_a_new_bind_address_restarts_semaphore_when_no_task_runs(self):
         for interface, mode, new in (("127.0.0.1", "http", ANY), (ANY, "https", "127.0.0.1"),

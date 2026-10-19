@@ -367,9 +367,14 @@ class PrivilegeTests(unittest.TestCase):
 
 
 class PackageLockTests(unittest.TestCase):
-    """A fresh VM can hold the package lock for minutes while it installs the image's own updates."""
+    """A fresh VM can hold the package lock for minutes while it installs the image's own updates.
 
-    def test_package_tasks_wait_for_the_lock_as_long_as_onboarding(self):
+    Only the apt tasks use lock_timeout. ansible-core's dnf module accepts it and never
+    reads it, and dnf itself waits until the lock is free; the dnf tasks carry the same
+    value only so that every package task reads alike.
+    """
+
+    def test_apt_tasks_wait_for_the_lock_as_long_as_onboarding(self):
         onboarding = set()
         for path in ("examples/onboard/cloud-init.yaml", "examples/onboard/onboard-linux.sh"):
             text = (ROOT / path).read_text()

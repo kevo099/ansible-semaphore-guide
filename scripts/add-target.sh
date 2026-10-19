@@ -115,6 +115,6 @@ PY
 # Trust the key only now, so a refused inventory edit leaves known_hosts unchanged.
 [[ $trusted_matches == yes ]] || cat "$matched" >> "$known_hosts"
 echo "Added $name ($address) to $inventory under [$group] and trusted its verified host key."
-echo "Next: run the Ping template with Limit $name. If it fails with Permission denied (publickey),"
+echo "Next: run the Ping template, which covers every host in the lab group. If $name fails with Permission denied (publickey),"
 echo "svc_ansible on $name lacks the key 'sudo cat /etc/semaphore/svc_ansible.pub' shows; if sudo asks for a"
 echo "password, give Semaphore the targets' sudo password, as chapter 3b shows."

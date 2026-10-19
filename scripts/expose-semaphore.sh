@@ -19,8 +19,9 @@
 # runs. To name a new address, remove semaphore.key and semaphore.crt there first.
 #
 # Semaphore restarts only when its bind address changes, that is, when switching to
-# or from http, and the restart stops every task it runs. While an ansible-playbook
-# of the semaphore account runs, such a switch is refused; --force restarts anyway.
+# or from http, or when it still listens on an earlier one, and the restart stops
+# every task it runs. While an ansible-playbook of the semaphore account runs, such
+# a restart is refused; --force restarts anyway.
 #
 # The cloud/network firewall in front of the VM is not touched; allow the chosen
 # port there yourself, ideally only from your own address.
@@ -60,6 +61,14 @@ current_interface() {
   python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("interface", ""))' /etc/semaphore/config.json
 }
 
+# True when Semaphore listens on port 3000 at exactly $1, or listens nowhere (stopped).
+# A run interrupted before its restart, or a hand edit, leaves config.json ahead of it.
+running_with() {
+  local live
+  live=$(ss -H -lnt 'sport = :3000' | awk '{h = $4; sub(/:3000$/, "", h); gsub(/[][]/, "", h); print h}')
+  [[ -z "$live" || "$live" == "$1" ]]
+}
+
 # A restart stops every task Semaphore runs, which can leave a host half changed.
 refuse_while_tasks_run() {
   if [[ -z "$force" ]] && pgrep -u semaphore -f ansible-playbook >/dev/null; then
@@ -72,7 +81,7 @@ refuse_while_tasks_run() {
 }
 
 set_interface() {
-  if [[ $(current_interface) == "$1" ]]; then
+  if [[ $(current_interface) == "$1" ]] && running_with "$1"; then
     # Starts a stopped Semaphore; a running one keeps running, and so do its tasks.
     systemctl start semaphore
     echo "Semaphore already listens on $1; it was not restarted."
@@ -172,7 +181,7 @@ primary_address() {
 # while a task runs. set_interface checks again, in case a task started meanwhile.
 interface=127.0.0.1
 [[ "$mode" != http ]] || interface=$any_address
-[[ $(current_interface) == "$interface" ]] || refuse_while_tasks_run
+{ [[ $(current_interface) == "$interface" ]] && running_with "$interface"; } || refuse_while_tasks_run
 
 case "$mode" in
   loopback)

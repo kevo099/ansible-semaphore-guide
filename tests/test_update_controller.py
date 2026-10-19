@@ -613,10 +613,25 @@ class LoginTests(unittest.TestCase):
         self.assertEqual(fake.calls, [])
 
     def test_a_login_that_sees_no_seeded_project_is_told_why(self):
-        with self.assertRaisesRegex(SystemExit, "found 0 .* sees only the projects it belongs to; use the login"):
-            seed.resolve(FakeSemaphore(projects=()), "Ansible Practice", LAB)
-        with self.assertRaisesRegex(SystemExit, "and check --project-id"):
-            seed.resolve(FakeSemaphore(), "Ansible Practice", LAB, project_id=9)
+        member = {"id": 2, "username": "learner", "admin": False}
+        for user in (member, None):
+            with self.subTest(user=user):
+                with self.assertRaisesRegex(SystemExit, "found 0 .* sees only the projects it belongs to; use "
+                                                        "the login.* If you renamed the project, pass --project-id"):
+                    seed.resolve(FakeSemaphore(projects=()), "Ansible Practice", LAB, user=user)
+                with self.assertRaisesRegex(SystemExit, "and check --project-id"):
+                    seed.resolve(FakeSemaphore(), "Ansible Practice", LAB, project_id=9, user=user)
+
+    def test_an_administrator_without_the_project_is_told_it_was_renamed_or_removed(self):
+        # An administrator sees every project, so blaming the login would be wrong.
+        admin = FakeSemaphore().user
+        with self.assertRaises(SystemExit) as raised:
+            seed.resolve(FakeSemaphore(projects=()), "Ansible Practice", LAB, user=admin)
+        self.assertIn("No project is named 'Ansible Practice'; if you renamed it, pass --project-id with its ID.",
+                      str(raised.exception))
+        self.assertNotIn("not a Semaphore administrator", str(raised.exception))
+        with self.assertRaisesRegex(SystemExit, "No project has ID 9; check --project-id"):
+            seed.resolve(FakeSemaphore(), "Ansible Practice", LAB, project_id=9, user=admin)
 
 
 class LoopbackSemaphore(http.server.BaseHTTPRequestHandler):
@@ -1079,11 +1094,24 @@ class UpdaterMainTests(unittest.TestCase):
         return subprocess.CompletedProcess(command, 1, "", "")
 
     def run_main(self, *arguments, lab_dir=None, token=None):
-        self.output, self.folders = io.StringIO(), []
+        self.output, self.folders, self.removals = io.StringIO(), [], 0
         environment = {key: value for key, value in os.environ.items() if key != "SEMAPHORE_API_TOKEN"}
         environment.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1",
                            **({"SEMAPHORE_API_TOKEN": token} if token else {}))
         argv = ["update-controller.py", "--lab-dir", str(lab_dir or self.lab_root), *arguments]
+        real_remove = seed.remove_replaced
+
+        def remove_after_commit(*positional, **keywords):
+            # The templates a release replaced go only once the lab folder holds that
+            # release's files, committed: until then they are what still works.
+            self.assertEqual(git_output(self.lab_root, "status", "--porcelain", "--untracked-files=all"), "")
+            self.assertEqual(git_output(self.lab_root, "log", "-1", "--format=%s"),
+                             "Update the guide's files to v9.9.9")
+            for relative, text in self.RELEASE.items():
+                self.assertEqual((self.lab_root / relative).read_text(), text)
+            self.removals += 1
+            return real_remove(*positional, **keywords)
+
         with contextlib.ExitStack() as stack:
             # The folder and its lock last as long as the run, as when the process exits.
             stack.callback(lambda: [folder.close() for folder in self.folders])
@@ -1100,6 +1128,7 @@ class UpdaterMainTests(unittest.TestCase):
                           mock.patch.object(seed, "Client", self.client),
                           mock.patch.object(seed, "BACKUP_DIR", self.backups),
                           mock.patch.object(seed, "PASSWORD_FILE", self.password_file),
+                          mock.patch.object(seed, "remove_replaced", remove_after_commit),
                           contextlib.redirect_stdout(self.output)):
                 stack.enter_context(patch)
             return updater.main()
@@ -1119,6 +1148,7 @@ class UpdaterMainTests(unittest.TestCase):
         self.assertEqual(self.fake.schedules, [nightly])
         self.assertIn("Kept template 'STIG audit (vendor scan only)': schedule 'Nightly audit'", out)
         self.assertIn("Removed 4 replaced object(s) from Semaphore.", out)
+        self.assertEqual(self.removals, 1)
         self.assertIn("The readiness check passed.", out)
         self.assertEqual(self.run_main(), 0, self.output.getvalue())
         out = self.output.getvalue()
@@ -1156,11 +1186,18 @@ class UpdaterMainTests(unittest.TestCase):
                 raise OSError(errno.ENOSPC, "No space left on device")
             return real_write(folder, relative, data, expected)
 
+        old_stig = [t["name"] for t in self.fake.templates.values() if t["name"].startswith("STIG ")]
+        self.assertEqual(len(old_stig), 4)
         with mock.patch.object(LabFolder, "write", full_disk):
             with self.assertRaisesRegex(SystemExit, "No space left on device. The files written were put back, so "
                                                     "nothing in the folder was changed; Semaphore is updated."):
-                self.run_main("--apply")
+                self.run_main("--apply", "--remove-replaced")
         self.assertEqual(git_output(self.lab_root, "status", "--porcelain", "--untracked-files=all"), "")
+        # The replaced templates stay while the folder still holds the files they use.
+        self.assertEqual(self.removals, 0)
+        self.assertEqual([call for call in self.fake.writes() if call[0] == "DELETE"], [])
+        names = [t["name"] for t in self.fake.templates.values()]
+        self.assertTrue(all(name in names for name in old_stig), names)
         self.assertEqual(self.run_main("--apply"), 0, self.output.getvalue())
         self.assertEqual(git_output(self.lab_root, "status", "--porcelain", "--untracked-files=all"), "")
         self.assertIn("Templates to add: 0", self.output.getvalue())

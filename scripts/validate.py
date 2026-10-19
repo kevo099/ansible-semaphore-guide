@@ -109,18 +109,16 @@ def publication_boundary(path, text):
         break
     # A sentence may end with an address; only a further dotted digit group makes it a version.
     ipv4 = r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?!\w|\.\d)"
-    # IPv6 likewise. "::" alone is the unspecified address of listen examples such as [::]:443.
+    # IPv6 likewise. Reserved space holds "::", the unspecified address of listen examples
+    # such as [::]:443, and what Python's extended slices look like, such as words[1::2];
+    # global, unique-local, link-local and multicast addresses are not reserved.
     ipv6 = r"(?<![\w:.])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?![\w:]|\.\d)"
-    # Python's extended slices, such as words[1::2], are digits and colons in brackets.
-    slices = {m.group(1) for m in re.finditer(r"\[([0-9:]*:[0-9:]*)\]", text)}
     for match in re.findall(ipv4, text) + re.findall(ipv6, text):
-        if match in slices and re.fullmatch(r"[0-9:]+", match):
-            continue
         try:
             address = ipaddress.ip_address(match)
         except ValueError:
             continue
-        if not (address.is_loopback or match == "::"):
+        if not (address.is_loopback or (address.version == 6 and address.is_reserved)):
             fail(path, "literal non-loopback address; use documentation hostnames")
             break
     # Owner names are case-insensitive, and clone and raw-file URLs are links too.

@@ -616,7 +616,7 @@ def main():
     client = seeder.Client(seeder.API, os.environ.get("SEMAPHORE_API_TOKEN") or None)
     seeder.wait_ready(client)
     user = seeder.log_in(client, "admin", ask=True)
-    found = seeder.resolve(client, "Ansible Practice", str(root), args.project_id)
+    found = seeder.resolve(client, "Ansible Practice", str(root), args.project_id, user)
     seeder.check_access(client, user, found)
     semaphore_plan = seeder.plan_for(found)
     print(f"Semaphore project {found['project']['name']!r} (ID {found['project']['id']})")

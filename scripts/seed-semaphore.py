@@ -508,16 +508,23 @@ def exactly_one(items, what, hint):
     return items[0]
 
 
-def resolve(client, project_name, lab_dir, project_id=None):
+def resolve(client, project_name, lab_dir, project_id=None, user=None):
     """Find the seeded project and its lab folder objects by what they are, not only by name."""
     projects = client.call("GET", "/projects") or []
     matches = ([p for p in projects if p["id"] == project_id] if project_id
                else [p for p in projects if p.get("name") == project_name])
-    project = exactly_one(matches, f"project named {project_name!r}",
-                          "Pass --project-id with the ID of the seeded one." if matches else
-                          "A login that is not a Semaphore administrator sees only the projects it belongs "
-                          "to; use the login or API token of an administrator, or of the project's owner or a "
-                          "manager" + (", and check --project-id." if project_id else "."))
+    if matches:
+        hint = "Pass --project-id with the ID of the seeded one."
+    elif (user or {}).get("admin"):
+        # An administrator sees every project, so this one was renamed or deleted.
+        hint = (f"No project has ID {project_id}; check --project-id." if project_id else
+                f"No project is named {project_name!r}; if you renamed it, pass --project-id with its ID.")
+    else:
+        hint = ("A login that is not a Semaphore administrator sees only the projects it belongs "
+                "to; use the login or API token of an administrator, or of the project's owner or a "
+                "manager" + (", and check --project-id." if project_id else
+                             ". If you renamed the project, pass --project-id with its ID."))
+    project = exactly_one(matches, f"project named {project_name!r}", hint)
     base = f"/project/{project['id']}"
     repository = exactly_one(
         [r for r in client.call("GET", f"{base}/repositories") or []
@@ -788,7 +795,7 @@ def apply_update(client, found, plan, backup_dir, say=print):
 
 def update(client, args, user):
     """--update for seed-semaphore.py itself; update-controller.py calls the parts directly."""
-    found = resolve(client, args.project_name, args.lab_dir, getattr(args, "project_id", None))
+    found = resolve(client, args.project_name, args.lab_dir, getattr(args, "project_id", None), user)
     check_access(client, user, found)
     plan = plan_for(found)
     result = {"project": {"name": found["project"]["name"], "id": found["project"]["id"]},

@@ -80,12 +80,13 @@ sudo bash scripts/expose-semaphore.sh --mode https \
 plain text. Use it only on a network you fully control.
 
 Semaphore restarts only when its bind address changes, that is, when you switch
-to or from `--mode http`. Running `--mode https` again, or switching between
-https and loopback, leaves Semaphore and its running tasks alone and prints
-`Semaphore already listens on 127.0.0.1; it was not restarted.` A restart stops
-every running task, so while a task runs, the script refuses such a switch
-before changing anything; run it again once the task has finished, or add
-`--force` to restart anyway.
+to or from `--mode http`, or when it still listens on an earlier address, for
+example after a run that stopped before its restart. Running `--mode https`
+again, or switching between https and loopback, leaves Semaphore and its running
+tasks alone and prints `Semaphore already listens on 127.0.0.1; it was not
+restarted.` A restart stops every running task, so while a task runs, the script
+refuses such a switch before changing anything; run it again once the task has
+finished, or add `--force` to restart anyway.
 
 **Check:** from another machine, `curl -k https://VM_ADDRESS/api/ping` prints
 `pong`, while `curl http://VM_ADDRESS:3000/` and `curl http://VM_ADDRESS/`

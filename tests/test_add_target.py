@@ -77,7 +77,7 @@ class AddTargetTests(unittest.TestCase):
         inventory, known = self.state()
         self.assertIn(f"[enterprise_linux]\nlab-alma ansible_host={TEST_NET}.12\n", inventory)
         self.assertEqual(known, f"{TEST_NET}.12 {self.key['line']}\n")
-        self.assertIn("Ping template with Limit lab-alma", result.stdout)
+        self.assertIn("run the Ping template, which covers every host in the lab group. If lab-alma fails", result.stdout)
 
     def test_running_it_again_changes_nothing(self):
         self.assertEqual(self.add().returncode, 0)
