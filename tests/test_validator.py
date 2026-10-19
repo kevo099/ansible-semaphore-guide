@@ -172,6 +172,31 @@ class HeadingAnchorTests(unittest.TestCase):
                     self.assertEqual(found, expected)
 
 
+class PlaceholderTests(unittest.TestCase):
+    """A published page must not keep the placeholder of a result nobody wrote in."""
+
+    RULE = "unfilled placeholder; write in the result it stands for"
+
+    def rules(self, text):
+        validate.errors.clear()
+        validate.markdown(ROOT / "docs" / "example.md", text)
+        found = [error.split(": ", 1)[1] for error in validate.errors]
+        validate.errors.clear()
+        return found
+
+    def test_a_pending_placeholder_is_reported_with_its_line(self):
+        for text, line in (("REMOVAL_PENDING\n", 1), ("# Run\n\nResult: STIG_COUNT_PENDING.\n", 3),
+                           ("| Removal | RESULT_PENDING |\n", 1), ("```text\nX_PENDING\n```\n", 2)):
+            with self.subTest(text=text):
+                self.assertEqual(self.rules(text), [f"line {line}: {self.RULE}"])
+
+    def test_the_word_pending_elsewhere_is_accepted(self):
+        for text in ("The removal is pending.", "PENDING", "Pending: none", "a_PENDING and REMOVAL_PENDINGS",
+                     "`is_pending`"):
+            with self.subTest(text=text):
+                self.assertEqual(self.rules(text), [])
+
+
 class CloudInitTests(unittest.TestCase):
     """cloud-init runs these scripts at first boot, so a syntax error must fail validation."""
 

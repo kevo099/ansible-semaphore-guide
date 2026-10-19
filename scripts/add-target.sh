@@ -19,7 +19,10 @@
 # The script scans the target, compares every scanned key against that fingerprint, and
 # keeps only the matching key. It adds the inventory line first and records that key
 # only after the edit succeeds, so a mismatch or a missing group section changes nothing.
-# Running it again for a host it added, with the same values, changes nothing.
+# Running it again for a host it added, with the same values, changes nothing. A rebuilt
+# VM keeps its inventory line but has a new host key: the script prints the commands
+# that remove the old key, and once that is done it trusts the verified new key without
+# adding the line again. Runs on one lab folder take turns, waiting up to two minutes.
 set -euo pipefail
 umask 077
 # Match bytes: in a UTF-8 locale, [A-Za-z] also matches other alphabets' look-alike letters.
@@ -35,7 +38,7 @@ from_info=no
 for argument in "$@"; do
   [[ $argument != --from-info ]] || from_info=yes
 done
-pasted='' cancelled=no
+pasted='' cancelled=no name_pasted=no
 if [[ $from_info == yes ]]; then
   if [[ -t 0 ]]; then
     # A control character in the paste must not stop the reading: Ctrl-\ and Ctrl-Z do
@@ -63,7 +66,7 @@ if [[ $from_info == yes ]]; then
     # A Ctrl-D inside the paste ends the reading early, and the rest of a long paste, or
     # of one over a slow link, can still be arriving: discard what comes, unechoed, until
     # the terminal has been quiet for a second.
-    python3 -c '
+    python3 -I -c '
 import os, termios
 saved = termios.tcgetattr(0)
 quiet = termios.tcgetattr(0)
@@ -112,6 +115,7 @@ if [[ $from_info == yes ]]; then
     if [[ -n ${info[$key]+set} ]]; then
       [[ -z ${!key} ]] || { echo "The $key is both in the paste and given with --$key; give it once."; exit 2; }
       printf -v "$key" '%s' "${info[$key]}"
+      [[ $key != name ]] || name_pasted=yes
     elif [[ -z ${!key} ]]; then
       echo "The paste has no $key= line; give that value with --$key."; exit 2
     fi
@@ -127,10 +131,22 @@ fi
 # Shown only once checked, so nothing unchecked from the VM reaches the terminal.
 [[ $from_info == no ]] || echo "Using name=$name address=$address group=$group fingerprint=$fingerprint"
 inventory="$lab_dir/inventories/lab.ini"
+# One run at a time per lab folder: two runs for one VM could otherwise both pass the
+# checks below before either writes, and add its line and its key twice.
+{ exec 9<"$lab_dir/inventories"; } 2>/dev/null || { echo 'Missing inventory or known-hosts file.'; exit 1; }
+flock -w 120 9 || { echo "Another add-target.sh run is changing $lab_dir; run this again when it has finished."; exit 1; }
 [[ -f "$inventory" && -f "$known_hosts" ]] || { echo 'Missing inventory or known-hosts file.'; exit 1; }
+# A name the VM printed can be left out of the paste and given as an option instead.
+refuse_name() {
+  echo "$1"
+  if [[ $name_pasted == yes ]]; then
+    echo "Paste the lines again without the name= line and add --name NAME, or set INVENTORY_NAME in inventory-info.sh."
+  fi
+  exit 1
+}
 # Ansible runs delegate_to: localhost tasks on a host of that name instead of the controller.
 if [[ "$name" == localhost || "$name" == 127.0.0.1 ]]; then
-  echo "$name is the name Ansible gives the controller; choose another name."; exit 1
+  refuse_name "$name is the name Ansible gives the controller; choose another name."
 fi
 # A host named like a group, such as lab, would make --limit lab select that host alone.
 if [[ "$name" == all || "$name" == ungrouped ]] || awk -v n="$name" '
@@ -139,7 +155,7 @@ if [[ "$name" == all || "$name" == ungrouped ]] || awk -v n="$name" '
       sub(/:.*/, "", header); if (header == n) found = 1
     }
     END {exit !found}' "$inventory"; then
-  echo "$name is also the name of an inventory group; choose another name."; exit 1
+  refuse_name "$name is also the name of an inventory group; choose another name."
 fi
 # Compare whole fields as text: a dot in the name is not a wildcard, and names that
 # look like numbers (10 and 010) stay different.
@@ -150,12 +166,35 @@ trusted_matches=no
 if [[ -n "$trusted" ]] && printf '%s\n' "$trusted" | ssh-keygen -lf - 2>/dev/null | grep -qF -- " $fingerprint "; then
   trusted_matches=yes
 fi
+key_only=no
 if [[ -n "$existing" ]]; then
-  if [[ "$existing" == "$name ansible_host=$address" && $trusted_matches == yes ]]; then
+  if [[ "$existing" != "$name ansible_host=$address" ]]; then
+    echo "Inventory already contains $name with other settings ($existing); edit it by hand instead."; exit 1
+  fi
+  # The section the line is under; a line above every section is in Ansible's ungrouped.
+  listed_group=$(awk -v n="$name" '
+      BEGIN {section = "ungrouped"}
+      match($0, /^[[:space:]]*\[[^]]+\]/) {
+        section = substr($0, RSTART, RLENGTH); sub(/^[[:space:]]*\[/, "", section); sub(/\]$/, "", section); next
+      }
+      $1 == (n "") {print section; exit}' "$inventory")
+  if [[ "$listed_group" != "$group" ]]; then
+    echo "Inventory lists $name under [$listed_group], not under [$group]; edit it by hand instead."; exit 1
+  fi
+  if [[ $trusted_matches == yes ]]; then
     echo "Already present: $name ($address) is in $inventory and its verified key is trusted; nothing changed."
     exit 0
   fi
-  echo "Inventory already contains $name with other settings ($existing); edit it by hand instead."; exit 1
+  # A rebuilt VM keeps its name and address and gets a new host key.
+  if [[ -n "$trusted" ]]; then
+    echo "$name ($address) is in $inventory, but known-hosts holds a different key for $address. After verifying why its key changed,"
+    echo "remove the old entry and give the rewritten file back to the service, then run this again:"
+    echo "  sudo ssh-keygen -R $address -f $known_hosts"
+    echo "  sudo chown root:semaphore $known_hosts && sudo chmod 0640 $known_hosts"
+    exit 1
+  fi
+  # The line is right and no key is trusted for the address: only the key is missing.
+  key_only=yes
 fi
 if [[ -n "$owner" ]]; then
   echo "Inventory already lists $address as $owner; edit it by hand instead."; exit 1
@@ -186,7 +225,9 @@ if [[ ! -s "$matched" ]]; then
   exit 1
 fi
 
-python3 - "$inventory" "$group" "$name" "$address" <<'PY'
+# The inventory line comes first; a rebuilt VM's line is already there.
+if [[ $key_only == no ]]; then
+  python3 -I - "$inventory" "$group" "$name" "$address" <<'PY'
 import re
 import sys
 from pathlib import Path
@@ -204,9 +245,14 @@ while index < len(lines) and lines[index].strip() and not lines[index].lstrip().
 lines.insert(index, f"{name} ansible_host={address}")
 Path(path).write_text("\n".join(lines) + "\n")
 PY
+fi
 # Trust the key only now, so a refused inventory edit leaves known_hosts unchanged.
 [[ $trusted_matches == yes ]] || cat "$matched" >> "$known_hosts"
-echo "Added $name ($address) to $inventory under [$group] and trusted its verified host key."
+if [[ $key_only == yes ]]; then
+  echo "Trusted the verified host key of $name ($address), which $inventory already lists."
+else
+  echo "Added $name ($address) to $inventory under [$group] and trusted its verified host key."
+fi
 echo "Next: run the Ping template, which covers every host in the lab group. If $name fails with Permission denied (publickey),"
 echo "svc_ansible on $name lacks the key 'sudo cat /etc/semaphore/svc_ansible.pub' shows; if sudo asks for a"
 echo "password, give Semaphore the targets' sudo password, as chapter 3b shows."

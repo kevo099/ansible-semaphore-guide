@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+import re
 import shutil
 import stat
 import subprocess
@@ -115,6 +116,21 @@ class InstallerPlanTests(unittest.TestCase):
                 result = self.run_installer(installer, "--apply", "--editor", "labeditor")
                 self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
                 self.assertIn("Requires", result.stdout)
+
+
+class InlinePythonTests(unittest.TestCase):
+    """The shell scripts run as root, from whatever folder the operator is in."""
+
+    def test_inline_python_runs_isolated(self):
+        # -I leaves the working directory and the PYTHON* variables out, so a module file
+        # there cannot stand in for one the snippet imports.
+        scripts = set()
+        for script in sorted((ROOT / "scripts").glob("*.sh")):
+            for match in re.finditer(r"\bpython3(?:\.\d+)?((?: -\w+)*) (?:-c|-)(?=\s)", script.read_text()):
+                scripts.add(script.name)
+                with self.subTest(script=script.name, command=match.group(0)):
+                    self.assertIn("-I", match.group(1).split())
+        self.assertEqual(scripts, {"add-target.sh", "expose-semaphore.sh", *INSTALLERS})
 
 
 class SharedPreflightTests(unittest.TestCase):

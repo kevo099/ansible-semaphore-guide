@@ -140,6 +140,10 @@ def markdown(path, content):
         elif parsed.fragment and linked.suffix == ".md" and unquote(parsed.fragment) not in headings(linked.read_text()):
             fail(path, "unknown local heading anchor")
         counts["local_links"] += 1
+    # A token such as REMOVAL_PENDING holds the place of a result not yet written in.
+    for number, line in enumerate(content.splitlines(), 1):
+        if re.search(r"\b[A-Z][A-Z_]*_PENDING\b", line):
+            fail(path, f"line {number}: unfilled placeholder; write in the result it stands for")
     if len(re.findall(r"^```", content, re.MULTILINE)) % 2:
         fail(path, "unclosed fenced example")
     for language, body in re.findall(r"^```(\w*)\n(.*?)^```", content, re.MULTILINE | re.DOTALL):

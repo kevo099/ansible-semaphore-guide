@@ -116,7 +116,7 @@ cat >> /var/lib/pgsql/data/postgresql.conf <<'PGCONF'
 listen_addresses = 'localhost'
 password_encryption = 'scram-sha-256'
 PGCONF
-python3.12 - <<'PY'
+python3.12 -I - <<'PY'
 from pathlib import Path
 p = Path('/var/lib/pgsql/data/pg_hba.conf')
 original = p.read_text()

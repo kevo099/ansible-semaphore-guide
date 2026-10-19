@@ -15,6 +15,9 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 # Documentation addresses (RFC 5737), built in parts so the publication check accepts them.
 TEST_NET = ".".join(("192", "0", "2"))
+# What add-target.sh adds after refusing a name that came from the paste.
+NAME_HINT = ("Paste the lines again without the name= line and add --name NAME, "
+             "or set INVENTORY_NAME in inventory-info.sh.")
 INVENTORY = """# Local lab inventory read by Semaphore at every run.
 [ubuntu]
 
@@ -46,12 +49,13 @@ class AddTargetTests(unittest.TestCase):
         self.other_key = self.make_key("other")
         # The script needs root and scans the target; stand-ins answer for both and
         # record each call, so a test can tell whether the script went past reading.
+        # The scan takes $SCAN_DELAY seconds, as one over a slow link does.
         self.bin = self.work / "bin"
         self.bin.mkdir()
         self.calls = self.work / "calls"
         (self.bin / "id").write_text('#!/bin/sh\necho "id $*" >>"$CALLS"\necho 0\n')
         (self.bin / "ssh-keyscan").write_text(
-            '#!/bin/sh\necho "ssh-keyscan $*" >>"$CALLS"\nfor last; do :; done\n'
+            '#!/bin/sh\necho "ssh-keyscan $*" >>"$CALLS"\nsleep "${SCAN_DELAY:-0}"\nfor last; do :; done\n'
             'printf "%s %s\\n" "$last" "$(cat "$SCAN_KEY")"\n')
         for stub in ("id", "ssh-keyscan"):
             (self.bin / stub).chmod(0o755)
@@ -81,9 +85,9 @@ class AddTargetTests(unittest.TestCase):
         return ["bash", str(ROOT / "scripts" / "add-target.sh"), "--from-info", *options,
                 "--lab-dir", str(self.lab), "--known-hosts", str(self.known_hosts)]
 
-    def paste(self, text, *options):
+    def paste(self, text, *options, served=None):
         return subprocess.run(self.from_info(*options), input=text, capture_output=True, text=True,
-                              env=self.environment(), timeout=60)
+                              env=self.environment(served), timeout=60)
 
     def info(self, **values):
         """The four lines the VM-side scripts print; a value of None leaves its line out."""
@@ -124,6 +128,24 @@ class AddTargetTests(unittest.TestCase):
         self.assertIn("Already present", result.stdout)
         self.assertEqual(self.state(), before)
 
+    def test_modules_in_the_working_directory_are_never_imported(self):
+        # The script runs as root, and its inline Python runs isolated: a module file in the
+        # folder it runs from, or in PYTHONPATH, never stands in for one it imports.
+        planted = self.work / "planted"
+        planted.mkdir()
+        marker = self.work / "imported"
+        for module in ("re", "pathlib", "termios", "json"):
+            (planted / f"{module}.py").write_text(f"open({str(marker)!r}, 'a').write({module!r})\n")
+        result = subprocess.run(
+            ["bash", str(ROOT / "scripts" / "add-target.sh"), "--name", "lab-alma", "--address", f"{TEST_NET}.12",
+             "--group", "enterprise_linux", "--fingerprint", self.key["fingerprint"], "--lab-dir", str(self.lab),
+             "--known-hosts", str(self.known_hosts)],
+            capture_output=True, text=True, cwd=planted, env=dict(self.environment(), PYTHONPATH=str(planted)),
+            timeout=60)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Added lab-alma", result.stdout)
+        self.assertFalse(marker.exists())
+
     def test_a_key_that_does_not_match_changes_nothing(self):
         result = self.add(served=self.other_key)
         self.assertEqual(result.returncode, 1)
@@ -143,8 +165,9 @@ class AddTargetTests(unittest.TestCase):
         for name in ("lab", "ubuntu", "enterprise_linux", "all", "ungrouped"):
             with self.subTest(name=name):
                 result = self.add(name=name)
-                self.assertEqual(result.returncode, 1, result.stdout)
-                self.assertIn("group", result.stdout)
+                # A name given as an option needs no hint about the paste.
+                self.assertEqual((result.returncode, result.stdout),
+                                 (1, f"{name} is also the name of an inventory group; choose another name.\n"))
                 self.assertEqual(self.state(), (INVENTORY, ""))
 
     def test_an_address_listed_under_another_name_is_refused(self):
@@ -181,6 +204,84 @@ class AddTargetTests(unittest.TestCase):
         result = self.add(name="lab-ubuntu", group="ubuntu")
         self.assertEqual(result.returncode, 1)
         self.assertEqual(self.known_hosts.read_text(), "")
+
+    def test_a_rebuilt_vm_keeps_its_line_and_gets_its_new_key_trusted(self):
+        # A rebuilt VM keeps its name and address and has a new host key.
+        self.assertEqual(self.add().returncode, 0)
+        added = self.state()
+        result = self.add(fingerprint=self.other_key["fingerprint"], served=self.other_key)
+        self.assertEqual((result.returncode, result.stdout), (1, (
+            f"lab-alma ({TEST_NET}.12) is in {self.inventory}, but known-hosts holds a different key for"
+            f" {TEST_NET}.12. After verifying why its key changed,\n"
+            "remove the old entry and give the rewritten file back to the service, then run this again:\n"
+            f"  sudo ssh-keygen -R {TEST_NET}.12 -f {self.known_hosts}\n"
+            f"  sudo chown root:semaphore {self.known_hosts} && sudo chmod 0640 {self.known_hosts}\n")))
+        self.assertEqual(self.state(), added)
+        # The first command it printed, as the operator runs it.
+        subprocess.run(["ssh-keygen", "-R", f"{TEST_NET}.12", "-f", str(self.known_hosts)], capture_output=True,
+                       check=True)
+        self.assertEqual(self.state(), (added[0], ""))
+        # A scan that does not match the fingerprint still changes nothing.
+        result = self.add(fingerprint=self.other_key["fingerprint"], served=self.key)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("No scanned key matched", result.stdout)
+        self.assertEqual(self.state(), (added[0], ""))
+        # Run again with the VM's lines, the script trusts the verified key and keeps the one line.
+        trusted = (added[0], f"{TEST_NET}.12 {self.other_key['line']}\n")
+        result = self.paste(self.info(fingerprint=self.other_key["fingerprint"]), served=self.other_key)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.splitlines()[1], f"Trusted the verified host key of lab-alma ({TEST_NET}.12),"
+                                                        f" which {self.inventory} already lists.")
+        self.assertIn("run the Ping template", result.stdout)
+        self.assertEqual(self.state(), trusted)
+        result = self.add(fingerprint=self.other_key["fingerprint"], served=self.other_key)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Already present", result.stdout)
+        self.assertEqual(self.state(), trusted)
+
+    def test_the_same_host_under_another_group_is_refused(self):
+        listed = INVENTORY.replace("[enterprise_linux]\n", f"[enterprise_linux]\nlab-alma ansible_host={TEST_NET}.12\n")
+        # A line above every section is in Ansible's ungrouped group.
+        for inventory, other in ((listed, "enterprise_linux"), (f"lab-alma ansible_host={TEST_NET}.12\n" + INVENTORY,
+                                                                "ungrouped")):
+            for key in ("", f"{TEST_NET}.12 {self.key['line']}\n"):
+                with self.subTest(other=other, trusted=bool(key)):
+                    self.inventory.write_text(inventory)
+                    self.known_hosts.write_text(key)
+                    result = self.add(group="ubuntu")
+                    self.assertEqual((result.returncode, result.stdout), (1, (
+                        f"Inventory lists lab-alma under [{other}], not under [ubuntu]; edit it by hand instead.\n")))
+                    self.assertEqual(self.state(), (inventory, key))
+
+    @unittest.skipUnless(shutil.which("flock"), "needs flock")
+    def test_runs_on_one_lab_folder_take_turns(self):
+        # The scan is slow, so without turns both runs would pass the checks before
+        # either wrote, and the inventory would get two lines and known-hosts two keys.
+        paste = self.work / "paste"
+        paste.write_text(self.info())
+        environment = dict(self.environment(), SCAN_DELAY="2")
+        with open(paste) as first, open(paste) as second:
+            runs = [subprocess.Popen(self.from_info(), stdin=stream, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                     text=True, env=environment) for stream in (first, second)]
+            results = [(run.communicate(timeout=60)[0], run.returncode) for run in runs]
+        for stdout, returncode in results:
+            self.assertEqual(returncode, 0, stdout)
+        self.assertEqual(sorted("Added lab-alma" in stdout for stdout, _ in results), [False, True])
+        self.assertEqual(sorted("Already present" in stdout for stdout, _ in results), [False, True])
+        added = INVENTORY.replace("[enterprise_linux]\n", f"[enterprise_linux]\nlab-alma ansible_host={TEST_NET}.12\n")
+        self.assertEqual(self.state(), (added, f"{TEST_NET}.12 {self.key['line']}\n"))
+        self.assertEqual(self.calls.read_text().count("ssh-keyscan "), 1)
+
+    def test_a_run_that_does_not_get_its_turn_changes_nothing(self):
+        # flock -w 120 gives up after two minutes; a stand-in gives up at once.
+        (self.bin / "flock").write_text('#!/bin/sh\necho "flock $*" >>"$CALLS"\nexit 1\n')
+        (self.bin / "flock").chmod(0o755)
+        result = self.add()
+        self.assertEqual((result.returncode, result.stdout), (
+            1, f"Another add-target.sh run is changing {self.lab}; run this again when it has finished.\n"))
+        self.assertIn("flock -w 120 9\n", self.calls.read_text())
+        self.assertNotIn("ssh-keyscan", self.calls.read_text())
+        self.assertEqual(self.state(), (INVENTORY, ""))
 
     # --from-info: the lines a VM printed, pasted as data.
 
@@ -363,7 +464,24 @@ class AddTargetTests(unittest.TestCase):
                     self.assertEqual(result.returncode, 1, result.stdout)
                     self.assertIn(f"{name} is the name Ansible gives the controller; choose another name.",
                                   result.stdout)
+                    self.assertEqual(NAME_HINT in result.stdout, form == "paste")
                     self.assertEqual(self.state(), (INVENTORY, ""))
+
+    def test_a_refused_pasted_name_comes_with_the_way_round_it(self):
+        # A VM may be named like a group, such as an Ubuntu cloud image booted without metadata,
+        # and --name alone would be refused as a value given both ways.
+        for name in ("lab", "ubuntu", "enterprise_linux", "all", "ungrouped", "localhost", "127.0.0.1"):
+            with self.subTest(name=name):
+                result = self.paste(self.info(name=name))
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertEqual(result.stdout.splitlines()[-1], NAME_HINT)
+                self.assertEqual(self.state(), (INVENTORY, ""))
+                # The name given as an option, with the rest pasted, gets no hint.
+                result = self.paste(self.info(name=None), "--name", name)
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertNotIn(NAME_HINT, result.stdout)
+        # What the hint says works.
+        self.assertAdded(self.paste(self.info(name=None), "--name", "lab-alma"))
 
     @unittest.skipUnless(shutil.which("locale"), "needs locale")
     def test_look_alike_letters_are_refused_in_a_utf8_locale(self):

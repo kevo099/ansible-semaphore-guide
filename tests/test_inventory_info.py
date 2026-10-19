@@ -88,8 +88,9 @@ class CollectorTests(unittest.TestCase):
         for field, value in [
             ("name", "$(id)"), ("name", "a;id"), ("name", "a\nb"), ("name", "-option"),
             ("name", "a b"), ("name", "x" * 64),
-            # Ansible's names for the controller, which add-target.sh refuses.
-            ("name", "localhost"), ("name", "127.0.0.1"),
+            # Ansible's names for the controller and group names, which add-target.sh refuses.
+            ("name", "localhost"), ("name", "127.0.0.1"), ("name", "all"), ("name", "ungrouped"),
+            ("name", "lab"), ("name", "ubuntu"), ("name", "enterprise_linux"),
             ("address", "host.example.test"), ("address", f"{TEST_NET}.10;id"),
             ("group", "lab"),
             ("fingerprint", "SHA256:short"), ("fingerprint", FINGERPRINT + " x"),
@@ -99,7 +100,7 @@ class CollectorTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     build(**dict(good, **{field: value}))
 
-    def collect(self, release=UBUNTU, shadow=SET_PASSWORD, visudo=0, name=""):
+    def collect(self, release=UBUNTU, shadow=SET_PASSWORD, visudo=0, name="", hostname="target-ubuntu.example.test"):
         """Run main() with simulated system commands; return its output and the commands it ran."""
         commands = []
         with tempfile.TemporaryDirectory() as directory:
@@ -133,7 +134,7 @@ class CollectorTests(unittest.TestCase):
                 "run": fake_run,
                 "Path": fake_path,
                 "pwd": SimpleNamespace(getpwnam=lambda _: SimpleNamespace(pw_dir=str(root / "targetuser"))),
-                "socket": SimpleNamespace(gethostname=lambda: "target-ubuntu.example.test"),
+                "socket": SimpleNamespace(gethostname=lambda: hostname),
             }):
                 output = io.StringIO()
                 with contextlib.redirect_stdout(output):
@@ -158,6 +159,19 @@ class CollectorTests(unittest.TestCase):
                          ["  sudo bash scripts/add-target.sh --from-info"])
         for code in ("python3", "<<", "ADD_ANSIBLE_TARGET", "$(", "`", "--name", "--lab-dir"):
             self.assertNotIn(code, text)
+
+    def test_a_name_add_target_refuses_asks_for_inventory_name(self):
+        # An Ubuntu cloud image booted without metadata names itself ubuntu, a group of the guide.
+        for hostname, message in (("ubuntu", "ubuntu is also the name of an inventory group"),
+                                  ("lab.example.test", "lab is also the name of an inventory group"),
+                                  ("localhost.localdomain", "localhost is Ansible's name for the controller")):
+            with self.subTest(hostname=hostname):
+                expected = "^" + re.escape(message + "; set INVENTORY_NAME to another name.")
+                with self.assertRaisesRegex(ValueError, expected):
+                    self.collect(hostname=hostname)
+        text, _ = self.collect(hostname="ubuntu", name="lab-ubuntu")
+        self.assertTrue(text.endswith(f"\nname=lab-ubuntu\naddress={TEST_NET}.10\ngroup=ubuntu"
+                                      f"\nfingerprint={FINGERPRINT}\n"))
 
     def test_full_output_fits_azure_and_reports_sudo_failure_without_secrets(self):
         text, _ = self.collect(visudo=1, name="n" * 63)
