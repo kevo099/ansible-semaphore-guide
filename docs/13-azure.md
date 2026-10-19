@@ -586,7 +586,9 @@ their sudo passwords differ. What the test saw on all three targets:
   bootstrap playbook, and Ubuntu 24.04 Pro through the bootstrap playbook alone.
   Ping and Baseline preview then succeeded on all four. At the time, the
   scripts on the VMs printed a whole command rather than lines for
-  `--from-info`.
+  `--from-info`. With this release's lines, on an Ubuntu 24.04 controller,
+  `add-target.sh --from-info` added VMs from pasted Run Command output, from
+  the end of a cloud-init log and from `inventory-info.sh`.
 
 Repeat the provisioning playbooks, too: in the test, `network.yml`,
 `controller.yml` and `targets.yml` reported `changed=0` on a second run, and the

@@ -4,7 +4,8 @@
 
 On 19 October 2026, every onboarding path of the guide was run on Azure, first
 as release `v1.7.1` published it and then with this release's fixes, in a
-disposable resource group that was then deleted. A review of the scripts,
+disposable resource group that was then deleted. The console path was run over
+SSH, which runs the same script. A review of the scripts,
 playbooks and documentation ran beside it, and each of its findings was checked
 by a second reviewer before it was fixed.
 
@@ -88,4 +89,25 @@ from this release.
 | Semaphore | With the shared sudo password added, Ping and Baseline preview succeeded on all three. |
 | FIPS on Rocky Linux | After the STIG, `fips-mode-setup --check` reported the `FIPS:STIG` policy without FIPS mode, `fips_enabled` was 0, and SSH offered RSA and ECDSA host keys but no Ed25519 key, as on RHEL and AlmaLinux. |
 
-REMOVAL_PENDING
+## The last paths and fixes, live
+
+The release's final code then ran on the Ubuntu controller.
+
+| Step | Result |
+| --- | --- |
+| cloud-init with this release's lines | A new AlmaLinux VM from `targets.yml`, given the Ubuntu controller's service key, ended its cloud-init log with the `onboard:` lines for `--from-info`. The log's last lines, read through Run Command and pasted whole at the prompt, added it, and a managed Run Command then set its password. |
+| `onboard-linux.sh` over SSH | Copied to the Ubuntu VM and run there with `sudo bash onboard-linux.sh`, it ended with `RESULT: OK` and the same lines as through Run Command. Unlike Run Command's copy, the copied file, which holds the hash, stayed until it was deleted. |
+| Updating the controller | `update-controller.sh` planned one changed lab-folder file, the preflight with its new check, applied and committed it, and a second plan had nothing to do. Ping and Baseline preview then succeeded on all four VMs. |
+| A rebuilt VM | The AlmaLinux VM was deleted and created again with the same name and address, so it had a new host key. Its lines at `--from-info` were refused with the two commands that remove the old key. After them, the same lines trusted the new key without a second inventory line, and the known-hosts file kept owner `root:semaphore` and mode 0640. With its password set again, Ping and Baseline preview succeeded on all four. |
+| Python 3.9 | The inline Python that `add-target.sh` and `expose-semaphore.sh` run as root, now isolated with `-I`, compiled with Python 3.9.25, Enterprise Linux 9's system Python. |
+
+## Removal
+
+The two VMs made with `az vm create` were deleted by hand, since `remove.yml`
+removes only the VMs its variables name. `remove.yml -e
+remove_confirm=RESOURCE_GROUP`, given the three cloud-init targets and the
+controller, then removed the VMs together, their network interfaces, the public
+address, both security groups, the virtual network and the empty resource group
+in 119 seconds. `az group exists` returned `false`, and a repeat printed
+`does not exist; nothing to remove.` The Rocky Linux image's Marketplace terms
+were cancelled again. No other resource group in the subscription was touched.
