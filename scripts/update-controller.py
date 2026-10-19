@@ -384,6 +384,20 @@ READINESS_HINTS = {
     "service_can_read_known_hosts": (
         "the semaphore account cannot read /etc/semaphore/known_hosts. Fix it with: "
         "sudo chown root:semaphore /etc/semaphore/known_hosts; sudo chmod 0640 /etc/semaphore/known_hosts"),
+    # A stopped service is not an exposure problem; these come before the port prefix rule.
+    "semaphore_is_active": (
+        "Semaphore is not running. Find out why with: sudo systemctl status semaphore --no-pager; "
+        "sudo journalctl -u semaphore -n 100 --no-pager"),
+    "port_3000_listening": (
+        "nothing listens on port 3000, so Semaphore is stopped or failed to start. Find out why with: "
+        "sudo journalctl -u semaphore -n 100 --no-pager"),
+    "postgresql_is_active": (
+        "PostgreSQL is not running. Find out why with: sudo systemctl status postgresql@16-main --no-pager "
+        "on Ubuntu, or sudo systemctl status postgresql --no-pager on Enterprise Linux"),
+    "port_5432_listening": (
+        "nothing listens on port 5432, so PostgreSQL is stopped or failed to start. Find out why with: "
+        "sudo journalctl -u postgresql@16-main -n 100 --no-pager on Ubuntu, "
+        "or sudo journalctl -u postgresql -n 100 --no-pager on Enterprise Linux"),
 }
 EXPOSURE_HINT = ("Semaphore's address or proxy does not match /etc/semaphore/exposure. Run "
                  "sudo bash scripts/expose-semaphore.sh --mode MODE with the mode you use: https, http or loopback")

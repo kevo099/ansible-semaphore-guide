@@ -6,7 +6,8 @@ umask 077
 
 usage() {
   cat <<'USAGE'
-Usage: sudo bash scripts/install-controller-el9.sh [--plan | --apply [--editor USER] [--lab-dir DIR] [--expose https|http]]
+Usage: sudo bash scripts/install-controller-el9.sh [--plan | --apply [--editor USER] [--lab-dir DIR]
+                                                   [--expose https|http [--address IP_OR_NAME]]]
 
 Creates a native Semaphore 2.19.12 / PostgreSQL 16 / Ansible 2.21.4 controller
 on a fresh RHEL, AlmaLinux or Rocky Linux 9.4 or later x86_64 VM, then seeds
@@ -22,6 +23,10 @@ not create VMs or targets.
   --expose MODE   Also make the UI reachable on this VM's address: https (nginx TLS on
                   port 443, recommended) or http (plain text on port 3000). Default: the UI
                   stays loopback-only for SSH tunnels; scripts/expose-semaphore.sh can change it later.
+  --address IP_OR_NAME
+                  With --expose, the IP address or DNS name you browse to, which the certificate
+                  and the printed URL name. Default: the address of this VM's default route,
+                  which on a cloud VM behind NAT, as on Azure, is a private one.
 
 The default is a read-only plan. --apply requires root and refuses existing
 Semaphore, PostgreSQL, lab-folder or /opt/ansible-venv state. It installs
@@ -66,7 +71,9 @@ Plan:
      file inventory, variable groups and 22 scoped task templates on the
      tabs Lessons and Patching and one STIG tab per system and version:
      RHEL 9, AlmaLinux 9, Rocky Linux 9 and Ubuntu 24.04.
- 13. With --expose, publish the UI on this VM's address (TLS proxy or plain HTTP).
+ 13. With --expose, publish the UI on this VM's address, or the one --address
+     names (TLS proxy or plain HTTP). If only this step fails, the installer says
+     so and prints the exposure command to run again.
 PLAN
   exit 0
 fi

@@ -35,7 +35,11 @@ def make_config():
             "PATH": "/opt/ansible-venv/bin:/usr/local/bin:/usr/bin:/bin",
             "GIT_CONFIG_GLOBAL": "/etc/semaphore/gitconfig",
             "ANSIBLE_HOST_KEY_CHECKING": "True",
+            # This replaces the lab ansible.cfg's ssh_args, so it repeats their connection
+            # reuse. With home_dir_mode user_home, the control sockets go to ~/.ansible/cp
+            # in the service's home, /var/lib/semaphore, which its unit lets it write.
             "ANSIBLE_SSH_ARGS": (
+                "-o ControlMaster=auto -o ControlPersist=60s "
                 "-o UserKnownHostsFile=/etc/semaphore/known_hosts "
                 "-o StrictHostKeyChecking=yes"
             ),

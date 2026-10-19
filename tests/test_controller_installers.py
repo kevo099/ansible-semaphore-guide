@@ -49,7 +49,8 @@ class InstallerPlanTests(unittest.TestCase):
             for arguments in ((), ("--plan",),
                               ("--plan", "--editor", "labeditor", "--lab-dir",
                                str(self.work / "unused-lab"), "--expose", "https"),
-                              ("--editor", "labeditor", "--expose", "http")):
+                              ("--editor", "labeditor", "--expose", "http"),
+                              ("--expose", "https", "--address", "controller.example.test")):
                 with self.subTest(installer=installer, arguments=arguments):
                     result = self.run_installer(installer, *arguments)
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -64,11 +65,22 @@ class InstallerPlanTests(unittest.TestCase):
                               ("--editor", ""), ("--lab-dir", ""),
                               ("--editor", "--apply"), ("--lab-dir", "--apply"),
                               ("--plan", "--apply"), ("--apply", "--plan"),
-                              ("--expose",), ("--expose", "ftp")):
+                              ("--expose",), ("--expose", "ftp"),
+                              ("--address",), ("--expose", "https", "--address", ""),
+                              ("--expose", "https", "--address", "--apply"),
+                              ("--address", "controller.example.test"),
+                              ("--apply", "--editor", "labeditor", "--address", "controller.example.test")):
                 with self.subTest(installer=installer, arguments=arguments):
                     result = self.run_installer(installer, *arguments)
                     self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
                     self.assertIn("Usage:", result.stdout)
+
+    def test_address_without_expose_says_why_it_is_refused(self):
+        for installer in INSTALLERS:
+            with self.subTest(installer=installer):
+                result = self.run_installer(installer, "--address", "controller.example.test")
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertIn("Pass --address together with --expose.", result.stdout)
 
     def test_apply_refuses_non_root_before_os_checks_or_mutations(self):
         executable = self.commands / "id"
@@ -116,11 +128,14 @@ class SharedPreflightTests(unittest.TestCase):
 usage() { :; }
 SUDO_USER=sudoeditor
 controller_parse_args "$@"
-printf '%s\\n' "$mode" "$editor" "$lab_dir" "$expose"
+printf '%s\\n' "$mode" "$editor" "$lab_dir" "$expose" "$expose_address"
 '''
-        for arguments, expected in (((), ["--plan", "sudoeditor", "/opt/ansible-lab", ""]),
+        for arguments, expected in (((), ["--plan", "sudoeditor", "/opt/ansible-lab", "", ""]),
                                     (("--apply", "--editor", "labeditor", "--lab-dir", "/srv/lab",
-                                      "--expose", "https"), ["--apply", "labeditor", "/srv/lab", "https"])):
+                                      "--expose", "https"), ["--apply", "labeditor", "/srv/lab", "https", ""]),
+                                    (("--address", "controller.example.test", "--apply", "--expose", "http"),
+                                     ["--apply", "sudoeditor", "/opt/ansible-lab", "http",
+                                      "controller.example.test"])):
             with self.subTest(arguments=arguments):
                 result = self.run_helper(body, *arguments)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -213,6 +228,157 @@ printf 'UNSAFE_CONTINUATION\\n'
         self.assertIn("REMOVED -f -- /var/cache/ansible-semaphore-guide/", result.stdout)
         self.assertIn("SHA-256 mismatch", result.stdout)
         self.assertNotIn("UNSAFE", result.stdout)
+
+
+class SharedPackageTests(unittest.TestCase):
+    """Ubuntu package steps with apt-get and sleep simulated; nothing is installed."""
+
+    def run_common(self, body, *arguments, common=COMMON):
+        return subprocess.run(["/bin/bash", "-c", 'set -euo pipefail; source "$1"; shift; ' + body,
+                               "controller-test", str(common), *arguments],
+                              capture_output=True, text=True, timeout=20)
+
+    def apt_update(self, failures):
+        body = '''
+failures=$1 calls=0
+apt-get() { printf 'APT %s\\n' "$*"; (( ++calls > failures )); }
+sleep() { printf 'SLEEP %s\\n' "$*"; }
+controller_apt_update
+printf 'CONTINUED\\n'
+'''
+        return self.run_common(body, str(failures))
+
+    def test_apt_update_is_retried_while_another_apt_process_holds_its_lock(self):
+        result = self.apt_update(failures=2)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        lines = result.stdout.splitlines()
+        self.assertEqual(lines.count("APT update"), 3)
+        self.assertEqual(lines.count("SLEEP 10"), 2)
+        self.assertIn("another apt process may hold its lock", result.stdout)
+        self.assertEqual(lines[-1], "CONTINUED")
+
+    def test_apt_update_gives_up_after_thirty_attempts(self):
+        result = self.apt_update(failures=1000)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        lines = result.stdout.splitlines()
+        self.assertEqual(lines.count("APT update"), 30)
+        self.assertEqual(lines.count("SLEEP 10"), 29)
+        self.assertIn("failed 30 times", result.stdout)
+        self.assertNotIn("CONTINUED", result.stdout)
+
+    def test_failed_postgresql_install_removes_the_new_runtime_unless_it_created_state(self):
+        body = '''
+apt_status=$1
+apt-get() { printf 'APT %s\\n' "$*"; return "$apt_status"; }
+controller_apt_install_postgresql
+printf 'CONTINUED\\n'
+'''
+        for apt_status, state in ((0, None), (100, None), (100, "etc/postgresql"), (100, "var/lib/postgresql")):
+            with self.subTest(apt_status=apt_status, state=state), tempfile.TemporaryDirectory() as directory:
+                # Only the paths move into the test folder; the function's logic runs unchanged.
+                root = Path(directory)
+                text = COMMON.read_text()
+                for path in ("/etc/postgresql", "/var/lib/postgresql", "/opt/ansible-venv"):
+                    text = text.replace(path, directory + path)
+                common = root / "controller-common.sh"
+                common.write_text(text)
+                runtime = root / "opt" / "ansible-venv"
+                (runtime / "bin").mkdir(parents=True)
+                if state:
+                    (root / state).mkdir(parents=True)
+                result = self.run_common(body, str(apt_status), common=common)
+                self.assertIn("APT -o DPkg::Lock::Timeout=600 install -y postgresql-16", result.stdout)
+                if apt_status == 0:
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertIn("CONTINUED", result.stdout)
+                    self.assertTrue(runtime.is_dir())
+                    continue
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertNotIn("CONTINUED", result.stdout)
+                self.assertIn("Installing PostgreSQL 16 failed", result.stdout)
+                if state:
+                    # A rerun is refused anyway, so the runtime stays for the manual recovery.
+                    self.assertTrue(runtime.is_dir())
+                    self.assertIn("refuses to run again", result.stdout)
+                else:
+                    self.assertFalse(runtime.exists())
+                    self.assertIn("rerun --apply", result.stdout)
+
+    def test_ubuntu_installer_apt_get_waits_for_the_dpkg_lock(self):
+        # apt-get gives up at once on a held dpkg lock unless DPkg::Lock::Timeout is set,
+        # and apt-get update takes another lock, so only the retrying helper runs it.
+        invocations = []
+        for script in ("install-controller.sh", "controller-common.sh"):
+            for line in (ROOT / "scripts" / script).read_text().splitlines():
+                command = line.strip().removeprefix("if ")
+                if command.startswith("apt-get "):
+                    invocations.append(command)
+        self.assertEqual(len(invocations), 4, invocations)
+        for command in invocations:
+            with self.subTest(command=command):
+                if command.startswith("apt-get update"):
+                    self.assertEqual(command, "apt-get update; then return; fi")
+                else:
+                    self.assertTrue(command.startswith("apt-get -o DPkg::Lock::Timeout=600 install -y "))
+
+
+class SharedFinishTests(unittest.TestCase):
+    """The optional exposure step, with expose-semaphore.sh and the readiness check simulated."""
+
+    def finish(self, expose="", address="", expose_status=0, check_status=0):
+        with tempfile.TemporaryDirectory() as directory:
+            scripts = Path(directory) / "scripts"
+            scripts.mkdir()
+            calls = Path(directory) / "calls"
+            (scripts / "expose-semaphore.sh").write_text(
+                'printf "EXPOSE %s\\n" "$*" >> "$CALL_LOG"\nexit "$EXPOSE_STATUS"\n')
+            body = '''
+script_dir=$1 expose=$2 expose_address=$3 lab_dir=/opt/ansible-lab editor=labeditor
+python3.12() { printf 'CHECK %s\\n' "$*" >> "$CALL_LOG"; return "$CHECK_STATUS"; }
+controller_finish
+printf 'FINISHED\\n'
+'''
+            result = subprocess.run(["/bin/bash", "-c", 'set -euo pipefail; source "$1"; shift; ' + body,
+                                     "controller-test", str(COMMON), str(scripts), expose, address],
+                                    env={**os.environ, "CALL_LOG": str(calls), "EXPOSE_STATUS": str(expose_status),
+                                         "CHECK_STATUS": str(check_status)},
+                                    capture_output=True, text=True, timeout=10)
+            return result, calls.read_text().splitlines() if calls.exists() else [], str(scripts)
+
+    def test_exposure_gets_the_address_and_the_readiness_check(self):
+        for expose, address, arguments in (("https", "controller.example.test",
+                                            "--mode https --address controller.example.test"),
+                                           ("http", "", "--mode http")):
+            with self.subTest(expose=expose, address=address):
+                result, calls, scripts = self.finish(expose, address)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(calls, [f"EXPOSE {arguments}", f"CHECK {scripts}/check-controller.py"])
+                self.assertIn("Controller installed and seeded.", result.stdout)
+                self.assertNotIn("failed", result.stdout)
+                self.assertIn("FINISHED", result.stdout)
+
+    def test_without_expose_nothing_is_published(self):
+        result, calls, _scripts = self.finish()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(calls, [])
+        self.assertIn("Controller installed and seeded.", result.stdout)
+
+    def test_failed_exposure_ends_with_next_steps_and_only_the_exposure_command(self):
+        for expose_status, check_status, expected_calls in ((100, 0, 1), (0, 1, 2)):
+            with self.subTest(expose_status=expose_status, check_status=check_status):
+                result, calls, scripts = self.finish("https", "controller.example.test",
+                                                     expose_status, check_status)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertEqual(len(calls), expected_calls)
+                self.assertNotIn("FINISHED", result.stdout)
+                # The next steps still print, and the last lines name the one step to repeat.
+                self.assertIn("Controller installed and seeded.", result.stdout)
+                self.assertIn("Automation public key: /etc/semaphore/svc_ansible.pub", result.stdout)
+                self.assertIn("Only the --expose https step failed. Do not run the installer again",
+                              result.stdout)
+                self.assertEqual(result.stdout.splitlines()[-2:], [
+                    f"  sudo bash {scripts}/expose-semaphore.sh --mode https --address controller.example.test",
+                    f"  sudo python3.12 {scripts}/check-controller.py"])
 
 
 @unittest.skipUnless(shutil.which("git"), "git is not installed")
