@@ -13,10 +13,15 @@
 # Run it from the controller's repository root, as the VM's own administrator
 # account, one host at a time (each target gets its own sudo password):
 #
+#   sudo cat /etc/semaphore/svc_ansible.pub > ~/svc_ansible.pub
 #   /opt/ansible-venv/bin/ansible-playbook -i inventories/bootstrap.ini \
-#     examples/bootstrap-existing-vm.yml --limit new-vm -u YOUR_ADMIN [-K]
+#     examples/bootstrap-existing-vm.yml --limit new-vm -u YOUR_ADMIN [-K] \
+#     -e '{"automation_public_key_files": ["~/svc_ansible.pub"]}'
 #
-# -K is needed only when that administrator's own sudo asks for a password.
+# -K is needed only when that administrator's own sudo asks for a password. The
+# -e option authorizes the service key of a controller made by either installer;
+# add "~/.ssh/ansible_lab.pub" to its list if you also use that CLI key. On a
+# controller set up by hand, leave it out: the default is ~/.ssh/ansible_lab.pub.
 - name: Prepare an existing VM for the automation account
   hosts: all
   gather_facts: true

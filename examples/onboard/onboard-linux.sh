@@ -16,8 +16,12 @@
 # Run Command starts scripts with /bin/sh, which is dash on Ubuntu.
 if [ -z "${BASH_VERSION:-}" ]; then exec /bin/bash "$0" "$@"; fi
 
-# 1. Replace the placeholder line with the controller's ~/.ssh/ansible_lab.pub.
-#    More keys go on further lines. Keep the two END_OF_KEYS lines as they are.
+# 1. Replace the placeholder line with the key Semaphore logs in with: on a
+#    controller made by either installer, the output of
+#    sudo cat /etc/semaphore/svc_ansible.pub; on one set up by hand,
+#    ~/.ssh/ansible_lab.pub. These keys replace the account's authorized keys,
+#    so list every key it needs; your CLI key, if you use one, goes on a further
+#    line. Keep the two END_OF_KEYS lines as they are.
 PUBLIC_KEYS=$(cat <<'END_OF_KEYS'
 REPLACE_WITH_AUTOMATION_PUBLIC_KEY
 END_OF_KEYS
