@@ -120,10 +120,10 @@ The runnable files, one by one:
 | [`examples/bootstrap-existing-vm.yml`](examples/bootstrap-existing-vm.yml) | Prepares an existing VM from the controller over SSH: chapter 4, steps 3 and 4, in one run per host. |
 | [`examples/onboard/inventory-info.sh`](examples/onboard/inventory-info.sh) | Reads a prepared VM through Azure Run Command, read-only, and prints the `add-target.sh` line for the controller. See [chapter 13](docs/13-azure.md#do-generate-the-controller-inventory-command). |
 | [`examples/azure/`](examples/azure/README.md) | Creates, stops and removes an Azure lab network, optional controller and cloud-init targets; see [chapter 13](docs/13-azure.md). |
-| [`scripts/install-controller.sh`](scripts/install-controller.sh) | Shows a plan by default; `--apply` bootstraps a fresh Ubuntu 24.04 controller and seeds a local-folder practice project through the API. Supports `--editor`, `--lab-dir` and `--expose`. |
+| [`scripts/install-controller.sh`](scripts/install-controller.sh) | Shows a plan by default; `--apply` bootstraps a fresh Ubuntu 24.04 controller and seeds a local-folder practice project through the API. Supports `--editor`, `--lab-dir`, `--expose` and `--address`. |
 | [`scripts/install-controller-el9.sh`](scripts/install-controller-el9.sh) | Same seeded installation and options for RHEL, AlmaLinux or Rocky Linux 9.4 or later. |
 | [`scripts/seed-semaphore.py`](scripts/seed-semaphore.py) | Creates the practice project, keys, local repository, file inventory and templates on loopback; prints names and ids only. |
-| [`scripts/expose-semaphore.sh`](scripts/expose-semaphore.sh) | Publishes the UI on the VM's address behind an nginx TLS proxy, or in plain HTTP, or reverts to loopback. |
+| [`scripts/expose-semaphore.sh`](scripts/expose-semaphore.sh) | Publishes the UI on the VM's address behind an nginx TLS proxy, or in plain HTTP, or reverts to loopback. It restarts Semaphore only when the bind address changes, and refuses that while a task runs unless you add `--force`. |
 | [`scripts/add-target.sh`](scripts/add-target.sh) | Adds a host to the local inventory only when its scanned host key matches the fingerprint you read from its console or from the onboarding output; a repeat changes nothing. |
 | [`scripts/check-controller.py`](scripts/check-controller.py) | Checks controller services, permissions and loopback listeners without printing credentials. |
 | [`scripts/validate.py`](scripts/validate.py) | Checks repository links, examples and publication boundaries locally. |

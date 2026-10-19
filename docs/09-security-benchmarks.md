@@ -223,9 +223,17 @@ python3 scripts/summarize_xccdf.py /path/to/after.xml
 ```
 
 If the XML contains multiple assessments, supply an exact `--result-id`.
-The helper rejects an empty assessment and distinguishes result instances
-from unique rule IDs. One rule can produce many checks, even with mixed
-outcomes, so dividing raw pass counts by unique rules is misleading.
+The helper distinguishes result instances from unique rule IDs. One rule can
+produce many checks, even with mixed outcomes, so dividing raw pass counts by
+unique rules is misleading. `result_instances` and `unique_rule_ids` count
+every rule-result in the XML, including the rules the profile did not select,
+which OpenSCAP and USG report as `notselected`; `selected_result_instances` and
+`selected_rule_ids` count only the selected ones. In the October test, the
+RHEL 9.8 vendor audit selected 477 of its 1540 rules and Ubuntu's `disa_stig`
+230. Compare outcome counts and selected totals between runs, never the raw
+totals. The helper exits 1 for an XML without rule-results, and for one in
+which every rule-result is `notselected`, as when a profile ID or tailoring
+selects nothing.
 
 Its exit code 0 means the selected XML parsed without error/unknown outcomes,
 **not that every control passed**. Exit 2 flags error/unknown outcomes; exit 1
@@ -303,11 +311,14 @@ packaged Ansible playbook applied on RHEL above.
   `ubuntu`, and skips the hosts there that run another system; the log names
   each skipped host and its system. On the hosts it keeps, it installs the
   scanner where missing, runs the assessment, keeps the XML and HTML on the
-  target under `/var/log/stig-practice/`, fetches them to the controller under
-  `stig-reports/<system>/<version>/` in the home of the account that runs the
-  playbook, for example `/var/lib/semaphore/stig-reports/rhel/9/` for a
-  Semaphore run and `~/stig-reports/rhel/9/` for your own CLI run, and prints
-  outcome counts. If no host in the group runs that system, the run
+  target under `/var/log/stig-practice/STAMP/`, fetches them to the
+  controller under `stig-reports/<system>/<version>/STAMP/HOST/` in the home of
+  the account that runs the playbook, for example
+  `/var/lib/semaphore/stig-reports/rhel/9/` for a Semaphore run and
+  `~/stig-reports/rhel/9/` for your own CLI run, and prints outcome counts.
+  `STAMP` is the controller's UTC time when the run started, such as
+  `20261019T061020Z`; every host of one run shares it, and so do an apply's
+  before and after reports. If no host in the group runs that system, the run
   stops and says which systems the hosts run. It changes no policy. Ubuntu needs `usg` already
   installed through your own Ubuntu Pro attachment. Without it, that host fails
   with an explanation while the other hosts' scans still complete.
@@ -330,16 +341,19 @@ From the CLI, run the playbook of the system you mean, for example
 `ansible-playbook playbooks/stig/rhel/9/audit.yml --limit enterprise_linux -K`.
 `-K` sends the one password you type to every host that the run uses sudo on,
 so when your targets have different sudo passwords, limit the run to one host,
-such as `--limit lab-rhel`, or use the Vault option.
+such as `--limit lab-rhel`, or use the Vault option, which gives each host its
+own. Hosts of another system are skipped or refused before Ansible uses sudo
+on them, so their passwords are never tried.
 The shared `playbooks/stig-audit.yml` still audits every supported system in
-its limit at once, with reports under `~/stig-reports/`, and
+its limit at once, with reports under `~/stig-reports/STAMP/`, and
 `playbooks/stig-apply.yml` applies to whichever single host you name.
 
 The STIG templates refuse Dry Run because the scanner does not run in check
 mode.
 
 **Check:** after an audit, the task log shows for each host a JSON summary of
-pass, fail, not-applicable and not-checked counts, then where its reports are:
+pass, fail, not-applicable and not-checked counts, with the selected totals,
+then where its reports are:
 on the target, and under the controller home of the service or of your
 account, depending on where you ran it. Only the `semaphore` account and root
 can read the service's home; copy a Semaphore run's reports to your own account

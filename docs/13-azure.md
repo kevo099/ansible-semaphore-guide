@@ -565,18 +565,28 @@ snapshot when you no longer need it and run `remove.yml` again, as the test did.
 **The Azure administrator loses sudo.** cloud-init gives the administrator
 passwordless sudo in `/etc/sudoers.d/90-cloud-init-users`, and the
 administrator has no password. The vendor STIG comments that rule out, so after
-remediation the administrator can log in but not use sudo. `svc_ansible`, with
-its own password, keeps working. The Azure VM agent kept reporting `Ready` and
-Run Command still ran as root on every hardened target, so Run Command is the
-way back in: to set an administrator password, to change `svc_ansible`'s, or to
-rerun the onboarding script.
+remediation an administrator with an RSA key can log in but not use sudo; on
+Enterprise Linux, an administrator's Ed25519 key stops working entirely,
+because the `FIPS:STIG` crypto policy refuses it. `svc_ansible`, with its RSA
+key and its own password, keeps working. The Azure VM agent kept reporting
+`Ready` and Run Command still ran as root on every hardened target, so Run
+Command is the way back in: to set an administrator password, to change
+`svc_ansible`'s, to rerun the onboarding script, or to unlock `svc_ansible`
+with `faillock --user svc_ansible --reset` after three wrong sudo passwords
+locked it; the STIG sets no automatic unlock.
 
-**Passwords expire on Enterprise Linux.** On AlmaLinux and RHEL the STIG sets a
-60-day maximum password age on existing accounts, `svc_ansible` included. Change
-its sudo password within that time, with the bootstrap playbook or a new hash
-through Run Command, and update the copy Ansible or Semaphore uses; otherwise
-every task that uses sudo fails after the password expires. The Ubuntu STIG
-left the account's password age unchanged in the test.
+**Passwords expire on Enterprise Linux.** On AlmaLinux, Rocky Linux and RHEL
+the STIG sets a 60-day maximum password age on existing accounts,
+`svc_ansible` included; `sudo chage -l svc_ansible` shows the date. Before it
+passes, run `onboard-linux.sh` through Run Command with a new hash, pasted as
+`PASSWORD_HASH` or passed as the protected `ONBOARD_PASSWORD_HASH`, which
+also restarts the 60 days, and update the copy Semaphore or your inventory
+uses. Once the password has expired, `svc_ansible` cannot log in without a
+terminal at all: in the test, Ping itself failed with `Password change
+required but no TTY available`, and the same Run Command with a new hash
+brought the account back. The bootstrap playbook cannot do this on a hardened
+target, because it logs in as the administrator, who no longer has sudo. The
+Ubuntu STIG left the account's password age unchanged.
 
 What the test saw, with the reboot approved:
 
@@ -585,6 +595,10 @@ What the test saw, with the reboot approved:
 | Ubuntu 24.04, Ubuntu Pro image, `disa_stig` | 67 → 8 | 54 → 209 |
 | AlmaLinux 9.8, `stig` | 268 → 22 | 155 → 406 |
 | RHEL 9.8 pay-as-you-go, `stig` | 262 → 15 | 170 → 420 |
+| Rocky Linux 9.8, `stig` | 264 → 27 | 159 → 401 |
+
+The October run reproduced the first three rows exactly and added Rocky
+Linux.
 
 After remediation, `svc_ansible` still logged in with its RSA key and used
 sudo with its password, and Ping, Baseline and Webserver applied and then

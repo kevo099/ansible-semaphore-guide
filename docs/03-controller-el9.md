@@ -110,7 +110,9 @@ above. The Key Store shows the SSH key by name only.
 
 Pass `--expose https` to the installer, or run
 `sudo bash scripts/expose-semaphore.sh --mode https` later, to publish the UI
-behind nginx on port 443 with a self-signed certificate.
+behind nginx on port 443 with a self-signed certificate. On a cloud VM behind
+NAT, also pass `--address` with the public IP address or DNS name you browse
+to, so the certificate and the printed URL name it.
 [Browser access](appendices/browser-access.md#https-on-the-vms-address)
 describes the modes, the checks, the cloud-firewall caution and
 [the return to loopback](appendices/browser-access.md#return-to-loopback).

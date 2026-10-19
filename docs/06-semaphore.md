@@ -247,6 +247,13 @@ connections have a different identity-selection path.
 Keep strict host verification. Correct the service's actual known-hosts file,
 permissions, inventory or credentials rather than bypassing authentication.
 
+Like terminal runs with the lab's `ansible.cfg`, Semaphore jobs on a controller
+installed from `v1.8.0` keep a target's SSH connection open for 60 seconds
+after the last task, and a job that starts within that time reuses it,
+whichever Key Store key it selects. Before testing that a removed or replaced
+key is refused, wait a minute after the last job, or restart Semaphore while
+no task runs.
+
 Privilege escalation is also configured differently. The terminal's `-K`
 password is used to become root; a Semaphore sudo credential with a Username
 becomes that user instead (see step 2). If Baseline apply works from the

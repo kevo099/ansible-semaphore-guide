@@ -134,7 +134,7 @@ rm /tmp/runner-server-ca.pem /tmp/runner-known-hosts
   "env_vars": {
     "PATH": "/opt/semaphore-runner/venv/bin:/usr/local/bin:/usr/bin:/bin",
     "ANSIBLE_HOST_KEY_CHECKING": "True",
-    "ANSIBLE_SSH_ARGS": "-o UserKnownHostsFile=/etc/semaphore-runner/known_hosts -o StrictHostKeyChecking=yes"
+    "ANSIBLE_SSH_ARGS": "-o ControlMaster=auto -o ControlPersist=60s -o UserKnownHostsFile=/etc/semaphore-runner/known_hosts -o StrictHostKeyChecking=yes"
   },
   "runner": {
     "name": "Runner practice",
