@@ -141,7 +141,10 @@ sudo bash scripts/add-target.sh --name lab-alma --address alma.example.test \
 ```
 
 With a custom `--lab-dir DIR`, add the same `--lab-dir DIR` here; the helper
-otherwise looks in `/opt/ansible-lab`.
+otherwise looks in `/opt/ansible-lab`. If one of the onboarding scripts
+prepared the target, run `sudo bash scripts/add-target.sh --from-info` instead
+and paste the lines it printed, as
+[the onboarding page](ONBOARDING.md#step-by-step) shows.
 
 The helper scans the address and keeps only the key whose fingerprint matches
 what you typed. It inserts the host under the chosen group, then appends that

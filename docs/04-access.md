@@ -94,8 +94,10 @@ steps run as root through Azure Run Command or `sudo bash` with
 [`examples/onboard/onboard-linux.sh`](../examples/onboard/onboard-linux.sh), and
 a new VM can do them at first boot with
 [`examples/onboard/cloud-init.yaml`](../examples/onboard/cloud-init.yaml); see
-[chapter 13](13-azure.md#do-onboard-an-existing-vm-with-run-command). The
-manual steps below explain what they do.
+[chapter 13](13-azure.md#do-onboard-an-existing-vm-with-run-command). On a
+seeded controller, each of them ends with what `add-target.sh` needs to add the
+VM, as [the onboarding page](ONBOARDING.md#step-by-step) shows. The manual
+steps below explain what they do.
 
 First copy the public key from the controller to each target administrator's
 home directory. This `scp`, like step 2's first connection, logs in to the

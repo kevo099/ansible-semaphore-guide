@@ -1,9 +1,10 @@
-"""Offline tests of the Run Command collector: it prints data and one add-target.sh line, never code."""
+"""Offline tests of the Run Command collector: it prints data for add-target.sh --from-info, never a command."""
 
 import contextlib
 import io
 import json
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 from types import SimpleNamespace
@@ -11,6 +12,7 @@ import unittest
 from unittest import mock
 
 HERE = Path(__file__).resolve().parents[1] / "examples" / "onboard"
+ADD_TARGET = (Path(__file__).resolve().parents[1] / "scripts" / "add-target.sh").read_text()
 TEST_NET = ".".join(("192", "0", "2"))
 SOURCE = (
     (HERE / "inventory-info.sh")
@@ -66,37 +68,38 @@ class CollectorTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 choose(controller, explicit, interfaces, routes)
 
-    def test_the_line_is_one_add_target_command(self):
-        build = API["build_command"]
+    def test_the_values_are_lines_for_add_target_from_info(self):
         self.assertEqual(
-            build("lab-alma", f"{TEST_NET}.12", "enterprise_linux", FINGERPRINT, "/opt/ansible-lab"),
-            f"sudo bash scripts/add-target.sh --name lab-alma --address {TEST_NET}.12"
-            f" --group enterprise_linux --fingerprint {FINGERPRINT}",
+            API["build_info"]("lab-alma", f"{TEST_NET}.12", "enterprise_linux", FINGERPRINT),
+            "Add this VM on the controller: in the guide's folder, run\n"
+            "  sudo bash scripts/add-target.sh --from-info\n"
+            "then paste these lines and press Ctrl-D:\n"
+            f"name=lab-alma\naddress={TEST_NET}.12\ngroup=enterprise_linux\nfingerprint={FINGERPRINT}\n",
         )
-        # The folder is named only when add-target.sh would not find it by itself.
-        self.assertTrue(
-            build("lab-ubuntu", f"{TEST_NET}.10", "ubuntu", FINGERPRINT, "/srv/lab.d/ansible_lab-2")
-            .endswith(f"--fingerprint {FINGERPRINT} --lab-dir /srv/lab.d/ansible_lab-2")
-        )
+        # Each value passes the check add-target.sh applies to it, read from the script.
+        checks = dict(re.findall(r'\[\[ "\$(name|address|fingerprint)" =~ (\^\S+\$) \]\]', ADD_TARGET))
+        self.assertEqual(sorted(checks), ["address", "fingerprint", "name"])
+        for field, value in (("name", "lab-alma"), ("address", f"{TEST_NET}.12"), ("fingerprint", FINGERPRINT)):
+            self.assertIsNotNone(re.fullmatch(checks[field], value))
 
     def test_values_that_are_not_plain_tokens_are_refused(self):
-        build = API["build_command"]
-        good = {"name": "host", "address": f"{TEST_NET}.10", "group": "ubuntu",
-                "fingerprint": FINGERPRINT, "folder": "/opt/ansible-lab"}
+        build = API["build_info"]
+        good = {"name": "host", "address": f"{TEST_NET}.10", "group": "ubuntu", "fingerprint": FINGERPRINT}
         for field, value in [
             ("name", "$(id)"), ("name", "a;id"), ("name", "a\nb"), ("name", "-option"),
             ("name", "a b"), ("name", "x" * 64),
+            # Ansible's names for the controller, which add-target.sh refuses.
+            ("name", "localhost"), ("name", "127.0.0.1"),
             ("address", "host.example.test"), ("address", f"{TEST_NET}.10;id"),
             ("group", "lab"),
             ("fingerprint", "SHA256:short"), ("fingerprint", FINGERPRINT + " x"),
-            ("folder", "/opt/a'b"), ("folder", "/opt/a b"), ("folder", "opt/ansible-lab"),
-            ("folder", "/opt/$(id)"), ("folder", "/opt/a\nb"), ("folder", "/" + "a" * 200),
+            ("fingerprint", FINGERPRINT + " --known-hosts /etc/sudoers"),
         ]:
             with self.subTest(field=field, value=value):
                 with self.assertRaises(ValueError):
                     build(**dict(good, **{field: value}))
 
-    def collect(self, release=UBUNTU, shadow=SET_PASSWORD, visudo=0, name="", folder="/opt/ansible-lab"):
+    def collect(self, release=UBUNTU, shadow=SET_PASSWORD, visudo=0, name=""):
         """Run main() with simulated system commands; return its output and the commands it ran."""
         commands = []
         with tempfile.TemporaryDirectory() as directory:
@@ -134,37 +137,40 @@ class CollectorTests(unittest.TestCase):
             }):
                 output = io.StringIO()
                 with contextlib.redirect_stdout(output):
-                    API["main"]([f"{TEST_NET}.5", "", name, folder])
+                    API["main"]([f"{TEST_NET}.5", "", name])
         return output.getvalue(), commands
 
-    def test_output_is_data_ending_with_the_add_target_line(self):
+    def test_output_is_data_ending_with_the_values_for_add_target(self):
         text, _ = self.collect()
         lines = text.splitlines()
         self.assertEqual(lines[0], f"VM: target-ubuntu | {TEST_NET}.10 | ubuntu 24.04")
         self.assertEqual(lines[1], "RSA: " + FINGERPRINT)
         self.assertEqual(lines[2], "SSH keys present; password set; sudo syntax OK")
-        self.assertEqual(lines[-2], "Add it on the controller, in the guide checkout:")
-        self.assertEqual(
-            lines[-1],
-            f"  sudo bash scripts/add-target.sh --name target-ubuntu --address {TEST_NET}.10"
-            f" --group ubuntu --fingerprint {FINGERPRINT}",
-        )
+        self.assertEqual(lines[-7:], [
+            "Add this VM on the controller: in the guide's folder, run",
+            "  sudo bash scripts/add-target.sh --from-info",
+            "then paste these lines and press Ctrl-D:",
+            "name=target-ubuntu", f"address={TEST_NET}.10", "group=ubuntu", "fingerprint=" + FINGERPRINT,
+        ])
         self.assertTrue(text.endswith("\n"))
-        # Nothing for the controller to run but that one line of reviewed code.
-        for code in ("python3", "<<", "ADD_ANSIBLE_TARGET", "$(", "`"):
+        # The only command is the one the operator runs; the VM's values are data for it.
+        self.assertEqual([line for line in lines if "add-target.sh" in line],
+                         ["  sudo bash scripts/add-target.sh --from-info"])
+        for code in ("python3", "<<", "ADD_ANSIBLE_TARGET", "$(", "`", "--name", "--lab-dir"):
             self.assertNotIn(code, text)
 
     def test_full_output_fits_azure_and_reports_sudo_failure_without_secrets(self):
-        text, _ = self.collect(visudo=1, name="n" * 63, folder="/" + "f" * 199)
+        text, _ = self.collect(visudo=1, name="n" * 63)
         self.assertLessEqual(len(text.encode()), 3900)
         self.assertIn("sudo INVALID", text)
         self.assertNotIn("PRIVATE_DIAGNOSTIC", text)
-        self.assertTrue(text.endswith(" --lab-dir /" + "f" * 199 + "\n"))
+        self.assertTrue(text.endswith("\nname=" + "n" * 63 + f"\naddress={TEST_NET}.10\ngroup=ubuntu"
+                                      f"\nfingerprint={FINGERPRINT}\n"))
 
     def test_enterprise_linux_password_is_read_from_the_shadow_entry(self):
         text, commands = self.collect(release=ALMALINUX)
         self.assertIn("SSH keys present; password set; sudo syntax OK", text)
-        self.assertIn("--group enterprise_linux", text)
+        self.assertIn("\ngroup=enterprise_linux\n", text)
         self.assertNotIn("passwd", commands)
         for shadow in ("svc_ansible:!$6$salt$hash:20000:0:99999:7:::\n", "svc_ansible:!!:20000::::::\n",
                        "svc_ansible:*:20000::::::\n", ""):

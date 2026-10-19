@@ -369,7 +369,10 @@ sudo bash scripts/add-target.sh --name lab-ubuntu --address ubuntu.example.test 
 ```
 
 Use `--group enterprise_linux` for an EL9 target and include `--lab-dir DIR`
-if you chose a custom folder. The helper adds the inventory entry and its
+if you chose a custom folder. If one of the onboarding scripts prepared the
+target, run `sudo bash scripts/add-target.sh --from-info` instead and paste
+the lines it printed, as [the onboarding page](ONBOARDING.md#step-by-step)
+shows. The helper adds the inventory entry and its
 verified key to `/etc/semaphore/known_hosts`. A fingerprint mismatch or a
 duplicate host is refused without changing either file. Skip chapter 4's step
 6 on this path: it replaces the known-hosts file the helper maintains. RSA host

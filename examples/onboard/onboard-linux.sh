@@ -9,7 +9,7 @@
 # SSH drop-in from chapter 4, and checks both before SSH reloads, including that
 # AllowUsers, AllowGroups, DenyUsers and DenyGroups let the account in. It prints
 # the host-key fingerprints to compare with ssh-keyscan from the controller, and
-# the add-target.sh line that adds this VM there.
+# the lines to paste into scripts/add-target.sh --from-info there to add this VM.
 #
 # Supported: Ubuntu 24.04, AlmaLinux, Rocky Linux and RHEL 9.
 
@@ -468,12 +468,13 @@ for pub in /etc/ssh/ssh_host_*_key.pub; do
   [ -f "$pub" ] || continue
   ssh-keygen -lf "$pub" | awk '{print "  " $1, $2, $NF}'
 done
-# The controller command that adds this VM, from values read here and nothing
-# else, so it is a single add-target.sh line you can check before running it.
+# The values add-target.sh --from-info reads on the controller. They are data, not
+# a command: the controller does not trust this VM, so only its own reviewed code
+# acts on them. A value that cannot be read here is left out, and the option that
+# supplies it on the controller is named instead.
 inventory_group=enterprise_linux
 [ "$family" = debian ] && inventory_group=ubuntu
 inventory_name=$(hostname -s 2>/dev/null || true)
-[[ "$inventory_name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || inventory_name=NAME
 target_address=
 if [ -n "$CONTROLLER_ADDRESS" ]; then
   target_address=$({ ip -o route get "$CONTROLLER_ADDRESS" 2>/dev/null || true; } \
@@ -483,9 +484,30 @@ if [ -z "$target_address" ]; then
   mapfile -t global_addresses < <(ip -o -4 addr show scope global 2>/dev/null | awk '{sub(/\/.*/, "", $4); print $4}')
   [ "${#global_addresses[@]}" -eq 1 ] && target_address=${global_addresses[0]}
 fi
-[[ "$target_address" =~ ^[0-9A-Fa-f.:]+$ ]] || target_address=ADDRESS
 rsa_fingerprint=$({ ssh-keygen -lf /etc/ssh/ssh_host_rsa_key.pub 2>/dev/null || true; } | awk '{print $2}')
-[[ "$rsa_fingerprint" =~ ^SHA256:[A-Za-z0-9+/]+$ ]] || rsa_fingerprint=FINGERPRINT
-note "add it on the controller, in the guide checkout (replace NAME, ADDRESS or FINGERPRINT if shown, and add --lab-dir DIR for a lab folder other than /opt/ansible-lab):"
-note "  sudo bash scripts/add-target.sh --name $inventory_name --address $target_address --group $inventory_group --fingerprint $rsa_fingerprint"
+info=() options=()
+# localhost is Ansible's name for the controller, so it counts as unreadable here.
+if [[ "$inventory_name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ && "$inventory_name" != localhost ]]; then
+  info+=("name=$inventory_name")
+else
+  options+=("--name with the name the inventory should use")
+fi
+if [[ "$target_address" =~ ^[0-9A-Fa-f.:]+$ ]]; then
+  info+=("address=$target_address")
+else
+  options+=("--address with the address the controller reaches")
+fi
+info+=("group=$inventory_group")
+if [[ "$rsa_fingerprint" =~ ^SHA256:[A-Za-z0-9+/]+$ ]]; then
+  info+=("fingerprint=$rsa_fingerprint")
+else
+  options+=("--fingerprint with the RSA host key's fingerprint, read from the console")
+fi
+note "Add this VM on the controller: in the guide's folder, run"
+note "  sudo bash scripts/add-target.sh --from-info"
+for option in "${options[@]}"; do
+  note "and add $option,"
+done
+note "then paste these lines and press Ctrl-D:"
+printf '%s\n' "${info[@]}"
 note "RESULT: OK"

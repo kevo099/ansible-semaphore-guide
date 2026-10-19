@@ -11,19 +11,37 @@ one fits your VM.
 | [`cloud-init.yaml`](cloud-init.yaml) | You are creating the VM and can give it custom data | At first boot, through cloud-init |
 | [`onboard-linux.sh`](onboard-linux.sh) | The VM exists and you can run a script as root: Azure Run Command, `sudo bash` over SSH, or the console | On the VM, as root |
 | [`../bootstrap-existing-vm.yml`](../bootstrap-existing-vm.yml) | The VM exists and the controller can log in as its administrator, whose sudo works | On the controller, one host per run |
-| [`inventory-info.sh`](inventory-info.sh) | The VM is prepared and you want its controller command through Azure Run Command, for example after cloud-init | On the VM, read-only |
+| [`inventory-info.sh`](inventory-info.sh) | The VM is prepared and you want its values for the controller through Azure Run Command, for example after cloud-init | On the VM, read-only |
 
-Each of them ends by printing one line to run on the controller, in the
-guide's folder:
+The files that run on the VM end by printing its values, as data and not as a
+command:
 
 ```text
-sudo bash scripts/add-target.sh --name NAME --address ADDRESS --group GROUP --fingerprint SHA256:...
+Add this VM on the controller: in the guide's folder, run
+  sudo bash scripts/add-target.sh --from-info
+then paste these lines and press Ctrl-D:
+name=NAME
+address=ADDRESS
+group=GROUP
+fingerprint=SHA256:...
 ```
 
-[`scripts/add-target.sh`](../../scripts/add-target.sh) scans the VM, keeps
-only the host key that matches the fingerprint, and adds the VM to the lab
-inventory. Check that the line you paste is that single command and nothing
-else, then run it.
+On the controller, run `sudo bash scripts/add-target.sh --from-info`, typed or
+copied from this page rather than from the VM's output, and after its prompt
+paste the four lines, or the whole output.
+[`scripts/add-target.sh`](../../scripts/add-target.sh) takes only those values
+and checks them, scans the VM, keeps only the host key that matches the
+fingerprint, and adds the VM to the lab inventory; it ignores every other line
+and runs none of it. cloud-init's copy starts each line with `onboard:`, which
+it accepts. A value the VM cannot read is left out, and the output asks for
+`--name`, `--address` or `--fingerprint` instead; add only those, with a value
+you read yourself through Run Command or the console. Add `--lab-dir DIR` for
+a lab folder other than `/opt/ansible-lab`. The bootstrap playbook runs on the
+controller and prints the whole `add-target.sh` command instead; run that
+command, replacing `NAME`, `ADDRESS` or `FINGERPRINT` if shown and adding
+`--lab-dir DIR` for another lab folder, as its message says.
+[The onboarding page](../../docs/ONBOARDING.md#why-the-vm-prints-lines-not-a-command)
+explains why.
 
 Insert the controller's public key where each file says so. On a controller
 made by either installer, that is the output of
