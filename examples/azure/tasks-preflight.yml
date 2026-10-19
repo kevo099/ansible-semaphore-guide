@@ -7,10 +7,26 @@
     quiet: true
   loop: "{{ azure_required_vars }}"
 
+# An unquoted expiry such as 2026-10-31 reaches Ansible as a date, so compare text.
 - name: Refuse an expiry-free or owner-free tag set
   ansible.builtin.assert:
     that:
-      - azure_tags.owner is defined and azure_tags.owner | length > 0
-      - azure_tags.expires is defined and azure_tags.expires | length > 0
+      - (azure_tags.owner | default('', true) | string | length) > 0
+      - (azure_tags.expires | default('', true) | string | length) > 0
     fail_msg: Tag every resource with an owner and an expiry date.
     quiet: true
+
+# Read each key file the way the VM tasks do, before anything is created.
+- name: Refuse a key file that is missing or holds anything but one public key
+  ansible.builtin.assert:
+    that:
+      - key_text is match('^(ssh-rsa|ssh-ed25519|ecdsa-sha2-nistp[0-9]+) [A-Za-z0-9+/=]+( .*)?$')
+      - "'PRIVATE KEY' not in key_text"
+    fail_msg: >-
+      {{ item }} must name a public key file (.pub) holding one key;
+      {{ key_file }} is missing or holds something else.
+    quiet: true
+  vars:
+    key_file: "{{ lookup('ansible.builtin.vars', item, default='') }}"
+    key_text: "{{ lookup('ansible.builtin.file', key_file, errors='ignore') | default('', true) }}"
+  loop: "{{ azure_required_key_files | default([]) }}"

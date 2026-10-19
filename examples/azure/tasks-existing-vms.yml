@@ -1,0 +1,32 @@
+---
+# azure_rm_virtualmachine keeps the image an existing VM was created from and reports
+# no change when vars.yml names another one, so compare them before the VM task.
+# azure_planned_vms lists the VMs the playbook manages, each with its name and image.
+- name: List the VMs that already exist in the resource group
+  azure.azcollection.azure_rm_virtualmachine_info:
+    resource_group: "{{ azure_resource_group }}"
+  register: azure_existing_vms
+
+# Marketplace images only; a gallery or custom image is not compared.
+- name: Refuse a VM that exists with another Marketplace image
+  ansible.builtin.assert:
+    that:
+      - found.image is not defined or item.image.publisher is not defined or found_image | lower == planned_image | lower
+    fail_msg: >-
+      {{ item.name }} was created from {{ found_image }}, and Azure keeps a VM's image, so
+      {{ planned_image }} would not be used. Put the original image back in vars.yml, or delete the VM
+      with az vm delete -g {{ azure_resource_group }} -n {{ item.name }} --yes and run this playbook
+      again; the new VM has new host keys to pin.
+    quiet: true
+  # Ansible renders fail_msg for every item, so both names must work for any image.
+  vars:
+    found: "{{ azure_existing_vms.vms | selectattr('name', 'equalto', item.name) | first | default({}) }}"
+    found_image: >-
+      {{ [found.image.publisher, found.image.offer, found.image.sku] | join(':')
+         if found.image.publisher is defined else 'a gallery or custom image' }}
+    planned_image: >-
+      {{ [item.image.publisher, item.image.offer, item.image.sku] | join(':')
+         if item.image.publisher is defined else 'a gallery or custom image' }}
+  loop: "{{ azure_planned_vms }}"
+  loop_control:
+    label: "{{ item.name }}"

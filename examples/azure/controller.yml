@@ -11,6 +11,34 @@
     # Use the virtual environment that holds the Azure SDK, not the system Python.
     ansible_python_interpreter: "{{ ansible_playbook_python }}"
     azure_required_vars: [azure_subscription_id, azure_tags, azure_controller]
+    azure_required_key_files: [azure_admin_public_key_file]
+    # nsg-lab-controller holds exactly these rules: purge_rules removes any other,
+    # including one added by hand. Open HTTPS with azure_controller.https_cidr.
+    controller_rules:
+      - name: ssh-from-operator
+        protocol: Tcp
+        source_address_prefix: "{{ azure_controller.operator_cidr }}"
+        destination_port_range: 22
+        access: Allow
+        priority: 100
+        direction: Inbound
+      # Azure's default AllowVNetInBound would otherwise open every port to the VNet.
+      - name: deny-other-inbound
+        protocol: "*"
+        source_address_prefix: "*"
+        destination_port_range: "*"
+        access: Deny
+        priority: 4000
+        direction: Inbound
+    # Semaphore behind expose-semaphore.sh --mode https; added only when https_cidr is set.
+    controller_https_rules:
+      - name: https-from-operator
+        protocol: Tcp
+        source_address_prefix: "{{ azure_controller.https_cidr | default('') }}"
+        destination_port_range: 443
+        access: Allow
+        priority: 110
+        direction: Inbound
   module_defaults:
     group/azure.azcollection.all:
       subscription_id: "{{ azure_subscription_id }}"
@@ -19,27 +47,27 @@
     - name: Check the variables
       ansible.builtin.import_tasks: tasks-preflight.yml
 
-    - name: Network security group for the controller (SSH from your prefix only)
+    - name: Keep HTTPS to one address prefix of your own
+      ansible.builtin.assert:
+        that:
+          - https_cidr is string
+          - https_cidr | lower not in ['*', 'any', 'internet']
+          - https_cidr is not search('/0$')
+        fail_msg: >-
+          azure_controller.https_cidr must be one address prefix of your own, as operator_cidr
+          is for SSH, never one that opens Semaphore's login page to everyone.
+        quiet: true
+      vars:
+        https_cidr: "{{ azure_controller.https_cidr | default('', true) }}"
+
+    - name: Network security group for the controller (SSH, and HTTPS if set, from your own prefixes only)
       azure.azcollection.azure_rm_securitygroup:
         resource_group: "{{ azure_resource_group }}"
         name: nsg-lab-controller
         purge_rules: true
-        rules:
-          - name: ssh-from-operator
-            protocol: Tcp
-            source_address_prefix: "{{ azure_controller.operator_cidr }}"
-            destination_port_range: 22
-            access: Allow
-            priority: 100
-            direction: Inbound
-          # Azure's default AllowVNetInBound would otherwise open every port to the VNet.
-          - name: deny-other-inbound
-            protocol: "*"
-            source_address_prefix: "*"
-            destination_port_range: "*"
-            access: Deny
-            priority: 4000
-            direction: Inbound
+        rules: >-
+          {{ controller_rules
+             + (controller_https_rules if azure_controller.https_cidr | default('', true) | length > 0 else []) }}
         tags: "{{ azure_tags }}"
 
     - name: Static public address for the controller
@@ -65,6 +93,11 @@
             private_ip_address: "{{ azure_controller.private_ip }}"
             public_ip_address_name: "pip-{{ azure_controller.name }}"
         tags: "{{ azure_tags }}"
+
+    - name: Check a controller VM that already exists
+      ansible.builtin.import_tasks: tasks-existing-vms.yml
+      vars:
+        azure_planned_vms: "{{ [azure_controller] }}"
 
     - name: Controller VM (bootstrap administrator key only)
       azure.azcollection.azure_rm_virtualmachine:
