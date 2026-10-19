@@ -1,14 +1,10 @@
-"""Offline tests: generated updates touch temporary fixtures only; SSH scans are fake."""
+"""Offline tests of the Run Command collector: it prints data and one add-target.sh line, never code."""
 
-import base64
 import contextlib
 import io
 import json
-import os
 from pathlib import Path
-import struct
 import subprocess
-import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -25,194 +21,11 @@ SOURCE = (
 API = {"__name__": "inventory_info_test"}
 exec(compile(SOURCE, str(HERE / "inventory-info.sh"), "exec"), API)
 
-
-def public_key(fill):
-
-    def field(data):
-        return struct.pack(">I", len(data)) + data
-
-    # Synthetic public RSA components; there are no corresponding private keys.
-    blob = (
-        field(b"ssh-rsa")
-        + field(b"\x01\x00\x01")
-        + field(b"\x00\x80" + bytes([fill]) * 255)
-    )
-    return "ssh-rsa " + base64.b64encode(blob).decode()
-
-
-PUB1, PUB2 = (public_key(1), public_key(3))
-
-
-def fingerprint(key):
-    result = subprocess.run(
-        ["ssh-keygen", "-l", "-E", "sha256", "-f", "-"],
-        input=key + "\n",
-        text=True,
-        capture_output=True,
-        check=True,
-    )
-    return result.stdout.split()[1]
-
-
-FP1 = fingerprint(PUB1)
-
-
-class ControllerTests(unittest.TestCase):
-
-    def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="inventory-info-test-")
-        self.root = Path(self.temp.name)
-        self.folder = self.root / "lab"
-        self.inventory = self.folder / "inventories/lab.ini"
-        self.inventory.parent.mkdir(parents=True)
-        self.inventory.write_text(
-            f"[ubuntu]\nold-ubuntu ansible_host={TEST_NET}.9\n\n[enterprise_linux]\n\n[lab:children]\nubuntu\nenterprise_linux\n\n[lab:vars]\nansible_user=svc_ansible\nansible_python_interpreter=/usr/bin/python3\n"
-        )
-        self.inventory.chmod(0o640)
-        self.trust = self.root / "known_hosts"
-        self.trust.write_text(
-            f"# Existing unrelated trust\n{TEST_NET}.9 " + PUB2 + "\n"
-        )
-        self.trust.chmod(0o640)
-        self.scan = self.root / "scanned-key"
-        self.scan.write_text(f"{TEST_NET}.10 " + PUB1 + "\n")
-        binary = self.root / "bin"
-        binary.mkdir()
-        scanner = binary / "ssh-keyscan"
-        scanner.write_text('#!/bin/sh\ncat "$TEST_SCAN_FILE"\n')
-        scanner.chmod(0o700)
-        self.env = dict(
-            os.environ,
-            PATH=str(binary) + os.pathsep + os.environ["PATH"],
-            TEST_SCAN_FILE=str(self.scan),
-        )
-        self.before = {p: p.read_bytes() for p in (self.inventory, self.trust)}
-
-    def tearDown(self):
-        self.temp.cleanup()
-
-    def execute(self, group="ubuntu", name="new-ubuntu", address=f"{TEST_NET}.10"):
-        command = API["build_command"](name, address, group, FP1, str(self.folder))
-        code = command.split("\n", 1)[1].rsplit("ADD_ANSIBLE_TARGET", 1)[0]
-        code = code.replace(
-            'Path("/etc/semaphore/known_hosts")', "Path(" + repr(str(self.trust)) + ")"
-        )
-        return subprocess.run(
-            [sys.executable, "-c", code], text=True, capture_output=True, env=self.env
-        )
-
-    def unchanged(self):
-        for path, content in self.before.items():
-            self.assertEqual(path.read_bytes(), content)
-        self.assertFalse(list(self.root.rglob("*.before-add-*")))
-
-    def test_add_and_repeat_preserve_other_hosts_permissions_and_backups(self):
-        result = self.execute()
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(
-            f"old-ubuntu ansible_host={TEST_NET}.9", self.inventory.read_text()
-        )
-        self.assertIn(
-            f"[ubuntu]\nnew-ubuntu ansible_host={TEST_NET}.10\n",
-            self.inventory.read_text(),
-        )
-        self.assertIn(f"{TEST_NET}.10 " + PUB1, self.trust.read_text())
-        backups = list(self.root.rglob("*.before-add-*"))
-        self.assertEqual(len(backups), 2)
-        for path in (self.inventory, self.trust):
-            backup = next(
-                (p for p in backups if p.name.startswith(path.name + ".before-add-"))
-            )
-            self.assertEqual(backup.read_bytes(), self.before[path])
-            self.assertEqual(path.stat().st_mode & 0o777, 0o640)
-        repeated = self.execute()
-        self.assertEqual(repeated.returncode, 0, repeated.stderr)
-        self.assertIn("Already present", repeated.stdout)
-        self.assertEqual(len(list(self.root.rglob("*.before-add-*"))), 2)
-        self.assertEqual(self.inventory.read_text().count("new-ubuntu "), 1)
-
-    def test_enterprise_group(self):
-        result = self.execute(group="enterprise_linux", name="new-rhel")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("[enterprise_linux]\nnew-rhel ", self.inventory.read_text())
-
-    def test_wrong_scanned_key_does_not_modify_either_file(self):
-        self.scan.write_text(f"{TEST_NET}.10 " + PUB2 + "\n")
-        result = self.execute()
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("fingerprint", result.stderr)
-        self.unchanged()
-
-    def test_unreachable_host_does_not_modify_either_file(self):
-        self.scan.write_text("")
-        self.assertNotEqual(self.execute().returncode, 0)
-        self.unchanged()
-
-    def test_conflicting_existing_name(self):
-        result = self.execute(name="old-ubuntu")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("different settings", result.stderr)
-        self.unchanged()
-
-    def test_address_already_under_another_alias(self):
-        result = self.execute(address=f"{TEST_NET}.9")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("another inventory name", result.stderr)
-        self.unchanged()
-
-    def test_hostname_can_match_a_child_group_name(self):
-        result = self.execute(name="ubuntu")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(
-            f"[ubuntu]\nubuntu ansible_host={TEST_NET}.10\n", self.inventory.read_text()
-        )
-
-    def test_quoted_address_is_not_duplicated(self):
-        self.inventory.write_text(
-            self.inventory.read_text().replace(
-                f"ansible_host={TEST_NET}.9", f'ansible_host="{TEST_NET}.10"'
-            )
-        )
-        self.before[self.inventory] = self.inventory.read_bytes()
-        result = self.execute()
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("another inventory name", result.stderr)
-        self.unchanged()
-
-    def test_existing_rsa_conflict(self):
-        self.trust.write_text(f"{TEST_NET}.10 " + PUB2 + "\n")
-        self.before[self.trust] = self.trust.read_bytes()
-        self.assertNotEqual(self.execute().returncode, 0)
-        self.unchanged()
-
-    def test_hashed_existing_trust_is_recognized(self):
-        self.trust.write_text(f"{TEST_NET}.10 " + PUB1 + "\n")
-        subprocess.run(
-            ["ssh-keygen", "-q", "-H", "-f", str(self.trust)],
-            capture_output=True,
-            check=True,
-        )
-        before = self.trust.read_bytes()
-        result = self.execute()
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.trust.read_bytes(), before)
-
-    def test_missing_group_refuses(self):
-        self.inventory.write_text(
-            self.inventory.read_text().replace("[ubuntu]", "[different]")
-        )
-        self.before[self.inventory] = self.inventory.read_bytes()
-        self.assertNotEqual(self.execute().returncode, 0)
-        self.unchanged()
-
-    def test_symlink_refuses(self):
-        saved = self.inventory.with_suffix(".saved")
-        self.inventory.rename(saved)
-        self.inventory.symlink_to(saved)
-        result = self.execute()
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("regular file", result.stderr)
-        self.unchanged()
+# The SHA256: form ssh-keygen -l prints: 43 base64 characters, no padding.
+FINGERPRINT = "SHA256:" + "A1b2C3d4" * 5 + "E5f"
+UBUNTU = 'ID=ubuntu\nVERSION_ID="24.04"\n'
+ALMALINUX = 'ID="almalinux"\nVERSION_ID="9.8"\n'
+SET_PASSWORD = "svc_ansible:$6$salt$hash:20000:0:99999:7:::\n"
 
 
 class CollectorTests(unittest.TestCase):
@@ -253,87 +66,111 @@ class CollectorTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 choose(controller, explicit, interfaces, routes)
 
-    def test_generated_values_cannot_inject_shell_or_python(self):
-        for name in ("$(id)", "a;id", "a\nADD_ANSIBLE_TARGET", "-option"):
-            with self.assertRaises(ValueError):
-                API["build_command"](
-                    name, f"{TEST_NET}.10", "ubuntu", FP1, "/opt/ansible-lab"
-                )
-        command = API["build_command"](
-            "host", f"{TEST_NET}.10", "ubuntu", FP1, "/opt/a'b"
+    def test_the_line_is_one_add_target_command(self):
+        build = API["build_command"]
+        self.assertEqual(
+            build("lab-alma", f"{TEST_NET}.12", "enterprise_linux", FINGERPRINT, "/opt/ansible-lab"),
+            f"sudo bash scripts/add-target.sh --name lab-alma --address {TEST_NET}.12"
+            f" --group enterprise_linux --fingerprint {FINGERPRINT}",
         )
-        compile(
-            command.split("\n", 1)[1].rsplit("ADD_ANSIBLE_TARGET", 1)[0],
-            "<generated>",
-            "exec",
+        # The folder is named only when add-target.sh would not find it by itself.
+        self.assertTrue(
+            build("lab-ubuntu", f"{TEST_NET}.10", "ubuntu", FINGERPRINT, "/srv/lab.d/ansible_lab-2")
+            .endswith(f"--fingerprint {FINGERPRINT} --lab-dir /srv/lab.d/ansible_lab-2")
         )
 
-    def test_full_output_fits_azure_and_reports_sudo_failure_without_secrets(self):
+    def test_values_that_are_not_plain_tokens_are_refused(self):
+        build = API["build_command"]
+        good = {"name": "host", "address": f"{TEST_NET}.10", "group": "ubuntu",
+                "fingerprint": FINGERPRINT, "folder": "/opt/ansible-lab"}
+        for field, value in [
+            ("name", "$(id)"), ("name", "a;id"), ("name", "a\nb"), ("name", "-option"),
+            ("name", "a b"), ("name", "x" * 64),
+            ("address", "host.example.test"), ("address", f"{TEST_NET}.10;id"),
+            ("group", "lab"),
+            ("fingerprint", "SHA256:short"), ("fingerprint", FINGERPRINT + " x"),
+            ("folder", "/opt/a'b"), ("folder", "/opt/a b"), ("folder", "opt/ansible-lab"),
+            ("folder", "/opt/$(id)"), ("folder", "/opt/a\nb"), ("folder", "/" + "a" * 200),
+        ]:
+            with self.subTest(field=field, value=value):
+                with self.assertRaises(ValueError):
+                    build(**dict(good, **{field: value}))
+
+    def collect(self, release=UBUNTU, shadow=SET_PASSWORD, visudo=0, name="", folder="/opt/ansible-lab"):
+        """Run main() with simulated system commands; return its output and the commands it ran."""
+        commands = []
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            release = root / "os-release"
-            release.write_text('ID=ubuntu\nVERSION_ID="24.04"\n')
+            (root / "os-release").write_text(release)
             ssh = root / "targetuser/.ssh"
             ssh.mkdir(parents=True)
-            (ssh / "authorized_keys").write_text(PUB1 + "\n")
+            (ssh / "authorized_keys").write_text("ssh-rsa AAAAB3NzaC1yc2E fixture\n")
 
             def fake_run(args):
-                command = args[0]
-                if command == "ip" and "address" in args:
-                    out = json.dumps(
-                        [
-                            {
-                                "addr_info": [
-                                    {
-                                        "family": "inet",
-                                        "scope": "global",
-                                        "local": f"{TEST_NET}.10",
-                                    }
-                                ]
-                            }
-                        ]
-                    )
-                elif command == "ip":
+                commands.append(args[0])
+                if args[0] == "ip" and "address" in args:
+                    out = json.dumps([{"addr_info": [
+                        {"family": "inet", "scope": "global", "local": f"{TEST_NET}.10"}]}])
+                elif args[0] == "ip":
                     out = json.dumps([{"prefsrc": f"{TEST_NET}.10"}])
-                elif command == "ssh-keygen":
-                    out = "2048 " + FP1 + " root@fixture (RSA)\n"
-                elif command == "passwd":
-                    out = "svc_ansible P 09/28/2026 0 99999 7 -1\n"
-                elif command == "/usr/sbin/visudo":
-                    return subprocess.CompletedProcess(
-                        args, 1, "", "PRIVATE_DIAGNOSTIC_NOT_FOR_OUTPUT"
-                    )
+                elif args[0] == "ssh-keygen":
+                    out = "3072 " + FINGERPRINT + " root@fixture (RSA)\n"
+                elif args[0] == "getent":
+                    return subprocess.CompletedProcess(args, 0 if shadow else 2, shadow, "")
+                elif args[0] == "/usr/sbin/visudo":
+                    return subprocess.CompletedProcess(args, visudo, "", "PRIVATE_DIAGNOSTIC_NOT_FOR_OUTPUT")
                 else:
                     raise AssertionError(args)
                 return subprocess.CompletedProcess(args, 0, out, "")
 
             def fake_path(value):
-                return release if str(value) == "/etc/os-release" else Path(value)
+                return root / "os-release" if str(value) == "/etc/os-release" else Path(value)
 
-            with mock.patch.dict(
-                API,
-                {
-                    "run": fake_run,
-                    "Path": fake_path,
-                    "pwd": SimpleNamespace(
-                        getpwnam=lambda _: SimpleNamespace(
-                            pw_dir=str(root / "targetuser")
-                        )
-                    ),
-                    "socket": SimpleNamespace(
-                        gethostname=lambda: "target-ubuntu.example.test"
-                    ),
-                },
-            ):
+            with mock.patch.dict(API, {
+                "run": fake_run,
+                "Path": fake_path,
+                "pwd": SimpleNamespace(getpwnam=lambda _: SimpleNamespace(pw_dir=str(root / "targetuser"))),
+                "socket": SimpleNamespace(gethostname=lambda: "target-ubuntu.example.test"),
+            }):
                 output = io.StringIO()
                 with contextlib.redirect_stdout(output):
-                    API["main"]([f"{TEST_NET}.5", "", "", "/opt/ansible-lab"])
-            text = output.getvalue()
-            self.assertLessEqual(len(text.encode()), 3900)
-            self.assertIn("sudo INVALID", text)
-            self.assertIn("password set", text)
-            self.assertNotIn("PRIVATE_DIAGNOSTIC", text)
-            self.assertTrue(text.endswith("ADD_ANSIBLE_TARGET\n"))
+                    API["main"]([f"{TEST_NET}.5", "", name, folder])
+        return output.getvalue(), commands
+
+    def test_output_is_data_ending_with_the_add_target_line(self):
+        text, _ = self.collect()
+        lines = text.splitlines()
+        self.assertEqual(lines[0], f"VM: target-ubuntu | {TEST_NET}.10 | ubuntu 24.04")
+        self.assertEqual(lines[1], "RSA: " + FINGERPRINT)
+        self.assertEqual(lines[2], "SSH keys present; password set; sudo syntax OK")
+        self.assertEqual(lines[-2], "Add it on the controller, in the guide checkout:")
+        self.assertEqual(
+            lines[-1],
+            f"  sudo bash scripts/add-target.sh --name target-ubuntu --address {TEST_NET}.10"
+            f" --group ubuntu --fingerprint {FINGERPRINT}",
+        )
+        self.assertTrue(text.endswith("\n"))
+        # Nothing for the controller to run but that one line of reviewed code.
+        for code in ("python3", "<<", "ADD_ANSIBLE_TARGET", "$(", "`"):
+            self.assertNotIn(code, text)
+
+    def test_full_output_fits_azure_and_reports_sudo_failure_without_secrets(self):
+        text, _ = self.collect(visudo=1, name="n" * 63, folder="/" + "f" * 199)
+        self.assertLessEqual(len(text.encode()), 3900)
+        self.assertIn("sudo INVALID", text)
+        self.assertNotIn("PRIVATE_DIAGNOSTIC", text)
+        self.assertTrue(text.endswith(" --lab-dir /" + "f" * 199 + "\n"))
+
+    def test_enterprise_linux_password_is_read_from_the_shadow_entry(self):
+        text, commands = self.collect(release=ALMALINUX)
+        self.assertIn("SSH keys present; password set; sudo syntax OK", text)
+        self.assertIn("--group enterprise_linux", text)
+        self.assertNotIn("passwd", commands)
+        for shadow in ("svc_ansible:!$6$salt$hash:20000:0:99999:7:::\n", "svc_ansible:!!:20000::::::\n",
+                       "svc_ansible:*:20000::::::\n", ""):
+            with self.subTest(shadow=shadow):
+                text, _ = self.collect(release=ALMALINUX, shadow=shadow)
+                self.assertIn("WARNING: password unset/locked/unverified", text)
 
 
 if __name__ == "__main__":

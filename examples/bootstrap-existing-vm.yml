@@ -3,7 +3,8 @@
 # another tool, or before cloud-init was set up): the automated form of chapter
 # 4, steps 3 and 4. It creates or completes svc_ansible, authorizes the listed
 # public keys, ensures the target prerequisites, sets the sudo password you type,
-# and adds the dedicated sudoers and SSH drop-ins. It is safe to run again.
+# and adds the dedicated sudoers and SSH drop-ins. It is safe to run again, and
+# ends with the add-target.sh line that adds the host on the controller.
 #
 # The VM must already accept SSH from the controller for an administrator whose
 # sudo works, and have Python 3; mainstream cloud images do.
@@ -32,6 +33,9 @@
     automation_public_keys: "{{ query('ansible.builtin.file', *automation_public_key_files) }}"
     ssh_service: "{{ 'ssh' if ansible_facts['os_family'] == 'Debian' else 'sshd' }}"
     ssh_dropin: /etc/ssh/sshd_config.d/70-ansible-lab.conf
+    # The account's real home and UID, which sshd uses, once getent has read them.
+    bootstrap_home: "{{ ansible_facts['getent_passwd']['svc_ansible'][4] }}"
+    bootstrap_uid: "{{ ansible_facts['getent_passwd']['svc_ansible'][1] }}"
     # SSH_CONNECTION holds the client address and port, then this host's address and port,
     # so the policy is read for exactly the connection the controller uses.
     bootstrap_sshd_context: >-
@@ -108,7 +112,8 @@
         bootstrap_min_rsa: >-
           {{ ([2048] + (bootstrap_policy_before | select('match', '^requiredrsasize ')
               | map('split') | map('last') | map('int') | list)) | max }}
-        bootstrap_rsa_accepted: "{{ ['rsa-sha2-512', 'rsa-sha2-256', 'ssh-rsa'] | intersect(bootstrap_accepted) | length > 0 }}"
+        # The controller's SSH client signs with SHA-2 only, never with SHA-1 ssh-rsa.
+        bootstrap_rsa_accepted: "{{ ['rsa-sha2-512', 'rsa-sha2-256'] | intersect(bootstrap_accepted) | length > 0 }}"
         bootstrap_usable_rsa: >-
           {{ bootstrap_key_sizes.results | selectattr('item', 'match', '^ssh-rsa ')
              | map(attribute='stdout') | map('split') | map('first') | map('int')
@@ -142,24 +147,67 @@
         update_password: always
       no_log: true
 
-    - name: Create the account's SSH directory
-      ansible.builtin.file:
-        path: /home/svc_ansible/.ssh
-        state: directory
-        owner: svc_ansible
-        group: svc_ansible
-        mode: "0700"
+    - name: Read the account's home directory
+      ansible.builtin.getent:
+        database: passwd
+        key: svc_ansible
 
+    - name: Look at the account's SSH directory and key file without following links
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+        get_checksum: false
+      loop:
+        - "{{ bootstrap_home }}/.ssh"
+        - "{{ bootstrap_home }}/.ssh/authorized_keys"
+      register: bootstrap_ssh_paths
+
+    # Root would follow a link that whoever controls the account planted there.
+    - name: Refuse a link in place of the SSH directory or key file
+      ansible.builtin.assert:
+        that:
+          - bootstrap_home is regex('/[A-Za-z0-9._/-]+', match_type='fullmatch')
+          - bootstrap_ssh_paths.results | map(attribute='stat') | selectattr('islnk', 'defined') | selectattr('islnk') | list | length == 0
+        fail_msg: >-
+          {{ bootstrap_home }}/.ssh or its authorized_keys is a link, or the home is not a
+          plain absolute path. Resolve that by hand before running this again.
+        quiet: true
+
+    # Written as svc_ansible, like onboard-linux.sh does, so no link can redirect root.
     - name: Authorize exactly the listed public keys
-      ansible.builtin.copy:
-        content: "{{ automation_public_keys | join('\n') }}\n"
-        dest: /home/svc_ansible/.ssh/authorized_keys
-        owner: svc_ansible
-        group: svc_ansible
-        mode: "0600"
+      ansible.builtin.command:
+        argv:
+          - /bin/bash
+          - -c
+          - |
+            set -euo pipefail
+            umask 077
+            mkdir -p "$1/.ssh"
+            chmod 0700 "$1/.ssh"
+            [ ! -d "$1/.ssh/authorized_keys" ] || { echo "authorized_keys is a directory" >&2; exit 1; }
+            staged=$(mktemp "$1/.ssh/.authorized_keys.XXXXXX")
+            cat > "$staged"
+            if cmp -s "$staged" "$1/.ssh/authorized_keys"; then
+              rm -f "$staged"
+              echo unchanged
+            else
+              mv -f "$staged" "$1/.ssh/authorized_keys"
+              echo replaced
+            fi
+            chmod 0600 "$1/.ssh/authorized_keys"
+          - bootstrap-keys
+          - "{{ bootstrap_home }}"
+        stdin: "{{ automation_public_keys | join('\n') }}"
+      become: true
+      become_user: svc_ansible
+      vars:
+        ansible_pipelining: true
+      register: bootstrap_keys
+      changed_when: bootstrap_keys.stdout == 'replaced'
 
     - name: Restore SELinux labels on the SSH directory
-      ansible.builtin.command: restorecon -RFv /home/svc_ansible/.ssh
+      ansible.builtin.command:
+        argv: [restorecon, -RFv, "{{ bootstrap_home }}/.ssh"]
       register: bootstrap_restorecon
       changed_when: bootstrap_restorecon.stdout | length > 0
       when: ansible_facts['selinux']['status'] | default('disabled') == 'enabled'
@@ -213,18 +261,75 @@
               - "'passwordauthentication no' in bootstrap_sshd_policy.stdout_lines"
               - "'kbdinteractiveauthentication no' in bootstrap_sshd_policy.stdout_lines"
               - "'pubkeyauthentication yes' in bootstrap_sshd_policy.stdout_lines"
-              - "'/home/svc_ansible/.ssh/authorized_keys' in bootstrap_key_paths"
+              - (bootstrap_home ~ '/.ssh/authorized_keys') in bootstrap_key_paths
             fail_msg: Another SSH setting overrides the svc_ansible policy; resolve it before reloading SSH.
             quiet: true
           vars:
             # AuthorizedKeysFile entries with their tokens resolved; relative ones are in the
             # home. A lookahead adds the home: in this expression ansible-core 2.21 passes a
             # backreference to regex_replace as literal text, which broke every relative path.
+            # The home is a plain path, checked above, so it is safe as a replacement.
             bootstrap_key_paths: >-
               {{ (bootstrap_sshd_policy.stdout_lines | select('match', '^authorizedkeysfile ')
                   | first | default('authorizedkeysfile none')).split()[1:]
-                 | map('replace', '%h', '/home/svc_ansible') | map('replace', '%u', 'svc_ansible')
-                 | map('regex_replace', '^(?=[^/])', '/home/svc_ansible/') | list }}
+                 | map('replace', '%h', bootstrap_home) | map('replace', '%u', 'svc_ansible')
+                 | map('replace', '%U', bootstrap_uid | string)
+                 | map('regex_replace', '^(?=[^/])', bootstrap_home ~ '/') | list }}
+
+        - name: Read the groups sshd compares with AllowGroups and DenyGroups
+          ansible.builtin.command: id -nG svc_ansible
+          register: bootstrap_account_groups
+          changed_when: false
+
+        # The same verdicts as sshd_access in onboard-linux.sh: sshd compares an entry
+        # without * or ? exactly, and so does this. Entries this cannot judge are only
+        # reported: a pattern, svc_ansible@host, two @ (OpenSSH 9.8 and earlier split
+        # at the first, later versions at the last), and a group name with a space,
+        # which id -nG cannot show.
+        - name: Check that DenyUsers, AllowUsers, DenyGroups and AllowGroups let svc_ansible in
+          ansible.builtin.assert:
+            that:
+              - bootstrap_access_refused | length == 0
+            fail_msg: >-
+              {{ bootstrap_access_refused | join('; ') }}; sshd would refuse the account,
+              so allow svc_ansible there before running this again.
+            success_msg: >-
+              {{ ('This check cannot evaluate "' ~ bootstrap_access_unsure | join('", "')
+                  ~ '"; make sure sshd lets svc_ansible in.') if bootstrap_access_unsure
+                 else 'Nothing in DenyUsers, AllowUsers, DenyGroups or AllowGroups keeps svc_ansible out.' }}
+          vars:
+            bootstrap_groups: "{{ bootstrap_account_groups.stdout.split() }}"
+            bootstrap_deny_users: >-
+              {{ bootstrap_sshd_policy.stdout_lines | select('match', '^denyusers ')
+                 | map('regex_replace', '^denyusers ', '') | list }}
+            bootstrap_allow_users: >-
+              {{ bootstrap_sshd_policy.stdout_lines | select('match', '^allowusers ')
+                 | map('regex_replace', '^allowusers ', '') | list }}
+            bootstrap_deny_groups: >-
+              {{ bootstrap_sshd_policy.stdout_lines | select('match', '^denygroups ')
+                 | map('regex_replace', '^denygroups ', '') | list }}
+            bootstrap_allow_groups: >-
+              {{ bootstrap_sshd_policy.stdout_lines | select('match', '^allowgroups ')
+                 | map('regex_replace', '^allowgroups ', '') | list }}
+            bootstrap_unsure_user: '^svc_ansible@[^@]*$|^[^@]*[*?][^@]*(@[^@]*)?$|@.*@'
+            bootstrap_unsure_group: '[*? ]'
+            bootstrap_access_refused: >-
+              {{ (['DenyUsers lists svc_ansible'] if 'svc_ansible' in bootstrap_deny_users else [])
+                 + (['AllowUsers does not list svc_ansible'] if bootstrap_allow_users
+                    and 'svc_ansible' not in bootstrap_allow_users
+                    and not bootstrap_allow_users | select('search', bootstrap_unsure_user) | list else [])
+                 + (["DenyGroups lists svc_ansible's group " ~ bootstrap_deny_groups | select('in', bootstrap_groups) | first]
+                    if bootstrap_deny_groups | select('in', bootstrap_groups) | list else [])
+                 + (["AllowGroups lists none of svc_ansible's groups (" ~ bootstrap_groups | join(' ') ~ ")"]
+                    if bootstrap_allow_groups and not bootstrap_allow_groups | select('in', bootstrap_groups) | list
+                    and not bootstrap_allow_groups | select('search', bootstrap_unsure_group) | list else []) }}
+            bootstrap_access_unsure: >-
+              {{ bootstrap_deny_users | select('search', bootstrap_unsure_user) | map('regex_replace', '^', 'DenyUsers ') | list
+                 + ((bootstrap_allow_users | select('search', bootstrap_unsure_user) | map('regex_replace', '^', 'AllowUsers ') | list)
+                    if 'svc_ansible' not in bootstrap_allow_users else [])
+                 + bootstrap_deny_groups | select('search', bootstrap_unsure_group) | map('regex_replace', '^', 'DenyGroups ') | list
+                 + ((bootstrap_allow_groups | select('search', bootstrap_unsure_group) | map('regex_replace', '^', 'AllowGroups ') | list)
+                    if not bootstrap_allow_groups | select('in', bootstrap_groups) | list else []) }}
 
         - name: Schedule the SSH reload only after every check has passed
           ansible.builtin.debug:
@@ -283,6 +388,36 @@
           asks for another account's password (rootpw, targetpw or runaspw). Review
           "sudo -l -U svc_ansible" on the host.
         success_msg: svc_ansible is ready; continue with chapter 4, step 5.
+
+    - name: Read the RSA host key's fingerprint for the controller
+      ansible.builtin.command: ssh-keygen -lf /etc/ssh/ssh_host_rsa_key.pub
+      register: bootstrap_rsa_host_key
+      changed_when: false
+      failed_when: false
+
+    # Only values that pass add-target.sh's own checks, or a placeholder to replace,
+    # so it is a single line you can check before running it.
+    - name: Show the controller command that adds this host
+      ansible.builtin.debug:
+        msg:
+          - >-
+            Add it on the controller, in the guide checkout (replace NAME, ADDRESS or FINGERPRINT if shown,
+            and add --lab-dir DIR for a lab folder other than /opt/ansible-lab):
+          - "{{ bootstrap_add_line }}"
+      vars:
+        bootstrap_add_name: "{{ inventory_hostname }}"
+        bootstrap_add_address: "{{ ansible_host | default(inventory_hostname) }}"
+        bootstrap_add_group: "{{ 'ubuntu' if ansible_facts['os_family'] == 'Debian' else 'enterprise_linux' }}"
+        bootstrap_add_fingerprint: "{{ (bootstrap_rsa_host_key.stdout.split() + ['', ''])[1] }}"
+        bootstrap_add_line: >-
+          {{ 'sudo bash scripts/add-target.sh'
+             ~ ' --name ' ~ (bootstrap_add_name
+                             if bootstrap_add_name is regex('[A-Za-z0-9][A-Za-z0-9._-]*', match_type='fullmatch') else 'NAME')
+             ~ ' --address ' ~ (bootstrap_add_address
+                                if bootstrap_add_address is regex('[A-Za-z0-9:][A-Za-z0-9.:-]*', match_type='fullmatch') else 'ADDRESS')
+             ~ ' --group ' ~ bootstrap_add_group
+             ~ ' --fingerprint ' ~ (bootstrap_add_fingerprint
+                                    if bootstrap_add_fingerprint is regex('SHA256:[A-Za-z0-9+/]+', match_type='fullmatch') else 'FINGERPRINT') }}
 
   handlers:
     - name: Reload the SSH service

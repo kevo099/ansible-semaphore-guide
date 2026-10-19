@@ -1,6 +1,7 @@
 #!/bin/sh
 # Paste this WHOLE file into the TARGET VM's Azure Run Command > RunShellScript.
-# It reads local information only. It prints a separate command for the controller.
+# It reads local information only and prints data: the VM's status, then one
+# scripts/add-target.sh line to run in the guide checkout on the controller.
 CONTROLLER_ADDRESS=''              # Set the controller IP to select the route's source address.
 TARGET_ADDRESS=''                  # Optional: choose an assigned target IPv4 explicitly.
 INVENTORY_NAME=''                  # Optional: otherwise use this VM's short hostname.
@@ -22,80 +23,8 @@ import socket
 import subprocess
 import sys
 
-# This code is PRINTED, never executed on the target.
-CONTROLLER_CODE = r"""from pathlib import Path
-import re, shlex, shutil, subprocess, time
-name, address, group, wanted, folder = __DATA__
-def stop(message):
-    raise SystemExit("STOP: " + message)
-def run(args, data=None):
-    return subprocess.run(args, input=data, text=True, capture_output=True, timeout=20)
-def fingerprint(line):
-    result = run(["ssh-keygen", "-l", "-E", "sha256", "-f", "-"], line + "\n")
-    return result.stdout.split()[1] if result.returncode == 0 else ""
-inventory = Path(folder) / "inventories/lab.ini"
-trust = Path("/etc/semaphore/known_hosts")
-for path in (inventory, trust):
-    if path.is_symlink() or not path.is_file():
-        stop("Expected an existing regular file: " + str(path))
-original = {p: p.read_text() for p in (inventory, trust)}
-lines = original[inventory].splitlines()
-section = ""
-headers, existing = [], []
-children = []
-for i, line in enumerate(lines):
-    clean = line.split("#", 1)[0].strip()
-    header = re.fullmatch(r"\[([^]]+)\]", clean)
-    if header:
-        section = header[1]
-        if section == group:
-            headers.append(i)
-        continue
-    if section == "lab:children":
-        children.append(clean)
-    if not clean or ":" in section:
-        continue
-    tokens = shlex.split(clean)
-    if tokens[0] == name:
-        existing.append((section, clean))
-    elif "ansible_host=" + address in tokens:
-        stop("This address already has another inventory name; review it first.")
-entry = name + " ansible_host=" + address
-if len(headers) != 1 or group not in children:
-    stop("Inventory must contain [" + group + "] and list it in [lab:children].")
-if existing and existing != [(group, entry)]:
-    stop("This inventory name already has different settings; review it first.")
-scan = run(["ssh-keyscan", "-T", "5", "-t", "rsa", "--", address])
-matching = [s for s in scan.stdout.splitlines() if s and not s.startswith("#") and fingerprint(s) == wanted]
-if not matching:
-    stop("SSH on port 22 did not return the target's RSA fingerprint. No files changed.")
-lookup = run(["ssh-keygen", "-F", address, "-f", str(trust)])
-if lookup.returncode not in (0, 1):
-    stop("Could not inspect existing SSH trust.")
-keys = [s for s in lookup.stdout.splitlines() if s and not s.startswith("#")]
-if any(s.startswith("@") or (s.split()[1] == "ssh-rsa" and fingerprint(s) != wanted) for s in keys):
-    stop("Existing RSA host trust conflicts. Verify any rebuild before replacing it.")
-changes = {}
-if not existing:
-    lines.insert(headers[0] + 1, entry)
-    changes[inventory] = "\n".join(lines) + "\n"
-if not any(fingerprint(s) == wanted for s in keys):
-    changes[trust] = original[trust].rstrip("\n") + "\n" + matching[0] + "\n"
-stamp = ".before-add-" + str(time.time_ns())
-for path in changes:
-    shutil.copy2(path, str(path) + stamp)
-try:
-    for path, content in changes.items():
-        path.write_text(content)
-except Exception:
-    for path in changes:
-        path.write_text(original[path])
-    raise
-print("Added " + name if changes else "Already present: " + name)
-print("Inventory: " + str(inventory))
-print("Next: select the SSH/sudo credentials in Semaphore; run Ping for " + name)
-"""
-# The trust path matches both seeded controller installers.
+# add-target.sh looks here unless it is given --lab-dir.
+DEFAULT_LAB_DIR = "/opt/ansible-lab"
 
 def run(args):
     try:
@@ -147,16 +76,18 @@ def group_for(release):
     raise ValueError("Guide targets supported here: Ubuntu 24.04 or RHEL/AlmaLinux/Rocky 9.")
 
 def build_command(name, address, group, fingerprint, folder):
+    # Plain tokens only, each passing add-target.sh's own checks, so the line is
+    # data for reviewed code on the controller and you can read it before running it.
     require(bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}", name)),
             "INVENTORY_NAME must be a plain hostname, at most 63 characters.")
     ipv4(address)
     require(group in ("ubuntu", "enterprise_linux"), "Unsupported inventory group.")
     require(bool(re.fullmatch(r"SHA256:[A-Za-z0-9+/]{43}", fingerprint)), "Invalid RSA fingerprint.")
-    require(Path(folder).is_absolute() and "\n" not in folder and len(folder) <= 200,
-            "LAB_DIR must be an absolute controller path, at most 200 characters.")
-    data = repr((name, address, group, fingerprint, folder))
-    code = CONTROLLER_CODE.replace("__DATA__", data)
-    return "sudo python3 - <<'ADD_ANSIBLE_TARGET'\n" + code + "ADD_ANSIBLE_TARGET\n"
+    require(bool(re.fullmatch(r"/[A-Za-z0-9._/-]{0,199}", folder)),
+            "LAB_DIR must be an absolute path of letters, digits and . _ - /, at most 200 characters.")
+    command = ("sudo bash scripts/add-target.sh --name " + name + " --address " + address
+               + " --group " + group + " --fingerprint " + fingerprint)
+    return command if folder == DEFAULT_LAB_DIR else command + " --lab-dir " + folder
 
 def main(args):
     controller, explicit, requested_name, folder = args
@@ -187,9 +118,10 @@ def main(args):
         account = pwd.getpwnam("svc_ansible")
         keys = Path(account.pw_dir) / ".ssh/authorized_keys"
         states.append("SSH keys present" if keys.is_file() and keys.stat().st_size else "WARNING: no authorized_keys")
-        password = run(["passwd", "-S", "svc_ansible"])
-        status = password.stdout.split()
-        states.append("password set" if password.returncode == 0 and len(status) > 1 and status[1] in ("P", "PS")
+        # The shadow entry, as onboard-linux.sh reads it; a set password is a crypt hash.
+        shadow = run(["getent", "shadow", "svc_ansible"])
+        fields = shadow.stdout.split(":")
+        states.append("password set" if shadow.returncode == 0 and len(fields) > 1 and fields[1].startswith("$")
                       else "WARNING: password unset/locked/unverified")
     except KeyError:
         states.append("WARNING: svc_ansible is missing")
@@ -200,8 +132,9 @@ def main(args):
         states.append("WARNING: sudo validation unavailable")
     summary = ("VM: " + name + " | " + address + " | " + release["ID"] + " " + release["VERSION_ID"]
                + "\nRSA: " + fingerprint + "\n" + "; ".join(states))
-    output = summary + "\nInventory setup only; access still needs Ping/sudo testing.\nCOPY THE FOLLOWING BLOCK INTO THE CONTROLLER CONSOLE:\n" + command
-    # Azure action Run Command keeps the last 4 KB. Never emit a truncated command.
+    output = (summary + "\nInventory setup only; access still needs Ping/sudo testing."
+              + "\nAdd it on the controller, in the guide checkout:\n  " + command + "\n")
+    # Azure action Run Command keeps the last 4 KB. Never emit a truncated line.
     require(len(output.encode()) <= 3900,
             "Output would exceed Azure's 4 KB limit. Shorten INVENTORY_NAME/LAB_DIR.")
     print(output, end="")
