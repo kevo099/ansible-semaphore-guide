@@ -149,9 +149,10 @@ and paste the lines it printed, as
 The helper scans the address and keeps only the key whose fingerprint matches
 what you typed. It inserts the host under the chosen group, then appends that
 key to `/etc/semaphore/known_hosts`. A mismatch changes nothing and prints the
-scanned fingerprints so you can investigate. A name the inventory already has
-is refused, and so is a group without a section in the inventory; neither
-changes anything.
+scanned fingerprints so you can investigate. A name the inventory already lists
+with another address or group, an address it lists under another name, and a
+group without a section in the inventory are refused, and none of them changes
+anything. Running it again with the same values reports `Already present`.
 
 Each target also needs the `svc_ansible` account, its sudo rule and its SSH
 drop-in. Before the check below, do steps 2 to 4 of
@@ -185,20 +186,32 @@ Skip step 6 of the access chapter: it replaces `/etc/semaphore/known_hosts`,
 which `add-target.sh` maintains. Reinstalling the controller creates a new key
 pair, so replace the old public key on each target with the new one.
 
-A rebuilt or restored target at the same address presents new host keys, and
-the helper refuses an address it already trusts. After confirming why the key
-changed, remove the old entry and the inventory line, then add the host again:
+A rebuilt or restored target at the same address presents new host keys. Run
+the helper again with the new fingerprint, or `--from-info` with the lines the
+target prints. It finds the host in the inventory and a different key trusted
+for its address, changes nothing, and prints the commands that remove the old
+key. After confirming why the key changed, run them:
 
 ```bash
 sudo ssh-keygen -R alma.example.test -f /etc/semaphore/known_hosts
-sudo chown root:semaphore /etc/semaphore/known_hosts
-sudo chmod 0640 /etc/semaphore/known_hosts
-sed -i '/^lab-alma /d' /opt/ansible-lab/inventories/lab.ini
+sudo chown root:semaphore /etc/semaphore/known_hosts && sudo chmod 0640 /etc/semaphore/known_hosts
 ```
 
 `ssh-keygen -R` rewrites the file as `root:root`; without the `chown`, the
 service can no longer read it and every job fails host verification.
-`check-controller.py` reports this as `service_can_read_known_hosts`.
+`check-controller.py` reports this as `service_can_read_known_hosts`. Then run
+the helper once more. It checks the new key against the fingerprint as before,
+adds no second inventory line, and says `Trusted the verified host key of
+lab-alma (alma.example.test), which /opt/ansible-lab/inventories/lab.ini
+already lists.`
+
+To retire a target, or to give its address to another VM, remove its key as
+above and, as the lab folder's owner after copying `lab.ini` aside, its
+inventory line:
+
+```bash
+sed -i '/^lab-alma /d' /opt/ansible-lab/inventories/lab.ini
+```
 
 **Check:** run the **Ping** template. The task log shows no clone step, its
 paths are under `/opt/ansible-lab`, and each host answers with its

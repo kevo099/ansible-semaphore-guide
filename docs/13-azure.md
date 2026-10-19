@@ -235,7 +235,7 @@ az vm image terms accept --urn resf:rockylinux-x86_64:9-base:latest
 
 Without the plan, Azure refuses the VM with `VMMarketplaceInvalidInput`. The
 foundation's Community Gallery images need no terms but declare no NVMe
-support, so they do not start on the NVMe-only sizes above.
+support, so Azure refuses to create them on the NVMe-only sizes above.
 
 An image is chosen when the VM is created; editing it in `vars.yml` later,
 for example to the Ubuntu Pro image the STIG lessons need, changes nothing on
@@ -318,15 +318,18 @@ images have. It then:
 
 By default it authorizes `~/.ssh/ansible_lab.pub`. On a controller made by
 either installer ([Ubuntu](03-controller.md) or
-[Enterprise Linux](03-controller-el9.md)), list the exported service key
-instead, and your CLI key too if you use one, or the run replaces the key
-Semaphore logs in with:
+[Enterprise Linux](03-controller-el9.md)), save the service key to your home
+folder and list it instead, or the run replaces the key Semaphore logs in with:
 
 ```bash
+sudo cat /etc/semaphore/svc_ansible.pub > ~/svc_ansible.pub
 /opt/ansible-venv/bin/ansible-playbook -i inventories/bootstrap.ini \
   examples/bootstrap-existing-vm.yml --limit lab-alma -u YOUR_ADMIN \
-  -e '{"automation_public_key_files": ["~/svc_ansible.pub", "~/.ssh/ansible_lab.pub"]}'
+  -e '{"automation_public_key_files": ["~/svc_ansible.pub"]}'
 ```
+
+If you also use a CLI key, list it too:
+`["~/svc_ansible.pub", "~/.ssh/ansible_lab.pub"]`.
 
 **Where: the controller, as your administrator account, in the repository root.**
 Put the VMs in a private inventory, for example `inventories/bootstrap.ini`:
@@ -347,13 +350,16 @@ its own sudo password:
 
 ```bash
 /opt/ansible-venv/bin/ansible-playbook -i inventories/bootstrap.ini \
-  examples/bootstrap-existing-vm.yml --limit lab-ubuntu -u YOUR_ADMIN
+  examples/bootstrap-existing-vm.yml --limit lab-ubuntu -u YOUR_ADMIN \
+  -e '{"automation_public_key_files": ["~/svc_ansible.pub"]}'
 ```
 
-Add `-K` when the administrator's own sudo asks for a password; the Azure
-administrator's does not. The playbook refuses a run without a single-host
-`--limit`, an unsupported system, or a password shorter than 12 characters. A
-repeat run with the same password reports no changes.
+On a controller you set up by hand, leave out the `-e` option, so the run
+authorizes `~/.ssh/ansible_lab.pub`. Add `-K` when the administrator's own sudo
+asks for a password; the Azure administrator's does not. The playbook refuses
+a run without a single-host `--limit`, an unsupported system, or a password
+shorter than 12 characters. A repeat run with the same password reports no
+changes.
 
 ### When the VM already exists
 
@@ -407,17 +413,19 @@ does what `bootstrap-existing-vm.yml` does, and is safe to run again:
 
 Edit the copy you run: replace `REPLACE_WITH_AUTOMATION_PUBLIC_KEY` with the
 controller's public key, one key per line, between the two `END_OF_KEYS`
-lines. Use `~/.ssh/ansible_lab.pub` from
-[chapter 4, step 1](04-access.md#step-1-generate-the-automation-key), and on a
-seeded controller also the service key from
-`sudo cat /etc/semaphore/svc_ansible.pub`. The script reads the keys through a
-quoted here-document, so a key comment with quotes or `$(...)` is stored as
-text and never run. Optionally set `CONTROLLER_ADDRESS` to the controller's
-address as the VM sees it, so the SSH check evaluates the policy for that
-address arriving on each of the VM's addresses and SSH ports. Empty, it checks
-from loopback, which gives the same answer unless a `Match` rule, in any file
-the configuration includes, depends on the client's address; the script then
-stops and asks for `CONTROLLER_ADDRESS`.
+lines. Use the key Semaphore logs in with: on a seeded controller the service
+key that `sudo cat /etc/semaphore/svc_ansible.pub` prints, otherwise
+`~/.ssh/ansible_lab.pub` from
+[chapter 4, step 1](04-access.md#step-1-generate-the-automation-key). Add your
+CLI key on a further line if you also run chapter 5 from the terminal. The
+script reads the keys through a quoted here-document, so a key comment with
+quotes or `$(...)` is stored as text and never run. Optionally set
+`CONTROLLER_ADDRESS` to the controller's address as the VM sees it, so the SSH
+check evaluates the policy for that address arriving on each of the VM's
+addresses and SSH ports. Empty, it checks from loopback, which gives the same
+answer unless a `Match` rule, in any file the configuration includes, depends
+on the client's address; the script then stops and asks for
+`CONTROLLER_ADDRESS`.
 
 In the portal: open the VM, then **Operations → Run command → RunShellScript**,
 paste the edited script and select **Run**. With the Azure CLI:
@@ -457,12 +465,14 @@ Then either:
   Azure shows the public keys when the command is read back, but never the
   protected hash. `ONBOARD_PUBLIC_KEYS` replaces the whole key list, so pass
   every key the account needs, one per line; on a seeded controller that
-  includes the service key you copied to `~/svc_ansible.pub`:
+  includes the service key, which `sudo cat /etc/semaphore/svc_ansible.pub`
+  prints on the controller, saved as `~/svc_ansible.pub` on the machine that
+  runs `az`:
 
 ```bash
 az vm run-command create -g RESOURCE_GROUP --vm-name VM_NAME --name onboard \
   --script @examples/onboard/onboard-linux.sh \
-  --parameters ONBOARD_PUBLIC_KEYS="$(cat ~/.ssh/ansible_lab.pub ~/svc_ansible.pub)" \
+  --parameters ONBOARD_PUBLIC_KEYS="$(cat ~/svc_ansible.pub ~/.ssh/ansible_lab.pub)" \
     ONBOARD_CONTROLLER_ADDRESS=CONTROLLER_PRIVATE_ADDRESS \
   --protected-parameters ONBOARD_PASSWORD_HASH="$(openssl passwd -6)" \
   --timeout-in-seconds 900
@@ -471,7 +481,8 @@ az vm run-command show -g RESOURCE_GROUP --vm-name VM_NAME --name onboard \
 az vm run-command delete -g RESOURCE_GROUP --vm-name VM_NAME --name onboard --yes
 ```
 
-Leave out `~/svc_ansible.pub` when Semaphore does not use a key of its own.
+Leave out `~/.ssh/ansible_lab.pub` if you use no CLI key; leave out
+`~/svc_ansible.pub` only on a controller you set up by hand.
 Pass each parameter as `NAME=value`; in the test the form `name=X value=Y`
 created parameters literally called `name` and `value`, and the script saw
 none. Two keys in one parameter arrived intact. While `az` runs, other accounts on your workstation can see the hash in
@@ -497,9 +508,11 @@ Set `CONTROLLER_ADDRESS` at the top to the controller's IP. The collector select
 the target's source address for that route; this does not send a network probe.
 If you leave it empty, the VM must have exactly one global-scope IPv4 address.
 For multiple addresses you can instead set `TARGET_ADDRESS` explicitly; it must
-belong to this VM. `INVENTORY_NAME` defaults to the short hostname. The script
-no longer takes the lab folder: for one other than `/opt/ansible-lab`, add
-`--lab-dir DIR` on the controller.
+belong to this VM. `INVENTORY_NAME` defaults to the short hostname; a name the
+inventory reserves, such as `localhost`, `lab` or `ubuntu`, is refused, and the
+script asks you to set `INVENTORY_NAME`. The script no longer takes the lab
+folder: for one other than `/opt/ansible-lab`, add `--lab-dir DIR` on the
+controller.
 
 The output ends with data for the **controller**, not a command:
 
@@ -513,7 +526,8 @@ group=GROUP
 fingerprint=SHA256:...
 ```
 
-On the controller, in the guide's folder, run
+On the controller, in the guide's folder, your copy of the guide rather than
+the lab folder `/opt/ansible-lab`, run
 `sudo bash scripts/add-target.sh --from-info` as this page shows it, not copied
 from the VM's output. After its prompt, paste the four lines or the whole
 output, and press Ctrl-D. A VM's output is untrusted, so only reviewed code on
@@ -524,9 +538,13 @@ paste first, takes only the `name=`, `address=`, `group=` and `fingerprint=`
 values, refuses one that is not a plain name, address or fingerprint, and
 ignores every other line. It then scans the VM, keeps only the host key that
 matches the fingerprint read through authenticated Run Command, refuses a name
-or address already in use and a different key already trusted for the address,
-adds the inventory entry and records the key in `/etc/semaphore/known_hosts`.
-Pasting the same lines again reports `Already present` and changes nothing.
+the inventory lists with another address or group, or an address it lists
+under another name, then adds the inventory entry and records the key in
+`/etc/semaphore/known_hosts`. When a different key is already trusted for the
+address, as after a rebuild, it changes nothing and prints the commands that
+remove the old key; after verifying why the key changed, run them and paste
+again, and it trusts the new key without a second inventory line. Pasting the
+same lines again reports `Already present` and changes nothing.
 This updates the seeded **local file inventory**; a Static inventory saved in
 Semaphore or an inventory fetched from Git is a separate source.
 
@@ -564,8 +582,8 @@ their sudo passwords differ. What the test saw on all three targets:
   preparing a VM above gave the values `add-target.sh` needs, and
   `add-target.sh`, on an AlmaLinux 9.8 controller, added each target with
   them: RHEL 9.8 through pasted Run Command, AlmaLinux 9.8 through cloud-init
-  and the bootstrap playbook, Rocky Linux 9.8 through cloud-init and a managed
-  Run Command, and Ubuntu 24.04 Pro through the bootstrap playbook alone.
+  and a managed Run Command, Rocky Linux 9.8 through cloud-init and the
+  bootstrap playbook, and Ubuntu 24.04 Pro through the bootstrap playbook alone.
   Ping and Baseline preview then succeeded on all four. At the time, the
   scripts on the VMs printed a whole command rather than lines for
   `--from-info`.
@@ -574,7 +592,7 @@ Repeat the provisioning playbooks, too: in the test, `network.yml`,
 `controller.yml` and `targets.yml` reported `changed=0` on a second run, and the
 resource group held the same resources before and after. `targets.yml` creates
 its VMs together, so two took 43 seconds in October, and `power.yml`
-deallocated and started them together.
+deallocated two targets together in 54 seconds and started them in 84.
 
 ## Optional Do: the vendor STIG lessons on Azure targets
 

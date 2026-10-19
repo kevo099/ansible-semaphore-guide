@@ -373,10 +373,13 @@ if you chose a custom folder. If one of the onboarding scripts prepared the
 target, run `sudo bash scripts/add-target.sh --from-info` instead and paste
 the lines it printed, as [the onboarding page](ONBOARDING.md#step-by-step)
 shows. The helper adds the inventory entry and its
-verified key to `/etc/semaphore/known_hosts`. A fingerprint mismatch or a
-duplicate host is refused without changing either file. Skip chapter 4's step
-6 on this path: it replaces the known-hosts file the helper maintains. RSA host
-keys also support the EL9 vendor STIG's later crypto-policy change.
+verified key to `/etc/semaphore/known_hosts`. A fingerprint mismatch, or a name
+or address the inventory already uses for another host, is refused without
+changing either file; for a target rebuilt at the same address, see
+[chapter 3b](03-controller-el9.md#do-add-a-target-without-leaving-the-terminal).
+Skip chapter 4's step 6 on this path: it replaces the known-hosts file the
+helper maintains. RSA host keys also support the EL9 vendor STIG's later
+crypto-policy change.
 
 In Semaphore, run **Ping**. Expect every added target to report its
 distribution, no failed hosts, and job paths under the lab folder without a
@@ -413,6 +416,9 @@ git clone --branch v1.8.0 https://github.com/kevo099/ansible-semaphore-guide.git
 cd ~/guide-v1.8.0
 sudo bash scripts/update-controller.sh
 ```
+
+Run `add-target.sh` from this newer copy too; `--from-info` is new in
+`v1.8.0`.
 
 Without options it only shows its plan, and it exits with status 1 while the
 plan lists a problem, ending with `Plan only. Resolve the N problem(s) above
@@ -479,9 +485,12 @@ that the next update compares with. A second run reports nothing to do.
 
 `git revert HEAD` in the folder undoes that commit's files, not the Semaphore
 changes: the tabs and templates the update added stay and need those files,
-and templates removed with `--remove-replaced` stay removed. The next update
-then stops and names the revert commit; to apply the update again, revert that
-commit with `git revert COMMIT` as the folder's owner and run the update.
+and templates removed with `--remove-replaced` stay removed. If that update
+was the folder's first, which created `.guide-files.json`, the next update
+stops and names the revert commit; to apply the update again, revert that
+commit with `git revert COMMIT` as the folder's owner and run the update. After
+a later update, the revert restores the previous record, so the next update
+plans the same changes again; check its plan before `--apply`.
 
 **From one STIG tab to one per system.** Release `v1.7.0` replaced the single
 **STIG** tab with one tab per system and version. An update adds the new tabs

@@ -4,8 +4,10 @@
 # rule and SSH drop-in from chapter 4, and the Python bindings the lessons need.
 # One file for Ubuntu 24.04 and AlmaLinux, Rocky Linux or RHEL 9.
 #
-# Replace REPLACE_WITH_AUTOMATION_PUBLIC_KEY with the one line of the
-# controller's ~/.ssh/ansible_lab.pub, keeping the double quotes. If the key's
+# Replace REPLACE_WITH_AUTOMATION_PUBLIC_KEY with the one line of the key
+# Semaphore logs in with: on a controller made by either installer, the output
+# of sudo cat /etc/semaphore/svc_ansible.pub; on one set up by hand,
+# ~/.ssh/ansible_lab.pub. Keep the double quotes. If the key's
 # comment (after the base64 part) contains a " or a \, leave the comment out.
 # Paste the result into the portal's Custom data field (Advanced tab), or pass
 # it with az vm create --custom-data. cloud-init reads it at first boot only; for a VM

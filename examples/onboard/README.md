@@ -33,10 +33,16 @@ paste the four lines, or the whole output.
 and checks them, scans the VM, keeps only the host key that matches the
 fingerprint, and adds the VM to the lab inventory; it ignores every other line
 and runs none of it. cloud-init's copy starts each line with `onboard:`, which
-it accepts. A value the VM cannot read is left out, and the output asks for
-`--name`, `--address` or `--fingerprint` instead; add only those, with a value
-you read yourself through Run Command or the console. Add `--lab-dir DIR` for
-a lab folder other than `/opt/ansible-lab`. The bootstrap playbook runs on the
+it accepts. `onboard-linux.sh` and `cloud-init.yaml` leave out a value the VM
+cannot read, and a hostname the inventory reserves, such as `localhost` or
+`ubuntu`. `add-target.sh` then says which value is missing and the option that
+gives it, `--name`, `--address` or `--fingerprint`; add only that option, with
+a value you read yourself through Run Command or the console.
+`onboard-linux.sh` prints `RESULT: OK` as its last line, after the values.
+`inventory-info.sh` leaves nothing out: it stops with `INFO FAILED` and names
+the setting to fill in at its top, `CONTROLLER_ADDRESS`, `TARGET_ADDRESS` or
+`INVENTORY_NAME`. Add `--lab-dir DIR` for a lab folder other than
+`/opt/ansible-lab`. The bootstrap playbook runs on the
 controller and prints the whole `add-target.sh` command instead; run that
 command, replacing `NAME`, `ADDRESS` or `FINGERPRINT` if shown and adding
 `--lab-dir DIR` for another lab folder, as its message says.
