@@ -65,10 +65,10 @@ def main():
     )
     checks["semaphore_is_active"] = command_ok(["systemctl", "is-active", "--quiet", "semaphore"])
     checks["semaphore_is_enabled"] = command_ok(["systemctl", "is-enabled", "--quiet", "semaphore"])
-    # Ubuntu names the cluster unit postgresql@16-main; Enterprise Linux uses postgresql.
-    checks["postgresql_is_active"] = any(
-        command_ok(["systemctl", "is-active", "--quiet", unit]) for unit in ("postgresql@16-main", "postgresql")
-    )
+    # Ubuntu's postgresql unit is a wrapper that stays active while the cluster unit
+    # postgresql@16-main is down, so check the cluster there. Enterprise Linux has only postgresql.
+    postgresql = "postgresql@16-main" if Path("/etc/postgresql/16/main").is_dir() else "postgresql"
+    checks["postgresql_is_active"] = command_ok(["systemctl", "is-active", "--quiet", postgresql])
     checks["ansible_is_available"] = command_ok(["/opt/ansible-venv/bin/ansible", "--version"])
     checks["strict_target_host_verification"] = (
         config.get("env_vars", {}).get("ANSIBLE_HOST_KEY_CHECKING") == "True"
@@ -83,10 +83,13 @@ def main():
     listeners = subprocess.check_output(["ss", "-H", "-lnt"], text=True)
     bound = {port: listening_hosts(listeners, port) for port in (3000, 5432)}
     for port, hosts in bound.items():
+        # A stopped service fails only the listening check; the address checks judge
+        # what listens, so they do not report it as an exposure problem.
+        checks[f"port_{port}_listening"] = bool(hosts)
         if port == 3000 and exposure == "http":
-            checks["port_3000_bound_on_all_addresses"] = any_address in hosts or "*" in hosts
+            checks["port_3000_bound_on_all_addresses"] = not hosts or any_address in hosts or "*" in hosts
         else:
-            checks[f"port_{port}_only_loopback"] = bool(hosts) and all(host in LOOPBACK_HOSTS for host in hosts)
+            checks[f"port_{port}_only_loopback"] = all(host in LOOPBACK_HOSTS for host in hosts)
     # nginx may listen beyond loopback only on 443, and only for the https exposure.
     nginx_ports = public_nginx_ports(subprocess.check_output(["ss", "-H", "-lntp"], text=True))
     checks["nginx_listens_only_where_expected"] = nginx_ports <= ({"443"} if exposure == "https" else set())

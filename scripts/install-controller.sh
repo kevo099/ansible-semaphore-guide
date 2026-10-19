@@ -6,7 +6,8 @@ umask 077
 
 usage() {
   cat <<'USAGE'
-Usage: sudo bash scripts/install-controller.sh [--plan | --apply [--editor USER] [--lab-dir DIR] [--expose https|http]]
+Usage: sudo bash scripts/install-controller.sh [--plan | --apply [--editor USER] [--lab-dir DIR]
+                                               [--expose https|http [--address IP_OR_NAME]]]
 
 Creates a native Semaphore 2.19.12 / PostgreSQL 16 / Ansible 2.21.4 controller
 on a fresh Ubuntu 24.04 amd64 VM, then seeds Semaphore with a project that runs
@@ -21,6 +22,10 @@ targets.
   --expose MODE   Also make the UI reachable on this VM's address: https (nginx TLS on
                   port 443, recommended) or http (plain text on port 3000). Default: the UI
                   stays loopback-only for SSH tunnels; scripts/expose-semaphore.sh can change it later.
+  --address IP_OR_NAME
+                  With --expose, the IP address or DNS name you browse to, which the certificate
+                  and the printed URL name. Default: the address of this VM's default route,
+                  which on a cloud VM behind NAT, as on Azure, is a private one.
 
 The default is a read-only plan. --apply requires root and refuses existing
 Semaphore, PostgreSQL, lab-folder or /opt/ansible-venv state. It installs
@@ -64,7 +69,9 @@ Plan:
      file inventory, variable groups and 22 scoped task templates on the
      tabs Lessons and Patching and one STIG tab per system and version:
      RHEL 9, AlmaLinux 9, Rocky Linux 9 and Ubuntu 24.04.
- 13. With --expose, publish the UI on this VM's address (TLS proxy or plain HTTP).
+ 13. With --expose, publish the UI on this VM's address, or the one --address
+     names (TLS proxy or plain HTTP). If only this step fails, the installer says
+     so and prints the exposure command to run again.
 PLAN
   exit 0
 fi
@@ -80,16 +87,17 @@ controller_require_fresh_state /etc/postgresql /var/lib/postgresql
 controller_check_sources semaphore.service
 
 # 2. Packages that create nothing the preflight refuses, then the pinned Semaphore archive.
-#    A failed download or checksum leaves nothing that blocks a rerun.
+#    A failed download or checksum leaves nothing that blocks a rerun. apt-get waits up
+#    to ten minutes for the dpkg lock, which unattended-upgrades may hold on a new VM.
 export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install -y python3.12 python3.12-venv git curl tar openssh-client ca-certificates
+controller_apt_update
+apt-get -o DPkg::Lock::Timeout=600 install -y python3.12 python3.12-venv git curl tar openssh-client ca-certificates
 # Fetch PostgreSQL now but install it after the runtime: installing it creates
 # /etc/postgresql and /var/lib/postgresql, which the preflight refuses.
-apt-get install -y --download-only postgresql-16
+apt-get -o DPkg::Lock::Timeout=600 install -y --download-only postgresql-16
 controller_download
 controller_install_runtime
-apt-get install -y postgresql-16
+controller_apt_install_postgresql
 [[ $(cat /var/lib/postgresql/16/main/PG_VERSION) == 16 ]] || { echo 'Expected PostgreSQL 16 main cluster.'; exit 1; }
 
 controller_configure_account

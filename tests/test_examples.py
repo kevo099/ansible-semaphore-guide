@@ -43,6 +43,32 @@ class ConfigurationTests(unittest.TestCase):
         self.assertIn("StrictHostKeyChecking=yes", first["env_vars"]["ANSIBLE_SSH_ARGS"])
         self.assertNotIn("IdentitiesOnly=yes", first["env_vars"]["ANSIBLE_SSH_ARGS"])
 
+    def test_semaphore_ssh_options_keep_the_lab_connection_reuse(self):
+        # ANSIBLE_SSH_ARGS replaces the lab ansible.cfg's ssh_args, so it must repeat them.
+        def options(arguments):
+            words = arguments.split()
+            self.assertEqual(set(words[::2]), {"-o"})
+            return words[1::2]
+
+        line = next(line for line in (ROOT / "ansible.cfg").read_text().splitlines() if line.startswith("ssh_args"))
+        lab = options(line.partition("=")[2])
+        semaphore = options(config_module.make_config()["env_vars"]["ANSIBLE_SSH_ARGS"])
+        self.assertIn("ControlPersist=60s", lab)
+        self.assertLessEqual(set(lab), set(semaphore))
+        self.assertEqual(set(semaphore) - set(lab), {"UserKnownHostsFile=/etc/semaphore/known_hosts"})
+
+    def test_ssh_control_sockets_go_where_the_hardened_service_may_write(self):
+        # Ansible keeps them in ~/.ansible/cp, and with user_home Semaphore keeps the unit's HOME.
+        self.assertEqual(config_module.make_config()["home_dir_mode"], "user_home")
+        for unit in ("semaphore.service", "semaphore-el9.service", "semaphore-runner.service"):
+            with self.subTest(unit=unit):
+                lines = (ROOT / "templates" / unit).read_text().splitlines()
+                self.assertIn("ProtectSystem=strict", lines)
+                home = next(line for line in lines if line.startswith("Environment=HOME=")).partition("HOME=")[2]
+                writable = next(line for line in lines if line.startswith("ReadWritePaths=")).partition("=")[2]
+                sockets = Path(home, ".ansible", "cp")
+                self.assertTrue(any(sockets.is_relative_to(path) for path in writable.split()), sockets)
+
     def test_private_write_refuses_overwrite(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "config.json"
