@@ -153,8 +153,8 @@ no other tasks running, and global limit one. This creates an **Operations
 local** inventory and an **Operations pause** template that uses the guide's
 [`examples/semaphore/operations-pause.yml`](../examples/semaphore/operations-pause.yml).
 It prints a begin marker, waits 40 seconds on the controller and prints an end
-marker; it changes nothing. On the seeded Enterprise Linux controller, copy it
-into the lab folder as its owner, as chapter 14 does for its demo:
+marker; it changes nothing. On a controller seeded by either installer, copy
+it into the lab folder as its owner, as chapter 14 does for its demo:
 
 ```bash
 mkdir -p /opt/ansible-lab/examples

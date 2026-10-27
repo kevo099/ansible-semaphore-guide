@@ -67,7 +67,9 @@ exercise, write a separately named playbook, make the choice explicit, and
 include connection and application checks. Do not hide power actions in a
 connectivity or audit job.
 
-**Check after a reboot:**
+**Check after a reboot, on the target:** reconnect to that target over SSH or
+use its trusted console. Compare its boot ID with the value recorded above;
+the commands below inspect the target, including its loopback-only web lesson.
 
 ```bash
 cat /proc/sys/kernel/random/boot_id

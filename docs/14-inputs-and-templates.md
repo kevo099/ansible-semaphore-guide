@@ -31,8 +31,8 @@ The guide ships a harmless playbook for this chapter,
 It asserts that its inputs have allowed values, then prints them as markers;
 it changes nothing on the target. Point the template at a repository that
 contains it: this guide's repository at tag `v1.3.0` or later, as chapter 6
-does for the lessons at `v1.2.0`, or your own copy. On the seeded Enterprise
-Linux controller, copy it into the lab folder as its owner:
+does for the lessons at `v1.2.0`, or your own copy. On a controller seeded by
+either installer, copy it into the lab folder as its owner:
 
 ```bash
 mkdir -p /opt/ansible-lab/examples
