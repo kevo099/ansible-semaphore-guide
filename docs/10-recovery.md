@@ -35,8 +35,9 @@ For the guide's native controller, protect:
   you added; the relevant PostgreSQL configuration.
 - Exact application/Ansible versions and your playbook repository/ref.
 - Your own Git repository and any encrypted host variables ignored by it.
-- On the Enterprise Linux controller, its lab folder: the seeded project's
-  playbooks, inventory and any Vault files.
+- On a controller seeded by either installer, its lab folder: the project's
+  playbooks, inventory and any Vault files, together with the service SSH key
+  pair in `/etc/semaphore`.
 - Your independent password-manager/recovery process for operator credentials.
 
 The database and access-key encryption configuration must be a matching set.
@@ -60,8 +61,9 @@ The capture is written for both controllers and has been captured and
 restored on both (see [validation](VALIDATION.md)). On the
 [Enterprise Linux controller](03-controller-el9.md) it records PostgreSQL's
 `postgresql.conf` and `pg_hba.conf` from `/var/lib/pgsql/data` instead of
-`/etc/postgresql/16/main`, and the lab folder `/opt/ansible-lab`. If you
-installed with `--lab-dir`, add that path to the `for extra in` list.
+`/etc/postgresql/16/main`. Both installers seed `/opt/ansible-lab`, which the
+capture includes when present. If you installed with `--lab-dir`, add that
+path to the `for extra in` list.
 
 ```bash
 sudo bash <<'BASH'
@@ -92,7 +94,7 @@ if [[ -d /etc/postgresql/16/main ]]; then
 else
   config_paths+=(var/lib/pgsql/data/postgresql.conf var/lib/pgsql/data/pg_hba.conf)
 fi
-# Optional: service drop-ins and the Enterprise Linux lab folder.
+# Optional: service drop-ins and either installer's seeded lab folder.
 for extra in /etc/systemd/system/semaphore.service.d /opt/ansible-lab; do
   if [[ -e "$extra" ]]; then config_paths+=("${extra#/}"); fi
 done
@@ -190,14 +192,23 @@ parts. This variant was run on a registered RHEL 9.8 controller:
   under `var/lib/pgsql/data` in the archive. Install those two as
   `postgres:postgres` with mode 0600 instead of the `conf.d` and `pg_hba.conf`
   commands below, then run `sudo restorecon -F` on them.
-- `/etc/semaphore` also holds the `svc_ansible` key pair. Install both as
+- Stage the dump under `/var/lib/pgsql` instead of `/var/lib/postgresql`.
+
+For a controller seeded by **either** installer, also restore these pieces;
+the configuration-file commands below cover the manual Ubuntu layout:
+
+- `/etc/semaphore` holds the `svc_ansible` key pair. Install both as
   `root:root`: `svc_ansible` with mode 0600 and `svc_ansible.pub` with mode
   0644.
-- Stage the dump under `/var/lib/pgsql` instead of `/var/lib/postgresql`.
 - Restore the lab folder to the same path, because the restored repository
   and inventory point there. Give it your administrator account as owner and
   the `semaphore` group, mode 2750 on its folders and 0640 on its files, as
-  the installer does, then run `sudo restorecon -RF` on it.
+  the installer does. On Enterprise Linux, run `sudo restorecon -RF` on it
+  and `sudo restorecon -F` on the restored key pair.
+
+The dated restore drills in [validation](VALIDATION.md) used the earlier
+ansible-core 2.20.x baseline. The shared seeded layout does not establish a
+new restore rehearsal on the current runtime.
 
 On either system, `expose-semaphore.sh` keeps an `exposure` marker and a
 `tls/` folder in `/etc/semaphore`. The commands below do not restore them, so

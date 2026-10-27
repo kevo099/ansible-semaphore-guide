@@ -1,6 +1,6 @@
 # Appendix: move the seeded lab folder to a Git repository
 
-[Back to the Enterprise Linux controller](../03-controller-el9.md) · [Git and VS Code](../07-git-and-vscode.md)
+[Ubuntu controller](../03-controller.md) · [Enterprise Linux controller](../03-controller-el9.md) · [Git and VS Code](../07-git-and-vscode.md)
 
 ## Goal
 
@@ -8,8 +8,10 @@ Publish the seeded controller's playbooks to a private Git repository without
 publishing its inventory, Vault files or history you did not mean to share,
 and switch templates to it one at a time.
 
-This applies to the [Enterprise Linux seeded controller](../03-controller-el9.md),
-whose **Local lab folder** repository is `/opt/ansible-lab`. The
+Both installers seed the same **Local lab folder** repository at
+`/opt/ansible-lab` (or your `--lab-dir` path). This procedure uses that shared
+layout; the [recorded migration drill](../validation/2026-09-baseline.md)
+ran on the Enterprise Linux controller. The
 [Git chapter](../07-git-and-vscode.md) explains the difference between edited,
 committed, pushed and executed code; read it first.
 
