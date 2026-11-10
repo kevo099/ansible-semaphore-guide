@@ -68,6 +68,19 @@
         src: /proc/sys/kernel/random/boot_id
       register: reboot_boot_id_before
 
+    # The boot ID is new at every start and differs between any two machines. The
+    # lookup reads it where Ansible runs, so the same value means the target is this
+    # controller, and its reboot would end the run in the middle.
+    - name: Refuse to reboot the controller this run comes from
+      ansible.builtin.assert:
+        that:
+          - reboot_id_before != lookup('ansible.builtin.file', '/proc/sys/kernel/random/boot_id') | trim
+        fail_msg: >-
+          {{ inventory_hostname }} is the controller this run comes from: its reboot would
+          stop Semaphore in the middle of the task. Restart the controller from its own
+          terminal, with sudo systemctl reboot, when no task is running. Nothing was changed.
+        quiet: true
+
     - name: Read the uptime before the reboot
       ansible.builtin.slurp:
         src: /proc/uptime

@@ -59,6 +59,9 @@ class RemoveTargetTests(unittest.TestCase):
         self.bin = self.work / "bin"
         self.bin.mkdir()
         self.stub("id", 'echo "${FAKE_UID:-0}"')
+        # What changes in the lab folder is done as its owner: runuser -u OWNER -- COMMAND.
+        self.owner_calls = self.work / "owner-calls"
+        self.stub("runuser", f'echo "$2 $4" >> {self.owner_calls}\nshift 3\nexec "$@"')
         self.stub("ssh-keygen", f'sleep "${{KEYGEN_DELAY:-0}}"\nexec {shutil.which("ssh-keygen")} "$@"')
 
     def stub(self, name, body):
@@ -118,6 +121,41 @@ class RemoveTargetTests(unittest.TestCase):
             f"  {self.alma_key['fingerprint']} (RSA)\n" + HINT))
         # No .old copy as ssh-keygen -R leaves, and no temporary file.
         self.assertEqual(self.leftovers(), [])
+
+    def test_the_lab_folder_is_changed_as_its_owner_and_never_as_root(self):
+        # The folder is its editor's, who could swap a name in it for a link between two steps.
+        self.assertEqual(self.remove().returncode, 0)
+        owner = self.inventories.owner()
+        calls = [line.split() for line in self.owner_calls.read_text().splitlines()]
+        self.assertEqual({user for user, _ in calls}, {owner})
+        self.assertEqual([command for _, command in calls], ["mktemp", "sh", "chgrp", "chmod", "cp", "mv"])
+        # Nothing else in the script creates, copies, moves or removes a file of that folder.
+        script = SCRIPT.read_text()
+        for line in script.splitlines():
+            if any(name in line for name in ('"$new_inventory"', '"$backup"')) and \
+                    any(f" {tool} " in f" {line}" for tool in ("rm", "mv", "cp", "chown", "chmod", "chgrp", "chcon", ">")):
+                with self.subTest(line=line.strip()):
+                    self.assertTrue("in_lab " in line or line.lstrip().startswith(("[[", "if [[", "echo")), line)
+
+    def test_a_failed_run_removes_its_files_as_the_owner_too(self):
+        self.stub("mv", "exit 1")
+        result = self.remove("lab-alma", "--keep-key")
+        self.assertUnchanged(result, 1)
+        calls = [line.split()[1] for line in self.owner_calls.read_text().splitlines()]
+        self.assertEqual(calls[-2:], ["rm", "rm"])
+        self.assertEqual((self.backups(), self.leftovers()), ([], []))
+
+    def test_variables_kept_for_the_name_are_named(self):
+        folder = self.inventories / "host_vars"
+        folder.mkdir()
+        (folder / "lab-alma.yml").write_text("ansible_port: 2222\n")
+        (folder / "lab-ubuntu.yml").write_text("ansible_port: 2222\n")
+        result = self.remove()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(f"Kept the variables of lab-alma, which a later host of that name would get: {folder}/lab-alma.yml\n",
+                      result.stdout)
+        self.assertNotIn("lab-ubuntu.yml", result.stdout)
+        self.assertTrue((folder / "lab-alma.yml").exists())
 
     def test_owner_group_and_mode_are_kept_and_the_files_replaced_whole(self):
         # Without root the test can only give the files groups it belongs to; a second one,

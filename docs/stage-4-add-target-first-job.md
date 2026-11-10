@@ -157,9 +157,15 @@ cd ~/ansible-semaphore-guide
 sudo python3.12 controller/lab-sudo.py
 ```
 
-It asks for the password twice, without echo:
+It logs in to Semaphore first, as `admin` with the installer's password. You
+changed that password in Stage 1, so it says so and asks for your Semaphore
+administrator's login and its current password. Then it asks for the sudo
+password twice. Nothing you type is shown:
 
 ```text
+The installer's admin password is missing or no longer logs in (changed in the UI?).
+Semaphore administrator login [admin]:
+Password:
 Sudo password of svc_ansible on the lab targets:
 The same password again:
 Stored the targets' sudo password as the key 'Lab sudo' (ID 3), with an empty Username, and chose it as the Sudo Credentials of 'Lab inventory file'.
@@ -173,11 +179,7 @@ an empty **Username**, and chooses that key as the **Sudo Credentials** of
 printed. It warns about a password shorter than 12 characters, which the
 onboarding script and the bootstrap playbook cannot give to a target.
 
-It logs in to Semaphore as `admin` with the installer's password. You changed
-that password in Stage 1, so it says
-`The installer's admin password is missing or no longer logs in (changed in the UI?).`
-and asks for `Semaphore administrator login [admin]:` and `Password:`; type
-your Semaphore administrator's login and its current password. An
+At `Semaphore administrator login [admin]:`, Enter alone means `admin`. An
 administrator with a second factor cannot log in this way: give an API token
 instead, as [updating a controller](controller-update.md#options-and-logins)
 explains, with
@@ -335,9 +337,8 @@ sudo bash controller/remove-target.sh --name lab-alma
 
 ```text
 Removed lab-alma ansible_host=alma.example.test from /opt/ansible-lab/inventories/lab.ini; the inventory as it was is in /opt/ansible-lab/inventories/lab.ini.before-remove-lab-alma.20261110T143012.bak.
-Removed 3 trusted host key line(s) for alma.example.test from /etc/semaphore/known_hosts:
+Removed 1 trusted host key line(s) for alma.example.test from /etc/semaphore/known_hosts:
   SHA256:... (RSA)
-  ...
 Only the controller changed: lab-alma itself still has the svc_ansible account, its authorized keys, its sudo rule and its SSH drop-in.
 ```
 
@@ -345,7 +346,10 @@ It removes the line `NAME ansible_host=ADDRESS` that `add-target.sh` wrote,
 keeps the inventory as it was beside it, as
 `lab.ini.before-remove-NAME.YYYYmmddTHHMMSS.bak`, and removes every line that
 the service's known-hosts file holds for that address, plain or hashed. Both
-files keep their owner, group and mode, so the service can still read them. It
+files keep their owner, group and mode, so the service can still read them;
+what changes in the lab folder is done as that folder's owner, never as root.
+A `host_vars` file for the name stays, and the last lines name it, because a
+later host of that name would get its variables. It
 keeps the host key when you pass `--keep-key`, or when another inventory host
 uses the same address. A name that is not in the inventory changes nothing and
 says `NAME is not in FILE; nothing changed.`, so running it again is safe. It
@@ -395,7 +399,12 @@ the account's sessions, such as a connection the controller still holds open;
 nothing and returns 1 when it runs nothing. If `userdel` says the account
 `is currently used by process`, its processes are still ending: wait a few
 seconds and run that line again. On Ubuntu it also notes that there is no mail
-spool, which is harmless. Leave out `userdel` for an
+spool, which is harmless. Also on Ubuntu, at the console of a machine nobody
+has connected to since it started, the SSH service is not running yet:
+`sshd -t` then misses `/run/sshd`, so run `sudo mkdir -p /run/sshd` first, and
+the reload answers that the unit is not active, which needs nothing, because
+the service reads the configuration when the next connection starts it. Leave
+out `userdel` for an
 account that existed before the onboarding; then remove its
 `~svc_ansible/.ssh/authorized_keys` instead, which holds the service key.
 
@@ -447,7 +456,7 @@ On the controller, the inventory lists the target, and the service trusts a key
 for its address:
 
 ```bash
-grep -n ansible_host /opt/ansible-lab/inventories/lab.ini
+grep -n '^[^#]*ansible_host' /opt/ansible-lab/inventories/lab.ini
 sudo ssh-keygen -F alma.example.test -f /etc/semaphore/known_hosts
 cd ~/ansible-semaphore-guide
 sudo python3.12 controller/check-controller.py

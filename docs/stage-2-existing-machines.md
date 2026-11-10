@@ -211,8 +211,9 @@ It needs a terminal: for the password, for SSH's host-key question and for a
 `sudo` prompt on the machine. Without one it stops with
 `Run it from a terminal to be asked for the sudo password, or pass --keep-password.`;
 with `--keep-password` it runs without a terminal only where nothing has to be
-asked: a pinned host key, key login, and an administrator whose `sudo` needs no
-password.
+asked: a pinned host key, key login, an administrator whose `sudo` on the
+machine needs no password, and your own `sudo` on the controller asking for
+none.
 
 ## Do: choose a sudo password and make its hash
 
@@ -725,7 +726,7 @@ After the one command, the controller's last lines name the machine under
 `Prepared and in the inventory:`, and the inventory lists it:
 
 ```bash
-grep -n ansible_host /opt/ansible-lab/inventories/lab.ini
+grep -n '^[^#]*ansible_host' /opt/ansible-lab/inventories/lab.ini
 ```
 
 On the machine, the script's first run shows:

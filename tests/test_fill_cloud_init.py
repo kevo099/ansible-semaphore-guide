@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import select
 import shutil
+import stat
 import subprocess
 import tempfile
 import termios
@@ -61,6 +62,11 @@ class FillCloudInitTests(unittest.TestCase):
     def write(self, name, text):
         path = self.work / name
         path.write_text(text)
+        return path
+
+    def write_bytes(self, name, data):
+        path = self.work / name
+        path.write_bytes(data)
         return path
 
     def fill(self, *args, path=None):
@@ -152,6 +158,34 @@ class FillCloudInitTests(unittest.TestCase):
         result = self.fill(self.key_file, "--password-hash-file", self.write("hash", HASH))
         self.assertEqual(self.hash_entry(result.stdout), HASH)
 
+    def test_with_a_hash_the_output_file_is_made_private_even_if_it_existed(self):
+        # The shell empties a file that exists and keeps its mode; umask only shapes a new one.
+        target = self.work / "onboard-new-vm.yaml"
+        hash_file = self.write("hash", HASH)
+        for start in (0o644, 0o664, None):
+            with self.subTest(start=start):
+                target.unlink(missing_ok=True)
+                if start is not None:
+                    target.write_text("an earlier copy without a secret\n")
+                    target.chmod(start)
+                old = os.umask(0o002)
+                try:
+                    with open(target, "w") as output:
+                        result = subprocess.run([BASH, str(FILL), "--password-hash-file", str(hash_file),
+                                                 str(self.key_file)], stdout=output, stderr=subprocess.PIPE,
+                                                text=True, stdin=subprocess.DEVNULL, timeout=60)
+                finally:
+                    os.umask(old)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
+                self.assertEqual(self.hash_entry(target.read_text()), HASH)
+        # Without a hash the file holds no secret, and its mode is the caller's business.
+        target.chmod(0o644)
+        with open(target, "w") as output:
+            subprocess.run([BASH, str(FILL), str(self.key_file)], stdout=output, check=True, timeout=60)
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o644)
+        self.assertEqual(target.read_text(), self.default_output())
+
     def test_refusals_print_nothing_on_standard_output(self):
         private = self.work / "svc_ansible"
         two = self.write("two.pub", f"{self.key}\n{self.key}\n")
@@ -168,6 +202,10 @@ class FillCloudInitTests(unittest.TestCase):
             "missing key file": ((self.work / "missing.pub",), "cannot read", 1),
             "empty key file": ((self.write("empty.pub", "\n"),), "must hold exactly one public key line", 1),
             "two keys": ((two,), "must hold exactly one public key line, and it holds 2", 1),
+            "a comment beyond ASCII": ((self.write_bytes("latin.pub", self.key.rsplit(" ", 1)[0].encode() + b" jos\xe9\n"),),
+                                       "the key comment has characters other than plain ASCII", 1),
+            "a comment in UTF-8": ((self.write("utf8.pub", self.key.rsplit(" ", 1)[0] + " josé@laptop\n"),),
+                                   "the key comment has characters other than plain ASCII", 1),
             "private key": ((private,), "must hold exactly one public key line", 1),
             "not a key": ((not_a_key,), "is not a single-line OpenSSH public key", 1),
             'a " in the comment': ((quote,), 'the key comment contains a " or a \\', 1),

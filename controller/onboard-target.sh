@@ -89,15 +89,18 @@ trap cleanup EXIT
 # The key Semaphore logs in with, read from its source rather than from a copy that
 # an earlier installation may have left in a home folder.
 echo "Reading the service key $service_key, which needs sudo on this controller."
+# One key per line, each line ended: a file without a final newline must not run into the next key.
+key_lines() { awk '{ sub(/\r$/, "") } NF' < "$1"; }
 # shellcheck disable=SC2024  # the copy is this account's own file; only the read needs root
-sudo cat "$service_key" > "$work/svc_ansible.pub" || stop "Could not read $service_key. Was this controller made by the guide's installer?"
-ssh-keygen -l -f "$work/svc_ansible.pub" >/dev/null 2>&1 || stop "$service_key is not a public key ssh-keygen can read."
+sudo cat "$service_key" > "$work/service-key" || stop "Could not read $service_key. Was this controller made by the guide's installer?"
+ssh-keygen -l -f "$work/service-key" >/dev/null 2>&1 || stop "$service_key is not a public key ssh-keygen can read."
+key_lines "$work/service-key" > "$work/svc_ansible.pub"
 # The script on the machine replaces the account's keys with exactly this list.
 for extra_key in "${extra_keys[@]}"; do
   [[ -f $extra_key && -r $extra_key ]] || stop "Cannot read the key file $extra_key."
   ssh-keygen -l -f "$extra_key" >/dev/null 2>&1 || stop "$extra_key is not a public key ssh-keygen can read."
   grep -q 'PRIVATE KEY' -- "$extra_key" && stop "$extra_key is a private key; give its .pub file."
-  sed -e 's/\r$//' -e '/^[[:space:]]*$/d' -- "$extra_key" >> "$work/svc_ansible.pub"
+  key_lines "$extra_key" >> "$work/svc_ansible.pub"
 done
 
 script_options=(--keys svc_ansible.pub)
@@ -145,17 +148,24 @@ for target in "${targets[@]}"; do
     echo "$target answered with something other than a folder name; nothing was changed there."
     failed+=("$target"); continue
   fi
-  if ! scp -q -o ControlPath="$work/%C" "${files[@]}" "$target:$remote_dir/"; then
+  # scp splits its destination at the first colon: an IPv6 address goes in brackets.
+  copy_to=$target
+  [[ $address != *:* ]] || copy_to="${target%%@*}@[$address]"
+  if ! scp -q -o ControlPath="$work/%C" "${files[@]}" "$copy_to:$remote_dir/"; then
     echo "Could not copy the script to $target."
     ssh "${ssh_options[@]}" "$target" "sh -c 'rm -rf -- $remote_dir'" || true
     failed+=("$target"); continue
   fi
   # The script runs in its folder, so the options name the files without a path.
   # SSH_CONNECTION starts with this controller's address as the machine sees it.
-  remote_command="sh -c 'cd $remote_dir && sudo bash onboard-linux.sh ${script_options[*]} --controller-address \"\${SSH_CONNECTION%% *}\"; status=\$?; cd / && rm -rf -- $remote_dir; exit \$status'"
+  # The folder, which holds the password's hash, goes on every way out: when the
+  # script ends, on Ctrl-C at the machine's sudo prompt, and when the connection drops.
+  remote_command="sh -c 'cleanup() { cd / && rm -rf -- $remote_dir; }; trap \"cleanup; exit 130\" HUP INT TERM; cd $remote_dir && sudo bash onboard-linux.sh ${script_options[*]} --controller-address \"\${SSH_CONNECTION%% *}\"; status=\$?; cleanup; exit \$status'"
   # -t gives sudo on the machine a terminal for its own password prompt.
   if ! ssh -t "${ssh_options[@]}" "$target" "$remote_command" | tee "$work/output"; then
     echo "The script did not finish on $target; its last line above says why."
+    # Once more over the connection that is still open, in case the shell there was killed.
+    ssh -o BatchMode=yes "${ssh_options[@]}" "$target" "sh -c 'rm -rf -- $remote_dir'" 2>/dev/null || true
     failed+=("$target"); continue
   fi
   tr -d '\r' < "$work/output" > "$work/output.clean"

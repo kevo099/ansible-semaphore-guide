@@ -56,6 +56,18 @@ flock -w 120 9 || { echo "Another add-target.sh or remove-target.sh run is chang
 for file in "$inventory" "$known_hosts"; do
   [[ ! -L "$file" ]] || { echo "$file is a symbolic link; edit it by hand instead."; exit 1; }
 done
+# The lab folder belongs to its editor, who could swap a name in it between two steps of
+# this run. Everything written there is therefore written as the folder's owner, who can
+# reach nothing that way that the account could not reach before; root's own rights are
+# used only for the service known-hosts file.
+inventory_dir=$(dirname -- "$inventory")
+lab_owner=$(stat -c %U -- "$inventory_dir")
+if [[ $lab_owner == UNKNOWN || $(stat -c %U -- "$inventory") != "$lab_owner" ]]; then
+  echo "$inventory and its folder have different owners, or an owner without an account;"
+  echo "remove the line and its host key by hand instead."
+  exit 1
+fi
+in_lab() { if [[ $lab_owner == root ]]; then "$@"; else runuser -u "$lab_owner" -- "$@"; fi; }
 
 # Read sections as Ansible does: [NAME], [NAME:vars] and [NAME:children] headers, with
 # surrounding spaces allowed. A line under :children names a group, and one under :vars
@@ -122,7 +134,6 @@ if [[ $keep_key == no && -z $sharer ]]; then
            awk '/^# Host .* found: line [0-9]/ {for (i = 1; i < NF; i++) if ($i == "line") {print $(i + 1); break}}')
 fi
 
-inventory_dir=$(dirname -- "$inventory")
 known_dir=$(dirname -- "$known_hosts")
 backup="$inventory.before-remove-$name.$(date +%Y%m%dT%H%M%S).bak"
 saved_known_hosts="$known_dir/.$(basename -- "$known_hosts").remove-target.$$"
@@ -132,11 +143,11 @@ new_inventory='' new_known_hosts='' state=planned
 finish() {
   local status=$?
   case $state in
-    copied) rm -f -- "$backup" ;;
-    linked) rm -f -- "$backup" "$saved_known_hosts" ;;
+    copied) in_lab rm -f -- "$backup" ;;
+    linked) in_lab rm -f -- "$backup"; rm -f -- "$saved_known_hosts" ;;
     key-removed)
       if mv -f -- "$saved_known_hosts" "$known_hosts"; then
-        rm -f -- "$backup"
+        in_lab rm -f -- "$backup"
         echo "Put $known_hosts back as it was; nothing changed."
       else
         echo "Could not put $known_hosts back; its previous version is $saved_known_hosts. Put it back with:"
@@ -144,7 +155,8 @@ finish() {
         echo "$inventory was not changed."
       fi ;;
   esac
-  rm -f -- ${new_inventory:+"$new_inventory"} ${new_known_hosts:+"$new_known_hosts"}
+  [[ -z $new_inventory ]] || in_lab rm -f -- "$new_inventory"
+  [[ -z $new_known_hosts ]] || rm -f -- "$new_known_hosts"
   exit "$status"
 }
 trap finish EXIT
@@ -159,10 +171,22 @@ same_attributes() {
     chcon --reference="$1" -- "$2" || return 1
   fi
 }
-new_inventory=$(mktemp "$inventory_dir/.$(basename -- "$inventory").XXXXXX") ||
+# The same for a file in the lab folder, made by its owner: the group and the mode are
+# set as that account, and root only compares the result.
+lab_attributes() {
+  in_lab chgrp --reference="$1" -- "$2" || return 1
+  in_lab chmod --reference="$1" -- "$2" || return 1
+  if command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled; then
+    in_lab chcon --reference="$1" -- "$2" || return 1
+  fi
+  [[ $(stat -c '%u:%g:%a' -- "$1") == "$(stat -c '%u:%g:%a' -- "$2")" ]]
+}
+new_inventory=$(in_lab mktemp "$inventory_dir/.$(basename -- "$inventory").XXXXXX") ||
   { echo "Could not write in $inventory_dir; nothing changed."; exit 1; }
-awk -v skip="$number" 'NR != skip' "$inventory" > "$new_inventory"
-same_attributes "$inventory" "$new_inventory" ||
+# shellcheck disable=SC2016  # the inner shell expands its own arguments
+in_lab sh -c 'awk -v skip="$1" "NR != skip" "$2" > "$3"' sh "$number" "$inventory" "$new_inventory" ||
+  { echo "Could not write the new inventory in $inventory_dir; nothing changed."; exit 1; }
+lab_attributes "$inventory" "$new_inventory" ||
   { echo "Could not give the new inventory the owner and mode of $inventory; nothing changed."; exit 1; }
 if [[ -n $(awk -v n="$name" '$1 == (n "")' "$new_inventory") ]]; then
   echo "The new inventory still lists $name; nothing changed."; exit 1
@@ -181,7 +205,7 @@ if [[ ${#key_lines[@]} -gt 0 ]]; then
   fi
 fi
 [[ ! -e "$backup" ]] || { echo "$backup exists already; run this again in a second. Nothing changed."; exit 1; }
-cp -p -- "$inventory" "$backup" || { echo "Could not keep a copy of $inventory; nothing changed."; exit 1; }
+in_lab cp -p -- "$inventory" "$backup" || { echo "Could not keep a copy of $inventory; nothing changed."; exit 1; }
 state=copied
 # known-hosts first: should the run be killed between the two replacements, the line
 # is still there and running this again finishes the job.
@@ -192,7 +216,7 @@ if [[ -n $new_known_hosts ]]; then
   mv -f -- "$new_known_hosts" "$known_hosts" || { echo "Could not replace $known_hosts; nothing changed."; exit 1; }
   new_known_hosts='' state=key-removed
 fi
-if ! mv -f -- "$new_inventory" "$inventory"; then
+if ! in_lab mv -f -- "$new_inventory" "$inventory"; then
   # finish puts known-hosts back, and says so.
   if [[ $state == copied ]]; then echo "Could not replace $inventory; nothing changed."; else echo "Could not replace $inventory."; fi
   exit 1
@@ -211,4 +235,13 @@ elif [[ -n $sharer ]]; then
 else
   echo "$known_hosts held no key for $address."
 fi
+# Ansible reads these beside the inventory and beside the playbooks, for any host of this name.
+kept_vars=()
+for folder in "$inventory_dir/host_vars" "$lab_dir/playbooks/host_vars"; do
+  for kept in "$folder/$name" "$folder/$name.yml" "$folder/$name.yaml" "$folder/$name.json"; do
+    [[ ! -e $kept ]] || kept_vars+=("$kept")
+  done
+done
+[[ ${#kept_vars[@]} -eq 0 ]] ||
+  echo "Kept the variables of $name, which a later host of that name would get: ${kept_vars[*]}"
 echo "Only the controller changed: $name itself still has the svc_ansible account, its authorized keys, its sudo rule and its SSH drop-in."

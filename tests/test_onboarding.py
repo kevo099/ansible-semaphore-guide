@@ -183,7 +183,8 @@ class AddTargetInfoMixin:
             inventory.write_text("[ubuntu]\n\n[enterprise_linux]\n")
             Path(work, "known_hosts").write_text("")
             # add-target.sh needs root and scans the target; stand-ins answer for both.
-            path = stand_ins(work, {"id": "echo 0", "ssh-keyscan": f'for last; do :; done; echo "$last {key}"'})
+            path = stand_ins(work, {"id": "echo 0", "ssh-keyscan": f'for last; do :; done; echo "$last {key}"',
+                                    "runuser": 'shift 3; exec "$@"'})
             result = subprocess.run([BASH, str(ROOT / "controller" / "add-target.sh"), "--from-info", *options,
                                      "--lab-dir", str(Path(work, "lab")),
                                      "--known-hosts", str(Path(work, "known_hosts"))],

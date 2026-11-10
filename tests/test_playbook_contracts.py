@@ -585,6 +585,36 @@ class RebootTests(unittest.TestCase):
         # A key=value string is refused, as for the STIG approval.
         self.assertIs(native("{{ " + that[0] + " }}", reboot_confirm="true"), False)
 
+    def test_the_controller_itself_is_refused_before_the_reboot(self):
+        play = self.play()
+        names = [task["name"] for task in play["tasks"]]
+        guard = named(play["tasks"], "Refuse to reboot the controller this run comes from")
+        # After the read it compares, and before the reboot.
+        self.assertLess(names.index("Read the boot ID before the reboot"), names.index(guard["name"]))
+        self.assertLess(names.index(guard["name"]), names.index("Reboot and wait for the target to answer again"))
+        self.assertNotIn("when", guard)
+        [that] = guard["ansible.builtin.assert"]["that"]
+        self.assertEqual(that, "reboot_id_before != lookup('ansible.builtin.file', "
+                               "'/proc/sys/kernel/random/boot_id') | trim")
+        self.assertIn("Nothing was changed.", guard["ansible.builtin.assert"]["fail_msg"])
+
+    @unittest.skipUnless(Templar and Path("/proc/sys/kernel/random/boot_id").exists(),
+                         "needs ansible-core, as CI installs it, and Linux")
+    def test_the_guard_compares_with_the_boot_id_of_the_machine_ansible_runs_on(self):
+        play = self.play()
+        [that] = named(play["tasks"], "Refuse to reboot the controller")["ansible.builtin.assert"]["that"]
+        here = Path("/proc/sys/kernel/random/boot_id").read_text()
+        # ansible-playbook loads the plugin lists at its start; a bare Templar does not.
+        from ansible.plugins.loader import init_plugin_loader
+        try:
+            init_plugin_loader([])
+        except RuntimeError:  # set up already by an earlier test
+            pass
+        for content, allowed in ((here, False), ("1111-aaaa\n", True)):
+            with self.subTest(content=content):
+                variables = self.registered(reboot_boot_id_before=encoded(content))
+                self.assertIs(rendered(play, variables, "{{ " + that + " }}"), allowed)
+
     def test_check_mode_reads_and_reboots_nothing(self):
         play = self.play()
         reboots = [t for t in walk(play["tasks"]) if "ansible.builtin.reboot" in t]

@@ -27,8 +27,8 @@ flowchart TD
     vm(["A Linux machine to manage"]) --> sys{"A system the<br/>guide supports?"}
     sys -- "no" --> stop(["Not covered by the guide"])
     sys -- "Ubuntu 24.04, or RHEL,<br/>AlmaLinux, Rocky 9" --> ctl{"A controller from<br/>the guide's installer?"}
-    ctl -- "no: a fresh<br/>Ubuntu 24.04 VM" --> ub["Stage 1, in the guide's folder:<br/>sudo bash controller/<br/>install-controller.sh<br/>--plan, then --apply"]
-    ctl -- "no: a fresh<br/>EL 9.4+ VM" --> el["Stage 1, in the guide's folder:<br/>sudo bash controller/<br/>install-controller-<br/>el9.sh --plan,<br/>then --apply"]
+    ctl -- "no: a fresh<br/>Ubuntu 24.04 VM" --> ub["Stage 1, in the guide's folder:<br/>bash controller/<br/>install-controller.sh<br/>--plan, then the same<br/>with sudo and --apply"]
+    ctl -- "no: a fresh<br/>EL 9.4+ VM" --> el["Stage 1, in the guide's folder:<br/>bash controller/<br/>install-controller-<br/>el9.sh --plan, then the<br/>same with sudo and --apply"]
     ctl -- "yes" --> key
     ub --> key
     el --> key["Service key: the installer<br/>leaves a copy in<br/>~/svc_ansible.pub. Older<br/>controller: sudo cat<br/>/etc/semaphore/svc_ansible.pub<br/>into that file"]

@@ -235,7 +235,15 @@ fi
 
 # The inventory line comes first; a rebuilt VM's line is already there.
 if [[ $key_only == no ]]; then
-  python3 -I - "$inventory" "$group" "$name" "$address" <<'PY'
+  # The lab folder belongs to its editor, who could swap the file for a link while this
+  # runs: write it as its owner, who can reach nothing that way that the account could
+  # not reach before. Root's own rights are used only for the service known-hosts file.
+  lab_owner=$(stat -c %U -- "$(dirname -- "$inventory")")
+  writer=()
+  if [[ $lab_owner != root && $lab_owner != UNKNOWN && $(stat -c %U -- "$inventory") == "$lab_owner" ]]; then
+    writer=(runuser -u "$lab_owner" --)
+  fi
+  "${writer[@]}" python3 -I - "$inventory" "$group" "$name" "$address" <<'PY'
 import re
 import sys
 from pathlib import Path

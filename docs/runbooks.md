@@ -124,7 +124,8 @@ for every new host.
 
 **Undo or next:** [retire](#retire-a-target) a clone you no longer want, then
 delete it in Proxmox. Without the hash, set each VM's password as
-[Stage 3](stage-3-new-vms-cloud-init.md#do-set-the-sudo-password) shows, or run
+[Stage 3](stage-3-new-vms-cloud-init.md#do-set-the-sudo-password) shows, or,
+when the VM's administrator accepts a key of the controller's, run
 `bash controller/onboard-target.sh ADMIN@VM_ADDRESS` for it, which sets the
 password and adds it in one step.
 
@@ -140,9 +141,12 @@ cd ~/ansible-semaphore-guide
 sudo python3.12 controller/lab-sudo.py
 ```
 
-To change it, first set the new password on every target, by running the one
-command again for all of them, typing the new password, then store it in
-Semaphore:
+To change it, first pause any [schedule](16-semaphore-operations.md) and
+start no Semaphore task until both commands below are done: the targets and
+Semaphore disagree in between, and on a STIG-hardened target three wrong sudo
+passwords lock the account. Then set the new password on every target, by
+running the one command again for all of them and typing the new password,
+and store it in Semaphore:
 
 ```bash
 cd ~/ansible-semaphore-guide
@@ -150,12 +154,11 @@ bash controller/onboard-target.sh ADMIN@VM_ADDRESS_1 ADMIN@VM_ADDRESS_2
 sudo python3.12 controller/lab-sudo.py --replace
 ```
 
-A target the controller cannot log in to gets the new password at its console
-with `sudo passwd svc_ansible`. Run no Semaphore task between the two
-commands: the targets and Semaphore disagree until both are done, and on a
-STIG-hardened target three wrong sudo passwords lock the account. Pause any
-[schedule](16-semaphore-operations.md) first. Save the new password in your
-password manager.
+If you gave a machine `--extra-key FILE` before, give it again here, in a run
+for that machine: the one command sets the account's keys anew each time. A
+target the controller cannot log in to gets the new password at its console
+with `sudo passwd svc_ansible`. Save the new password in your password
+manager, and resume the schedules.
 
 **Check:** `lab-sudo.py` says `Stored the new password in the key 'Lab sudo'
 (ID N), with an empty Username`; **Baseline preview** passes for every host.
@@ -210,14 +213,17 @@ In the Run dialog, type exactly one inventory host in **Limit**, such as
 `lab-alma`, and choose `REBOOT NOW - restart this one target`. Turn on **Dry
 Run** first for a preview: it reads the target, reports its boot ID, uptime
 and failed units, and reboots nothing. It needs **Lab sudo**. From the
-terminal in `/opt/ansible-lab`, the same is
-`ansible-playbook playbooks/reboot.yml --limit lab-alma -K -e '{"reboot_confirm": true}'`.
+terminal, set up as [chapter 5](05-cli-lessons.md#establish-the-command-line-environment)
+shows and with a key of your own authorized for `svc_ansible`, the same is
+`ansible-playbook playbooks/reboot.yml --limit lab-alma --private-key ~/.ssh/ansible_lab -K -e '{"reboot_confirm": true}'`.
 
 **Check:** the log ends with the target's boot ID before and now, which must
 say `changed`, its uptime, its system state, and its failed units now and
 before the reboot. It waits up to 15 minutes for the target to answer again.
 A Limit with several hosts, or no choice in the dialog, is refused with
-`Nothing was changed.`
+`Nothing was changed.` So is the controller itself, should it be in the
+inventory: its reboot would stop Semaphore in the middle of the task, so
+restart it from its own terminal when no task runs.
 
 **Undo or next:** a reboot cannot be undone. If the target does not answer
 again, open its console. Run **Health report** afterwards;

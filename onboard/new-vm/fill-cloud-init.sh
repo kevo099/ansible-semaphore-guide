@@ -19,6 +19,10 @@
 # --password-hash-file FILE takes that hash, one line from openssl passwd -6,
 # from a file instead. The hash can be attacked offline wherever a copy of the
 # file is kept, which is why it is opt-in; the warning printed then says where.
+# With a hash, this script gives the output file mode 0600 before it writes. On
+# the VM, cloud-init keeps its own root-only copies under /var/lib/cloud/ and,
+# until the next start, /run/cloud-init/; it writes the hash file first and
+# sets its root-only mode right after, at the first boot.
 set -euo pipefail
 export LC_ALL=C
 
@@ -59,8 +63,11 @@ done
 mapfile -t keys < <(sed -e 's/\r$//' -e '/^[[:space:]]*$/d' -e '/^[[:space:]]*#/d' -- "$key_file")
 [[ ${#keys[@]} -eq 1 ]] || stop "$key_file must hold exactly one public key line, and it holds ${#keys[@]}"
 key=${keys[0]}
+# The key becomes part of a YAML file: plain ASCII only, which every YAML reader accepts.
+[[ $key != *[!\ -~]* ]] ||
+  stop 'the key comment has characters other than plain ASCII; remove the comment, the text after the base64 part'
 # The same single-line form onboard-linux.sh accepts.
-key_pattern='^(ssh-rsa|ssh-ed25519|ecdsa-sha2-nistp(256|384|521)) [A-Za-z0-9+/]+={0,3}( [^[:cntrl:]]*)?$'
+key_pattern='^(ssh-rsa|ssh-ed25519|ecdsa-sha2-nistp(256|384|521)) [A-Za-z0-9+/]+={0,3}( [ -~]*)?$'
 [[ $key =~ $key_pattern ]] || stop "$key_file is not a single-line OpenSSH public key"
 ssh-keygen -l -f "$key_file" >/dev/null 2>&1 || stop "ssh-keygen cannot read the key in $key_file"
 # The key goes inside a double-quoted YAML string, where these two would change it.
@@ -113,6 +120,11 @@ elif [[ $ask == yes ]]; then
 fi
 
 if [[ -n $password_hash ]]; then
+  # A file that was there before keeps its mode when the shell empties it, and a new
+  # one gets the caller's umask: make the output private before the hash goes into it.
+  if [[ -f /dev/stdout ]]; then
+    chmod 600 /dev/stdout || stop "could not give the output file mode 0600; nothing was printed"
+  fi
   cat >&2 <<'WARNING'
 fill-cloud-init: warning: the filled file holds a hash of the sudo password, which can be attacked offline.
 fill-cloud-init: Keep it readable only by people who may have the password (chmod 600): the hypervisor's

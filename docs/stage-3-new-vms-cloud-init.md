@@ -86,7 +86,7 @@ bash onboard/new-vm/fill-cloud-init.sh ~/svc_ansible.pub > ~/onboard-new-vm.yaml
 It prints `cloud-init.yaml` with only the quoted placeholder replaced by the
 key, quotes kept. It refuses a key file that does not hold exactly one
 single-line OpenSSH public key, and a key whose comment (the text after the
-base64 part) contains a `"` or a `\`; remove such a comment from your copy of
+base64 part) contains a `"`, a `\` or a character outside plain ASCII; remove such a comment from your copy of
 the key and run it again. On an error it prints the reason and writes nothing
 to standard output, so `~/onboard-new-vm.yaml` is then empty. The installer's
 key has the comment `ansible-practice`, which is safe. You can also edit a
@@ -147,9 +147,11 @@ cd ~/ansible-semaphore-guide
 (umask 077 && bash onboard/new-vm/fill-cloud-init.sh --with-password ~/svc_ansible.pub > ~/onboard-new-vm.yaml)
 ```
 
-`umask 077` in the parentheses makes the new file readable by you alone. It
-asks twice, without echo, and prints a warning on standard error; the filled
-file goes to standard output only:
+`umask 077` in the parentheses makes a new file readable by you alone, and
+with a hash the script also gives the output file mode 0600 itself, so that a
+file left there by the step above does not stay readable by others. It asks
+twice, without echo, and prints a warning on standard error; the filled file
+goes to standard output only:
 
 ```text
 Sudo password for svc_ansible on the new VMs:
@@ -173,8 +175,9 @@ grep -c '^  - path: /run/ansible-lab-onboard.hash$' ~/onboard-new-vm.yaml
 ls -l ~/onboard-new-vm.yaml
 ```
 
-The first prints `1`, and the second shows `-rw-------`. The YAML check above
-works the same. Keep every copy of this file private: give it mode 0600
+The first prints `1`, and the second shows `-rw-------`; if it shows anything
+else, run `chmod 600 ~/onboard-new-vm.yaml`. The YAML check above works the
+same. Keep every copy of this file private: give it mode 0600
 wherever you copy it, such as the hypervisor's snippet folder, delete a seed
 ISO made from it once the VM has booted, and never commit it.
 [`platforms/azure/targets.yml`](../platforms/azure/targets.yml) has no
@@ -207,12 +210,13 @@ the panel keeps working, and one copy of the file serves every VM.
 
    This needs root SSH from the controller to the node, with the node's host
    key checked when `scp` asks. Without it, open the node's **Shell** in the
-   web UI, run `cat > /var/lib/vz/snippets/onboard-new-vm.yaml`, paste the
-   file's content, then press Enter and Ctrl-D. A snippet on a storage that is
+   web UI, run `(umask 077; cat > /var/lib/vz/snippets/onboard-new-vm.yaml)`,
+   paste the file's content, then press Enter and Ctrl-D. A snippet on a storage that is
    not shared exists on that node only. A VM started on another node of a
    cluster needs the file there too. A file made with `--with-password` holds
    the password's hash: on the node, make it private with
-   `chmod 600 /var/lib/vz/snippets/onboard-new-vm.yaml`.
+   `chmod 600 /var/lib/vz/snippets/onboard-new-vm.yaml`, also after `scp`,
+   which keeps the mode of a file that was already there.
 
 
 3. **Create the VM from the cloud image**, as
@@ -375,8 +379,9 @@ boot, with your platform's own tools, and boot it. The `instance-id` must be
 new for each VM: cloud-init runs the file again only for an instance ID it
 has not seen. Detach the ISO once the VM has booted; it is not needed again.
 By default it holds no secret. Made from a file with `--with-password`, it
-holds the password's hash: keep it private while it exists, and delete it and
-the `~/seed-NAME` folder after the first boot.
+holds the password's hash: run `umask 077` in that shell before the commands
+above, so that the folder, the copy and the ISO are readable by you alone, and
+delete the ISO and the `~/seed-NAME` folder after the first boot.
 
 If your `user-data` has its own `write_files:` or `runcmd:`, it replaces the
 file's, and the VM is not prepared; the log then has no `onboard:` line. Put
@@ -454,14 +459,14 @@ for everything else; compare the fingerprint with the console once.
 Two values can be missing on purpose:
 
 - **No `name=` line**, and the file says
-  `onboard: and add --name with the name the inventory should use`: the VM's
+  `onboard: and add --name with the name the inventory should use,`: the VM's
   short hostname is one the inventory reserves (`localhost`, `all`,
   `ungrouped`, `lab`, `ubuntu`, `enterprise_linux`) or is not a plain name.
   This happens with a cloud image's default name, or on Enterprise Linux
   when the user data gives no `fqdn` (Proxmox always sends one). Stage 4 then
   asks for `--name`.
 - **No `address=` line**, and it says
-  `onboard: and add --address with the address the controller reaches`: the
+  `onboard: and add --address with the address the controller reaches,`: the
   VM has no global IPv4 address, or more than one, and the file does not know
   which one the controller uses. Stage 4 then asks for `--address`.
 
@@ -502,6 +507,9 @@ sudo getent shadow svc_ansible | cut -d: -f2 | cut -c1
 
 `passwd` asks for the new password twice. Setting a new password as root
 writes a fresh hash over the locked field, so no separate unlock is needed.
+A console login needs a password for the administrator, which a cloud image
+has only where you set one, such as with Proxmox's `--cipassword`; over SSH
+the administrator's key is enough.
 The second command prints only the first character of the stored field: `$`
 means a password is set; `!` or `*` means the account is still locked or has
 none. The same test is what `inventory-info.sh` reports as `password set`.
@@ -561,7 +569,7 @@ rather than lines.
 | `fill-cloud-init: with a password hash, send the output to a file: ...` | `--with-password` or `--password-hash-file` without `> FILE` | Run it again with the output sent to a file, as shown. |
 | `fill-cloud-init: --with-password asks on a terminal, and there is none; use --password-hash-file` | It ran from a script or without a terminal | Run it in an interactive session, or make the hash with `openssl passwd -6` and use `--password-hash-file`. |
 | `fill-cloud-init: the two passwords differ; nothing was printed`, or `... fewer than 12 characters ...` | A typing slip, or a short password | Run it again. The output file is then empty until it succeeds. |
-| A usage line `Usage: bash ... [--with-password \| --password-hash-file HASH_FILE] PUBLIC_KEY_FILE > FILLED_FILE` | An option after the key file, or both options at once | Put the one option before the key file. |
+| A usage line `Usage: bash ... [--with-password \| --password-hash-file HASH_FILE] PUBLIC_KEY_FILE > FILLED_FILE` | Both options at once, an unknown option, two key files, or no key file | Give one key file and at most one of the two options. |
 | `onboard: ERROR: /run/ansible-lab-onboard.hash did not hold a SHA-512 crypt hash; no password was set` | The filled file was edited by hand | Make the filled copy again with `fill-cloud-init.sh`, and set this VM's password as the last step shows. |
 
 ## Concept

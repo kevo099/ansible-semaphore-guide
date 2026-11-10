@@ -57,7 +57,9 @@ class AddTargetTests(unittest.TestCase):
         (self.bin / "ssh-keyscan").write_text(
             '#!/bin/sh\necho "ssh-keyscan $*" >>"$CALLS"\nsleep "${SCAN_DELAY:-0}"\nfor last; do :; done\n'
             'printf "%s %s\\n" "$last" "$(cat "$SCAN_KEY")"\n')
-        for stub in ("id", "ssh-keyscan"):
+        # The inventory is written as the lab folder's owner: runuser -u OWNER -- COMMAND.
+        (self.bin / "runuser").write_text('#!/bin/sh\necho "runuser $1 $2 $3 $4" >>"$CALLS"\nshift 3\nexec "$@"\n')
+        for stub in ("id", "ssh-keyscan", "runuser"):
             (self.bin / stub).chmod(0o755)
 
     def make_key(self, name):
@@ -119,6 +121,16 @@ class AddTargetTests(unittest.TestCase):
         self.assertIn(f"[enterprise_linux]\nlab-alma ansible_host={TEST_NET}.12\n", inventory)
         self.assertEqual(known, f"{TEST_NET}.12 {self.key['line']}\n")
         self.assertIn("run the Ping template, which covers every host in the lab group. If lab-alma fails", result.stdout)
+
+    def test_the_inventory_is_written_as_the_lab_folders_owner(self):
+        # The folder is its editor's, who could swap the file for a link: root never writes there.
+        result = self.add()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        owner = self.inventory.parent.owner()
+        self.assertIn(f"runuser -u {owner} -- python3\n", self.calls.read_text())
+        script = (ROOT / "controller" / "add-target.sh").read_text()
+        self.assertEqual(script.count("write_text("), 1)
+        self.assertIn('"${writer[@]}" python3 -I - "$inventory"', script)
 
     def test_running_it_again_changes_nothing(self):
         self.assertEqual(self.add().returncode, 0)

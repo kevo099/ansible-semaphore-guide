@@ -5,8 +5,10 @@ import pty
 import re
 import select
 import shutil
+import signal
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -51,7 +53,7 @@ FAKE_SCP = r'''#!/bin/bash
 printf '%s\n' "$*" >> "$FAKE_LOG/scp"
 [ -z "${FAKE_SCP_FAILS:-}" ] || exit 1
 destination=${!#}
-directory=${destination#*:}
+directory=${destination##*:}
 for argument in "$@"; do
   [ -f "$argument" ] && cp -p -- "$argument" "$directory" || true
 done
@@ -147,8 +149,94 @@ class OnboardTargetTests(unittest.TestCase):
         run = [line for line in self.logged("ssh").splitlines() if "onboard-linux.sh" in line][0]
         self.assertIn("sudo bash onboard-linux.sh --keys svc_ansible.pub --controller-address", run)
         self.assertIn('"${SSH_CONNECTION%% *}"', run)
-        self.assertRegex(run, r"rm -rf -- \S+/remote; exit \$status'$")
+        self.assertRegex(run, r"sh -c 'cleanup\(\) \{ cd / && rm -rf -- \S+/remote; \}; trap \"cleanup; exit 130\" HUP INT TERM; ")
+        self.assertRegex(run, r"; status=\$\?; cleanup; exit \$status'$")
         self.assertIn(" -t ", " " + run)
+
+    def sent_command(self):
+        """What the wrapper asked the machine to run, after a run that left the copied files in place."""
+        status, output = self.run_wrapper(f"labadmin@{FIRST}", "--keep-password")
+        self.assertEqual(status, 0, output)
+        run = [line for line in self.logged("ssh").splitlines() if "onboard-linux.sh" in line][0]
+        return run[run.index("sh -c 'cleanup()"):]
+
+    def machine(self, sudo_body):
+        """A PATH whose sudo is a stand-in, and the environment sshd gives a command."""
+        there = Path(self.directory.name) / "there"
+        there.mkdir(exist_ok=True)
+        (there / "sudo").write_text(f"#!/bin/sh\n{sudo_body}\n")
+        (there / "sudo").chmod(0o755)
+        return {"PATH": f"{there}:{os.environ['PATH']}", "SSH_CONNECTION": f"{NET}.1 50000 {FIRST} 22",
+                "SEEN": str(self.log / "seen")}
+
+    def test_the_command_sent_runs_as_written_in_a_real_shell(self):
+        # sshd hands the command to the account's shell; the stand-in for ssh never did.
+        command = self.sent_command()
+        remote = self.log / "remote"
+        for shell in filter(shutil.which, ("sh", "bash", "dash")):
+            with self.subTest(shell=shell):
+                remote.mkdir(exist_ok=True)
+                (remote / "sudo-password.hash").write_text("left behind\n")
+                env = self.machine('pwd > "$SEEN"; printf "%s\\n" "$@" >> "$SEEN"; exit 7')
+                result = subprocess.run([shell, "-c", command], env=env, capture_output=True, text=True, timeout=30)
+                # The script's own exit status comes back, it ran in the folder with its
+                # options whole, and the folder is gone.
+                self.assertEqual(result.returncode, 7, result.stderr)
+                self.assertEqual(self.logged("seen").splitlines(), [
+                    str(remote), "bash", "onboard-linux.sh", "--keys", "svc_ansible.pub",
+                    "--controller-address", f"{NET}.1"])
+                self.assertFalse(remote.exists())
+
+    def test_ctrl_c_at_the_machines_sudo_prompt_still_removes_the_folder(self):
+        command = self.sent_command()
+        remote = self.log / "remote"
+        for shell in filter(shutil.which, ("sh", "bash", "dash")):
+            with self.subTest(shell=shell):
+                remote.mkdir(exist_ok=True)
+                (remote / "sudo-password.hash").write_text("left behind\n")
+                (self.log / "seen").unlink(missing_ok=True)
+                env = self.machine('echo waiting > "$SEEN"; exec sleep 30')
+                # A new session, as under sshd, and Ctrl-C reaches the whole foreground group.
+                process = subprocess.Popen([shell, "-c", command], env=env, start_new_session=True,
+                                           preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL),
+                                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                try:
+                    for _ in range(100):
+                        if (self.log / "seen").exists():
+                            break
+                        time.sleep(0.05)
+                    os.killpg(process.pid, signal.SIGINT)
+                    # The account's shell runs the command: bash becomes it and reports 130;
+                    # dash stays its parent and dies of the signal, and the command still
+                    # cleans up behind it.
+                    self.assertIn(process.wait(timeout=20), (130, -signal.SIGINT))
+                    for _ in range(100):
+                        if not remote.exists():
+                            break
+                        time.sleep(0.05)
+                finally:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                self.assertFalse(remote.exists())
+
+    def test_a_failed_run_asks_once_more_for_the_folder_to_be_removed(self):
+        status, output = self.run_wrapper(f"labadmin@{FIRST}", "--keep-password", FAKE_RESULT="FAILED: run as root")
+        self.assertEqual(status, 1, output)
+        last = self.logged("ssh").splitlines()[-2]
+        self.assertIn("BatchMode=yes", last)
+        self.assertRegex(last, r"sh -c 'rm -rf -- \S+/remote'$")
+
+    def test_an_ipv6_address_is_copied_to_in_brackets(self):
+        address = ":".join(("2001", "db8", "", "5"))
+        status, output = self.run_wrapper(f"labadmin@{address}", "--keep-password")
+        self.assertEqual(status, 0, output)
+        self.assertRegex(self.logged("scp").splitlines()[-1], rf" labadmin@\[{address}\]:\S+/remote/$")
+        self.assertTrue((self.log / "remote" / "onboard-linux.sh").exists())
+        # ssh and add-target.sh take the address as typed.
+        self.assertIn(f" labadmin@{address} ", self.logged("ssh"))
+        self.assertEqual(self.logged("sudo").split()[-3:], ["--from-info", "--address", address])
 
     def test_an_unknown_host_is_asked_for_its_rsa_key_and_a_known_one_is_not(self):
         self.run_wrapper(f"labadmin@{FIRST}", "--keep-password")
@@ -191,6 +279,17 @@ class OnboardTargetTests(unittest.TestCase):
         self.assertEqual(status, 0, output)
         copied = (self.log / "remote" / "svc_ansible.pub").read_text().splitlines()
         self.assertEqual(copied, [(self.log / "service-key.pub").read_text().strip(), (work / "mine.pub").read_text().strip()])
+        # A file without a final line break, or with CRLF, does not run into the next key.
+        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "second", "-f", str(work / "two")], check=True)
+        mine, two = (work / "mine.pub").read_text().strip(), (work / "two.pub").read_text().strip()
+        (work / "mine.pub").write_text(mine)
+        (work / "two.pub").write_text(two + "\r\n\r\n")
+        (self.log / "service-key.pub").write_text((self.log / "service-key.pub").read_text().strip())
+        status, output = self.run_wrapper(f"labadmin@{FIRST}", "--keep-password", "--extra-key", str(work / "mine.pub"),
+                                          "--extra-key", str(work / "two.pub"))
+        self.assertEqual(status, 0, output)
+        self.assertEqual((self.log / "remote" / "svc_ansible.pub").read_text(),
+                         "".join(line + "\n" for line in ((self.log / "service-key.pub").read_text(), mine, two)))
         for arguments, message in ((("--extra-key", str(work / "missing.pub")), "Cannot read the key file"),
                                    (("--extra-key", str(work / "mine")), "is a private key; give its .pub file."),
                                    (("--extra-key", str(self.log / "ssh")), "is not a public key ssh-keygen can read.")):

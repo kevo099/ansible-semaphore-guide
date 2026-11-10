@@ -63,8 +63,9 @@ shows every branch with the file for each step.
 ### The short path
 
 What you type, after Stage 0 gave you a controller VM, for **one machine that
-already exists**. On the controller, as your administrator; read the plan
-before `--apply`, and use `install-controller-el9.sh` on Enterprise Linux:
+already exists**. On the controller, as your administrator; install `git`
+first where the image lacks it, read the plan before `--apply`, and use
+`install-controller-el9.sh` on Enterprise Linux:
 
 ```bash
 git clone https://github.com/kevo099/ansible-semaphore-guide.git ~/ansible-semaphore-guide
@@ -75,8 +76,10 @@ bash controller/onboard-target.sh ADMIN@VM_ADDRESS
 sudo python3.12 controller/lab-sudo.py
 ```
 
-Then, in Semaphore, run **Ping** and **Baseline preview** on the **Lessons**
-tab. For **one new VM** instead, the last two commands become these three:
+Then [open Semaphore](docs/stage-1-controller.md#do-open-semaphore) and run
+**Ping** and **Baseline preview** on the **Lessons** tab. The fifth command
+needs SSH from the controller to the machine as its administrator. For **one
+new VM** instead, the last two commands become these three:
 fill the cloud-init file with the sudo password's hash; give the file to the
 VM at its creation, as Stage 3 shows for your platform; then add the VM from
 the lines its console prints, and give Semaphore the password:
