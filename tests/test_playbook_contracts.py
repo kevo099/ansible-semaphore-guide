@@ -373,6 +373,21 @@ class PrivilegeTests(unittest.TestCase):
                         self.assertTrue(task["name"] in self.PROBES or task.get("delegate_to") == "localhost")
 
 
+    def test_no_option_is_split_by_a_comma_in_a_bracketed_list(self):
+        # YAML reads [df, --output=size,used] as three items. Every option that takes a
+        # comma-separated value must therefore arrive whole, and no item may be a bare word
+        # that only makes sense as the rest of such a value.
+        for name in ("report.yml", "reboot.yml"):
+            for play in tasks(f"playbooks/{name}"):
+                for task in play.get("pre_tasks", []) + play.get("tasks", []) + play.get("post_tasks", []):
+                    command = task.get("ansible.builtin.command")
+                    if not isinstance(command, dict) or "argv" not in command:
+                        continue
+                    with self.subTest(playbook=name, task=task["name"]):
+                        self.assertTrue(all(isinstance(item, str) for item in command["argv"]), command["argv"])
+                        if command["argv"][0] == "df":
+                            self.assertEqual(command["argv"], ["df", "--output=size,used,avail,pcent", "--block-size=1M", "/"])
+
     def test_the_health_report_never_asks_for_sudo(self):
         # It runs right after Ping, before Semaphore holds a sudo password.
         play = tasks("playbooks/report.yml")[0]

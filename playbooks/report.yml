@@ -88,7 +88,8 @@
 
     - name: Measure the root file system
       ansible.builtin.command:
-        argv: [df, --output=size,used,avail,pcent, --block-size=1M, /]
+        # Quoted: in a YAML list in brackets, a bare comma would split the option.
+        argv: [df, '--output=size,used,avail,pcent', --block-size=1M, /]
       register: report_root_fs
       changed_when: false
       check_mode: false
