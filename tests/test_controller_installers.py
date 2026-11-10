@@ -56,7 +56,7 @@ class InstallerPlanTests(unittest.TestCase):
                     result = self.run_installer(installer, *arguments)
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                     self.assertRegex(result.stdout, r"(?m)^Plan:")
-                    self.assertIn("22 scoped task templates", result.stdout)
+                    self.assertIn("24 scoped task templates", result.stdout)
                     self.assertIn("local folder", result.stdout)
                     self.assertFalse((self.work / "unused-lab").exists())
 

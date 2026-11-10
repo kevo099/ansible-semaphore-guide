@@ -47,6 +47,16 @@ RECOVERY_PROMPT = [{
     "values": [{"name": "SNAPSHOT READY - apply the vendor STIG fixes to this target", "value": "SNAPSHOT READY"}],
 }]
 
+# playbooks/reboot.yml reboots only with this answer; check mode needs none.
+REBOOT_PROMPT = [{
+    "name": "reboot_target_ack",
+    "title": "Reboot the target in Limit now",
+    "description": "Its services stop and anyone using it is disconnected for a few minutes.",
+    "type": "enum",
+    "required": True,
+    "values": [{"name": "REBOOT NOW - restart this one target", "value": "REBOOT NOW"}],
+}]
+
 # Ansible options for each template. The playbooks' preflight requires an explicit
 # limit; this release passes the template's Limit option to ansible-playbook as --limit.
 ALL_LAB_TARGETS = {"limit": ["lab"]}
@@ -101,7 +111,11 @@ LESSONS = [
     ("Patch preview", "playbooks/patch.yml", ["--check", "--diff"], "Practice defaults", [], ALL_LAB_TARGETS),
     ("Patch, no reboot", "playbooks/patch.yml", [], "Practice defaults", [], ALL_LAB_TARGETS),
     ("Patch, allow required reboot", "playbooks/patch.yml", [], "Allow required reboot", [], ALL_LAB_TARGETS),
-] + [lesson for system in STIG_SYSTEMS for lesson in stig_lessons(*system)]
+] + [lesson for system in STIG_SYSTEMS for lesson in stig_lessons(*system)] + [
+    # Day-to-day jobs. The health report reads without sudo, so it works right after Ping.
+    ("Health report", "playbooks/report.yml", [], "Practice defaults", [], ALL_LAB_TARGETS),
+    ("Reboot one target", "playbooks/reboot.yml", [], "Practice defaults", REBOOT_PROMPT, ONE_TARGET_PER_RUN),
+]
 
 VARIABLE_GROUPS = {
     "Practice defaults": {},
@@ -114,10 +128,15 @@ VARIABLE_GROUPS = {
 
 
 # Template tabs, which Semaphore calls views. Every seeded template belongs to one.
+# An update adds a missing tab after the last existing one and never moves a tab,
+# so a tab a release adds comes last here too: fresh and updated controllers then
+# show the same order.
 VIEWS = [
     ("Lessons", ["Ping", "Baseline preview", "Baseline apply", "Users", "Webserver"]),
     ("Patching", ["Patch preview", "Patch, no reboot", "Patch, allow required reboot"]),
-] + [(stig_tab(system[0]), [lesson[0] for lesson in stig_lessons(*system)]) for system in STIG_SYSTEMS]
+] + [(stig_tab(system[0]), [lesson[0] for lesson in stig_lessons(*system)]) for system in STIG_SYSTEMS] + [
+    ("Operations", ["Health report", "Reboot one target"]),
+]
 VIEW_OF = {name: title for title, names in VIEWS for name in names}
 
 # What releases before 1.7.0 seeded and the per-system STIG tabs replace, with the

@@ -1,0 +1,172 @@
+---
+# Read-only. Without sudo it runs right after Ping, before Semaphore holds a
+# sudo password, and it never changes a host, with or without check mode.
+# Something that needs attention is reported, never failed; a host fails only
+# when it cannot be read.
+- name: Report the health of each lab machine
+  hosts: lab
+  become: false
+  gather_facts: false
+  vars:
+    # At or above these, the last line asks for attention.
+    report_disk_limit: 90
+    report_memory_limit: 90
+    # The failed units named in the summary; the count covers all of them.
+    report_units_shown: 5
+    # Worked out from what the tasks below read, when the summary uses them.
+    report_seconds: "{{ (report_uptime.content | b64decode).split()[0] | float | int }}"
+    report_uptime_text: >-
+      {{ '%d d %d h %d min' | format(report_seconds | int // 86400, report_seconds | int % 86400 // 3600,
+         report_seconds | int % 3600 // 60) }}
+    report_meminfo_text: "{{ report_meminfo.content | b64decode }}"
+    report_memory_total: >-
+      {{ (report_meminfo_text | regex_search('MemTotal:\s+(\d+)', '\1') or ['0']) | first | int // 1024 }}
+    report_memory_available: >-
+      {{ (report_meminfo_text | regex_search('MemAvailable:\s+(\d+)', '\1') or ['0']) | first | int // 1024 }}
+    report_memory_percent: >-
+      {{ (100 - report_memory_available | int * 100 / report_memory_total | int) | round | int
+         if report_memory_total | int > 0 else 0 }}
+    # df prints a header, then size, used, available and use%, in MiB.
+    report_root: "{{ report_root_fs.stdout_lines[-1].split() }}"
+    report_root_percent: "{{ report_root[3] | replace('%', '') | int }}"
+    report_failed_units: >-
+      {{ report_failed.stdout_lines | default([]) | map('regex_replace', '^[●\s]*(\S+).*$', '\1')
+         | select | list }}
+    report_failed_text: >-
+      {{ 'unknown, systemctl could not list them' if report_failed.rc | default(1) != 0
+         else (report_failed_units | length) ~ ((': ' ~ report_failed_units[:report_units_shown] | join(', ')
+         ~ (', ...' if report_failed_units | length > report_units_shown else '')) if report_failed_units else '') }}
+    # The newest kernel is the one installed last, as dnf installs kernels side by side.
+    report_kernel_newest: >-
+      {{ (report_kernels.stdout_lines | sort | last).split()[1]
+         if report_kernels.rc | default(1) == 0 and report_kernels.stdout_lines | default([]) else '' }}
+    report_reboot: >-
+      {{ ('yes' if report_reboot_marker.stat.exists | default(false) else 'no')
+         if ansible_facts['os_family'] == 'Debian'
+         else ('unknown' if report_kernel_newest == '' else ('no' if report_kernel_newest == ansible_facts['kernel']
+         else 'yes')) }}
+    report_reboot_text: >-
+      {{ report_reboot ~ (' (running ' ~ ansible_facts['kernel'] ~ ', newest installed ' ~ report_kernel_newest ~ ')'
+         if report_reboot == 'yes' and ansible_facts['os_family'] == 'RedHat' else '') }}
+    report_time: >-
+      {{ 'unknown' if report_clock.rc | default(1) != 0
+         else ('synchronized' if 'NTPSynchronized=yes' in report_clock.stdout_lines
+         else 'not synchronized, time service ' ~ ('active' if 'NTP=yes' in report_clock.stdout_lines else 'inactive')) }}
+    # -1 means not checked: the local package data could not be read without sudo.
+    report_packages: "{{ report_apt if ansible_facts['os_family'] == 'Debian' else report_dnf }}"
+    report_update_count: >-
+      {{ -1 if report_packages.rc | default(1) != 0
+         else (report_packages.stdout_lines | select('match', 'Inst ') | list | length
+         if ansible_facts['os_family'] == 'Debian' else report_packages.stdout_lines | select | unique | list | length) }}
+    report_updates_text: >-
+      {{ 'not checked; the local package data could not be read without sudo' if report_update_count | int < 0
+         else (report_update_count | string if report_update_count | int > 0 else 'none') }}
+    report_attention: >-
+      {{ (['root file system ' ~ report_root_percent ~ '% full'] if report_root_percent | int >= report_disk_limit else [])
+         + (['memory ' ~ report_memory_percent ~ '% used'] if report_memory_percent | int >= report_memory_limit else [])
+         + (['failed systemd units could not be listed'] if report_failed.rc | default(1) != 0
+         else ([(report_failed_units | length) ~ ' failed systemd unit(s)'] if report_failed_units else []))
+         + (['reboot pending'] if report_reboot == 'yes' else [])
+         + (['reboot need unknown'] if report_reboot == 'unknown' else [])
+         + (['time synchronization unknown'] if report_time == 'unknown'
+         else (['clock ' ~ report_time] if report_time != 'synchronized' else []))
+         + ([(report_update_count | string) ~ ' package update(s) pending'] if report_update_count | int > 0 else []) }}
+  pre_tasks:
+    - name: Check scope and supported operating system
+      ansible.builtin.import_tasks: tasks/preflight.yml
+      tags: always
+  tasks:
+    - name: Read the uptime
+      ansible.builtin.slurp:
+        src: /proc/uptime
+      register: report_uptime
+
+    - name: Read the memory counters
+      ansible.builtin.slurp:
+        src: /proc/meminfo
+      register: report_meminfo
+
+    - name: Measure the root file system
+      ansible.builtin.command:
+        argv: [df, --output=size,used,avail,pcent, --block-size=1M, /]
+      register: report_root_fs
+      changed_when: false
+      check_mode: false
+
+    # The probes below may fail without failing the host; the summary then says unknown.
+    # No module lists failed units, and listing them needs no sudo.
+    - name: List the failed systemd units # noqa: command-instead-of-module
+      ansible.builtin.command:
+        argv: [systemctl, list-units, --state=failed, --plain, --no-legend, --no-pager]
+      register: report_failed
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Look for the Ubuntu reboot marker
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+      register: report_reboot_marker
+      when: ansible_facts['os_family'] == 'Debian'
+
+    # patch.yml asks dnf needs-restarting, which needs dnf-plugins-core and sudo.
+    # Here the running kernel is compared with the newest installed one instead.
+    - name: List the installed Enterprise Linux kernels # noqa: command-instead-of-module
+      ansible.builtin.command:
+        argv: [rpm, -q, --queryformat, '%{INSTALLTIME} %{VERSION}-%{RELEASE}.%{ARCH}\n', kernel-core]
+      register: report_kernels
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      when: ansible_facts['os_family'] == 'RedHat'
+
+    - name: Ask systemd whether the clock is synchronized
+      ansible.builtin.command:
+        argv: [timedatectl, show, --property=NTP, --property=NTPSynchronized]
+      register: report_clock
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    # Both counts read only the package data already on the host: nothing is
+    # downloaded or locked. timeout keeps a stuck package tool from holding the report.
+    - name: Count pending Ubuntu updates from the local package lists
+      ansible.builtin.command:
+        argv: [timeout, '120', apt-get, --simulate, --quiet, dist-upgrade]
+      register: report_apt
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      when: ansible_facts['os_family'] == 'Debian'
+
+    # dnf --cacheonly lets an account without sudo read the system's metadata cache.
+    - name: Count pending Enterprise Linux updates from the cached metadata
+      ansible.builtin.command:
+        argv: [timeout, '120', dnf, --cacheonly, --quiet, repoquery, --upgrades, --latest-limit=1,
+               --queryformat, '%{name}.%{arch}']
+      register: report_dnf
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      when: ansible_facts['os_family'] == 'RedHat'
+
+    - name: Summarize each host
+      ansible.builtin.debug:
+        msg:
+          - >-
+            {{ inventory_hostname }}: {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }},
+            kernel {{ ansible_facts['kernel'] }}, up {{ report_uptime_text }}
+          - >-
+            Root file system: {{ report_root_percent }}% used, {{ report_root[2] }} MiB free of {{ report_root[0] }} MiB.
+            Memory: {{ report_memory_percent }}% used, {{ report_memory_available }} MiB available of
+            {{ report_memory_total }} MiB.
+          - "Failed systemd units: {{ report_failed_text }}"
+          - "Reboot pending: {{ report_reboot_text }}"
+          - "Time: {{ report_time }}"
+          - "Pending package updates: {{ report_updates_text }}"
+
+    - name: Say whether each host needs attention
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }}: {{ 'OK' if not report_attention
+          else 'needs attention: ' ~ report_attention | join('; ') }}

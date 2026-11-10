@@ -188,6 +188,15 @@ controller_seed_lab() {
   ssh-keygen -q -t rsa -b 4096 -N '' -C ansible-practice -f /etc/semaphore/svc_ansible
   chmod 0600 /etc/semaphore/svc_ansible
   chmod 0644 /etc/semaphore/svc_ansible.pub
+  # A copy of the public key in the editor's home, where the onboarding steps look
+  # for it. The editor writes it, so a link planted there cannot redirect root.
+  editor_home=$(getent passwd "$editor" | cut -d: -f6) || editor_home=
+  key_copy=
+  # shellcheck disable=SC2016  # expanded by the editor's own shell
+  if [[ -d "$editor_home" ]] && runuser -u "$editor" -- /bin/sh -c 'umask 022 && cat > "$1"' _ "$editor_home/svc_ansible.pub" \
+       < /etc/semaphore/svc_ansible.pub; then
+    key_copy=$editor_home/svc_ansible.pub
+  fi
 
   # 11. Local lab folder owned by the editor, readable by the service
   (umask 022; mkdir -p -- "$(dirname -- "$lab_dir")")
@@ -258,9 +267,11 @@ controller_finish() {
     fi
   fi
 
-  printf '\nController installed and seeded. Next: authorize the automation key on each target\n'
-  printf 'and add each target with its verified host key (controller/add-target.sh --lab-dir %s).\n' "$lab_dir"
-  printf 'Automation public key: /etc/semaphore/svc_ansible.pub\n'
+  printf '\nController installed and seeded. Next: prepare each target and add it with its verified\n'
+  printf 'host key. For a machine that already exists, as your administrator in this folder:\n'
+  printf '  bash controller/onboard-target.sh ADMIN@ADDRESS%s\n' "$([[ $lab_dir == /opt/ansible-lab ]] || printf ' --lab-dir %q' "$lab_dir")"
+  printf 'README.md lists the other ways, and cloud-init for new VMs.\n'
+  printf 'Automation public key: /etc/semaphore/svc_ansible.pub%s\n' "${key_copy:+ (a copy is in $key_copy)}"
   printf 'Local lab folder (edit as %s): %s\n' "$editor" "$lab_dir"
   printf 'The initial admin password is in /etc/semaphore/initial-admin-password (root only).\n'
   if [[ -n "$exposure_failed" ]]; then

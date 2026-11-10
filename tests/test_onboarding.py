@@ -369,11 +369,94 @@ class CloudInitTests(AddTargetInfoMixin, unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         return result.stdout.splitlines()
 
+    def set_password(self, content, chpasswd='cat >"$SHADOW"'):
+        """Run the password block with its hash file holding content, or absent for None.
+
+        The stand-in chpasswd stores its input as the shadow line getent then reports.
+        Returns the output, what chpasswd received, whether the file is left and its path.
+        """
+        block = section(CLOUD_SCRIPT, "# fill-cloud-init.sh --with-password adds", "# cloud-init drops a key")
+        with tempfile.TemporaryDirectory() as work:
+            hash_file = Path(work, "ansible-lab-onboard.hash")
+            self.assertEqual(block.count("/run/ansible-lab-onboard.hash"), 1)
+            block = block.replace("/run/ansible-lab-onboard.hash", str(hash_file))
+            if content is not None:
+                hash_file.write_text(content)
+                hash_file.chmod(0o600)
+            shadow = Path(work, "shadow")
+            commands = {"chpasswd": f'[ "$*" = -e ] || exit 2; {chpasswd}',
+                        "getent": '[ "$*" = "shadow svc_ansible" ] && [ -f "$SHADOW" ] && cat "$SHADOW"'}
+            script = ('set -u\nfailed=\nproblem() { echo "onboard: ERROR: $*"; failed=yes; }\n' + block
+                      + 'echo "failed=$failed password_set=$password_set"\n')
+            result = run_bash(script, stand_ins(work, commands), {"SHADOW": str(shadow)})
+            received = shadow.read_text() if shadow.exists() else None
+            return result.stdout + result.stderr, received, hash_file.exists(), str(hash_file)
+
+    def test_a_password_hash_is_set_and_its_file_removed(self):
+        applied = "onboard: set svc_ansible's sudo password from the hash fill-cloud-init.sh added\n"
+        rounds = "$6$rounds=5000$saltsalt$" + "b" * 86
+        # cloud-init writes the content without a newline; one at the end changes nothing.
+        for content, expected in ((HASH, HASH), (HASH + "\n", HASH), (rounds, rounds)):
+            with self.subTest(content=content):
+                output, received, left, _ = self.set_password(content)
+                self.assertEqual(output, applied + "failed= password_set=yes\n")
+                self.assertEqual(received, f"svc_ansible:{expected}\n")
+                self.assertFalse(left)
+
+    def test_without_a_hash_file_no_password_is_set(self):
+        output, received, left, _ = self.set_password(None)
+        self.assertEqual((output, received, left), ("failed= password_set=\n", None, False))
+
+    def test_an_invalid_hash_is_an_error_and_its_file_still_removed(self):
+        for content in ("", "not a hash", "$1$saltsalt$" + "a" * 22, "!" + HASH, f"{HASH}\n{HASH}",
+                        "$6$rounds=999$saltsalt$" + "a" * 86, HASH + " "):
+            with self.subTest(content=content):
+                output, received, left, path = self.set_password(content)
+                self.assertEqual(output, f"onboard: ERROR: {path} did not hold a SHA-512 crypt hash;"
+                                         " no password was set\nfailed=yes password_set=\n")
+                self.assertIsNone(received)
+                self.assertFalse(left)
+
+    def test_a_failed_chpasswd_or_a_still_locked_account_is_an_error(self):
+        cases = {"exit 1": "onboard: ERROR: chpasswd could not set svc_ansible's password\n",
+                 # As if the field kept its lock: the hash behind a !.
+                 'sed "s/:/:!/" >"$SHADOW"': "onboard: ERROR: svc_ansible's password field is not the given hash;"
+                                             " the account may still be locked\n"}
+        for chpasswd, message in cases.items():
+            with self.subTest(chpasswd=chpasswd):
+                output, _, left, _ = self.set_password(HASH, chpasswd)
+                self.assertEqual(output, message + "failed=yes password_set=\n")
+                self.assertNotIn(HASH, output)
+                self.assertFalse(left)
+
+    def test_the_password_is_set_after_the_account_exists_in_either_mode(self):
+        # Whether cloud-init applied the users: list (user data) or the script created the
+        # account (vendor data), the hash is applied afterwards, to the same account.
+        created = CLOUD_SCRIPT.index('rm -f "$spare"')
+        applied = CLOUD_SCRIPT.index("# fill-cloud-init.sh --with-password adds")
+        self.assertLess(created, applied)
+        self.assertLess(applied, CLOUD_SCRIPT.index("# cloud-init drops a key"))
+        self.assertTrue(CLOUD_INIT["users"][1]["lock_passwd"])
+        # Only through chpasswd's standard input, never on a command line.
+        code = [line.strip() for line in CLOUD_SCRIPT.splitlines() if not line.lstrip().startswith("#")]
+        self.assertFalse([line for line in code if re.search(r"usermod|--password|(?<!getent )\bpasswd\b", line)])
+        self.assertEqual([line for line in code if "chpasswd -" in line],
+                         ["elif ! printf 'svc_ansible:%s\\n' \"$password_hash\" | chpasswd -e; then"])
+
+    def test_the_ready_message_says_whether_the_password_was_set(self):
+        ready = section(CLOUD_SCRIPT, 'if [ -n "$password_set" ]; then', "# The values add-target.sh --from-info reads")
+        for password_set, message in (("yes", "onboard: svc_ansible is ready, with its sudo password set\n"),
+                                      ("", "onboard: svc_ansible is ready; set its sudo password next\n")):
+            with self.subTest(password_set=password_set):
+                result = run_bash(f"set -u\npassword_set={password_set}\n" + ready)
+                self.assertEqual(result.stdout, message)
+
     def test_a_successful_run_ends_with_the_lines_for_add_target(self):
         # The block follows the ready message and ends the script.
-        ready = 'echo "onboard: svc_ansible is ready; set its sudo password next"\n'
+        ready = section(CLOUD_SCRIPT, 'if [ -n "$password_set" ]; then', "# The values add-target.sh --from-info reads")
         closing = section(CLOUD_SCRIPT, "# The values add-target.sh --from-info reads")
-        self.assertTrue(CLOUD_SCRIPT.endswith(ready + closing))
+        # Only after the check for errors, which stops the script.
+        self.assertTrue(CLOUD_SCRIPT.endswith('  exit 1\nfi\n' + ready + closing))
         self.assertInfoLines(self.final_lines([f"{TEST_NET}.12"]), prefix="onboard: ", name="lab-alma",
                              address=f"{TEST_NET}.12", group="enterprise_linux", fingerprint=FINGERPRINT)
 
@@ -399,6 +482,11 @@ class CloudInitTests(AddTargetInfoMixin, unittest.TestCase):
         lines = self.final_lines([], fingerprint=fingerprint)
         self.assertAddTargetAdds(log + "\n".join(lines) + "\n", key, f"lab-alma ansible_host={TEST_NET}.14",
                                  options=("--address", f"{TEST_NET}.14"))
+        # With a password hash from fill-cloud-init.sh, its two lines are only text too.
+        log = ("onboard: set svc_ansible's sudo password from the hash fill-cloud-init.sh added\n"
+               "onboard: svc_ansible is ready, with its sudo password set\n")
+        lines = self.final_lines([f"{TEST_NET}.12"], fingerprint=fingerprint)
+        self.assertAddTargetAdds(log + "\n".join(lines) + "\n", key, f"lab-alma ansible_host={TEST_NET}.12")
 
 
 class OnboardScriptTests(AddTargetInfoMixin, unittest.TestCase):
