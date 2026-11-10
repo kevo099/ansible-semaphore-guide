@@ -257,4 +257,4 @@ else
 fi
 echo "Next: run the Ping template, which covers every host in the lab group. If $name fails with Permission denied (publickey),"
 echo "svc_ansible on $name lacks the key 'sudo cat /etc/semaphore/svc_ansible.pub' shows; if sudo asks for a"
-echo "password, give Semaphore the targets' sudo password, as docs/stage-4-add-target-first-job.md shows."
+echo "password, give Semaphore the targets' sudo password: sudo python3.12 controller/lab-sudo.py"
