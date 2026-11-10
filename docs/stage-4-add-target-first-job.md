@@ -282,7 +282,7 @@ a new target and at the start of any later session. It reads each host in
 ```text
 ok: [lab-alma] => {
     "msg": [
-        "lab-alma: AlmaLinux 9.6, kernel 5.14.0-570.el9_6.x86_64, up 0 d 1 h 12 min",
+        "lab-alma: AlmaLinux 9.8, kernel 5.14.0-687.61.1.el9_8.x86_64, up 0 d 1 h 12 min",
         "Root file system: 9% used, 36211 MiB free of 40140 MiB. Memory: 21% used, 2296 MiB available of 2916 MiB.",
         "Failed systemd units: 0",
         "Reboot pending: no",
@@ -379,7 +379,8 @@ in its first output), then remove the sudo rule and the SSH drop-in and check
 both configurations before SSH reloads:
 
 ```bash
-sudo pkill -u svc_ansible
+sudo loginctl terminate-user svc_ansible
+sudo pkill -KILL -u svc_ansible
 sudo userdel -r svc_ansible
 sudo rm /etc/sudoers.d/90-ansible-lab
 sudo visudo -c
@@ -388,12 +389,16 @@ sudo sshd -t
 sudo systemctl reload ssh
 ```
 
-On Enterprise Linux, reload `sshd` in place of `ssh`. `pkill` prints nothing
-and returns 1 when the account runs nothing. Leave out `userdel` for an
+On Enterprise Linux, reload `sshd` in place of `ssh`. The first two lines end
+the account's sessions, such as a connection the controller still holds open;
+`loginctl` complains when the account is not logged in, and `pkill` prints
+nothing and returns 1 when it runs nothing. If `userdel` says the account
+`is currently used by process`, its processes are still ending: wait a few
+seconds and run that line again. On Ubuntu it also notes that there is no mail
+spool, which is harmless. Leave out `userdel` for an
 account that existed before the onboarding; then remove its
 `~svc_ansible/.ssh/authorized_keys` instead, which holds the service key.
 
-<!-- VERIFY-LIVE: the by-hand removal on Ubuntu 24.04 and an EL9 target: userdel -r after pkill, visudo -c and sshd -t pass, and the reload names ssh on Ubuntu and sshd on EL9 -->
 
 **A rebuilt or restored target at the same address** presents new host keys.
 Your own `~/.ssh/known_hosts` and the service's known-hosts file both still

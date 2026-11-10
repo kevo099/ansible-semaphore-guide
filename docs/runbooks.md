@@ -30,7 +30,10 @@ second command is needed once for the lab: skip it when Semaphore already holds
 that password. Then, in Semaphore, run **Ping** and **Baseline preview** on the
 **Lessons** tab, and **Health report** on the **Operations** tab.
 [Stage 2](stage-2-existing-machines.md#do-onboard-it-in-one-command-from-the-controller)
-explains every prompt.
+explains every prompt. The command makes the controller's service key the
+account's only login; to log in as `svc_ansible` with your own key too, for
+the command-line lessons, add `--extra-key ~/.ssh/ansible_lab.pub`, on every
+run for that machine.
 
 **Check:** the command ends with `Prepared and in the inventory: ADMIN@VM_ADDRESS`;
 Ping and Baseline preview show `failed=0` for the new host; the Health report
@@ -97,7 +100,6 @@ at its first boot.
    own address with `qm set NEW_VMID --ipconfig0 ...` if you use fixed ones),
    start it and watch its console; Ctrl-O leaves the console:
 
-   <!-- VERIFY-LIVE: qm clone from the template with --name gives each clone its own hostname, MAC address and cloud-init instance ID, keeps the cicustom vendor data, and every clone prepares itself at first boot -->
    ```bash
    qm clone TEMPLATE_VMID NEW_VMID --name NAME
    qm start NEW_VMID

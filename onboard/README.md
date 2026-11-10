@@ -16,7 +16,8 @@ yourself: on the controller, `bash controller/onboard-target.sh ADMIN@ADDRESS`
 ([the script](../controller/onboard-target.sh)) copies `existing/onboard-linux.sh` and the service key to the machine over SSH,
 runs it there with `sudo`, and adds the machine to the lab inventory, as
 [Stage 2](../docs/stage-2-existing-machines.md#do-onboard-it-in-one-command-from-the-controller)
-shows. The table lists the files for the other ways.
+shows. Its `--extra-key FILE` option authorizes one more public key, such as
+your own, beside the service key. The table lists the files for the other ways.
 
 | File | Stage | Use it when | Where it runs |
 | --- | --- | --- | --- |
