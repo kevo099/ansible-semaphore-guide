@@ -7,12 +7,21 @@ a VM you are about to create, [Stage 3](stage-3-new-vms-cloud-init.md) prepares
 it at first boot instead; both stages end at the same place and hand off to
 Stage 4. Do this stage once per machine.
 
+The main way is one command on the controller: it prepares the machine over
+SSH and adds it to the lab inventory in the same run, so
+[Stage 4](stage-4-add-target-first-job.md) then starts at
+[giving Semaphore the sudo password](stage-4-add-target-first-job.md#do-give-semaphore-the-sudo-password).
+The other ways on this page do the same preparation by hand, from the console,
+with Ansible, or through Azure, and leave the adding to Stage 4.
+
 ## Goal
 
 The machine has the automation account `svc_ansible`, which logs in with the
-controller's service key only and uses sudo with its own password. You have
-the four lines the controller needs, `name=`, `address=`, `group=` and
-`fingerprint=`, and you know the sudo password you gave the account.
+controller's service key only and uses sudo with its own password, and you
+know that password. With the one command, the controller's inventory also
+lists the machine and trusts its verified host key. With the other ways, you
+have the four lines the controller needs, `name=`, `address=`, `group=` and
+`fingerprint=`.
 
 ## Before you start
 
@@ -22,11 +31,6 @@ the four lines the controller needs, `name=`, `address=`, `group=` and
   updates and STIG remediation, and can reboot it. Use a machine you can lose or rebuild, never one that runs
   something you need, and never the controller itself. Keep its console, and a
   snapshot or backup, as a way back that does not depend on SSH.
-- **The service key copy.** Stage 1 ends with a copy of the service key in your
-  home folder on the controller, `~/svc_ansible.pub`. If it is missing, make it
-  again on the controller with
-  `sudo cat /etc/semaphore/svc_ansible.pub > ~/svc_ansible.pub`; it is one
-  line that starts with `ssh-rsa`.
 - **The guide's folder** on the controller, `~/ansible-semaphore-guide`, from
   Stage 1. The commands below that run on the controller start there.
 - **A way to get root on the machine:** an administrator account you can log in
@@ -37,37 +41,198 @@ the four lines the controller needs, `name=`, `address=`, `group=` and
   needs is missing, because they install it from the system's repositories:
   `python3`, `sudo` and `openssh-server` everywhere, `python3-apt` on Ubuntu,
   `python3-dnf` and `python3-libselinux` on Enterprise Linux.
-- **The controller's IP address,** which `hostname -I` prints on the
-  controller. On a lab with one network it is the only address shown.
+- **For the ways by hand only:** the copy of the service key in your home
+  folder on the controller, `~/svc_ansible.pub`, which the installer leaves
+  there (on a controller installed earlier, make it with
+  `sudo cat /etc/semaphore/svc_ansible.pub > ~/svc_ansible.pub`), and the
+  controller's IP address, which `hostname -I` prints on the controller. The
+  one command reads both itself.
 
 Pick one way for this machine:
 
 | You have | Use |
 | --- | --- |
-| SSH from the controller to the machine as its administrator, with a password or a key | [The onboarding script over SSH](#do-run-the-onboarding-script-over-ssh) |
+| SSH from the controller to the machine as its administrator, with a password or a key | [One command from the controller](#do-onboard-it-in-one-command-from-the-controller), the default |
+| The same, and you want to run each step yourself, or authorize a key of your own beside the service key | [The onboarding script over SSH](#do-run-the-onboarding-script-over-ssh) |
 | Only the machine's console | [The onboarding script from the console](#do-run-the-onboarding-script-from-the-console) |
 | SSH from the controller as the administrator with a key, its host key pinned, and you prefer Ansible | [The bootstrap playbook](#do-let-the-controller-do-it-with-the-bootstrap-playbook) |
-| An Azure VM and no SSH path yet | [Run Command](platform-azure.md#do-onboard-an-existing-vm-with-run-command) on the Azure page |
+| An Azure VM and no SSH path yet | [Run Command](#azure-run-command), on the Azure page |
 
-Every way makes the same changes and is safe to run again. Doing the same by
-hand, step by step, is [SSH, sudo and the automation account by hand](manual-access.md).
+Every way makes the same changes on the machine and is safe to run again.
+Doing the same by hand, step by step, is
+[SSH, sudo and the automation account by hand](manual-access.md).
+
+## Do: onboard it in one command from the controller
+
+**Where: the controller, as your administrator account, in the guide's
+folder. Do not use `sudo` and do not run it as root:** it logs in to the
+machine with your own SSH keys and known hosts, and asks for `sudo` itself
+where it needs it.
+
+```bash
+cd ~/ansible-semaphore-guide
+bash controller/onboard-target.sh ADMIN@VM_ADDRESS
+```
+
+`ADMIN` is the machine's administrator, and `VM_ADDRESS` the IP address or DNS
+name the controller will use for it from now on; that exact address goes into
+the inventory. [`controller/onboard-target.sh`](../controller/onboard-target.sh)
+copies [`onboard-linux.sh`](../onboard/existing/onboard-linux.sh) and the
+service key to a temporary folder on the machine, runs the script there with
+`sudo`, removes the folder, and gives the machine's `name=`, `group=` and
+`fingerprint=` lines, with the address you typed, to
+`sudo bash controller/add-target.sh --from-info`, which checks them and adds
+the machine.
+
+It asks, in this order:
+
+1. **Your `sudo` password on the controller**, after
+   `Reading the service key /etc/semaphore/svc_ansible.pub, which needs sudo on this controller.`
+2. **The shared sudo password for `svc_ansible`**, once for the whole run:
+
+   ```text
+   The sudo password that svc_ansible gets on these machines: one shared lab password,
+   which Semaphore needs once afterwards. Save it in your password manager.
+   Sudo password for svc_ansible, 12 characters or more:
+   The same password again:
+   ```
+
+   Use **one shared sudo password for every lab target**, at least 12
+   characters; Semaphore then needs it only once, in Stage 4. **Save it in
+   your password manager now**: nothing in the guide can show it to you again.
+   Nothing is shown as you type. The controller hashes it with `openssl` and
+   sends the machine only the SHA-512 hash, in a file the script removes when
+   it ends.
+3. **SSH's own question about the machine's host key**, the first time your
+   account connects to that address. The command prints three lines first:
+
+   ```text
+   This account has not connected to VM_ADDRESS before. SSH shows its RSA key fingerprint next.
+   Compare it with the machine's console, sudo ssh-keygen -lf /etc/ssh/ssh_host_rsa_key.pub,
+   and answer yes only when they are the same.
+   ```
+
+   SSH then shows `RSA key fingerprint is SHA256:...` and asks whether to
+   continue. At the machine's console, logged in as its administrator, run
+   `sudo ssh-keygen -lf /etc/ssh/ssh_host_rsa_key.pub`; on Proxmox the node
+   can open that console, as
+   [the Proxmox page](platform-proxmox.md#do-read-a-vms-console-and-host-key-fingerprint-from-the-node)
+   shows. Answer `yes` only when the two values match character for character.
+   A different value means another machine answers at that address: answer
+   `no`, and find out why. If you pinned the key earlier, as
+   [the next section but one](#do-pin-the-vms-host-key-on-the-controller)
+   shows, SSH asks nothing.
+4. **The administrator's login password**, if that account logs in with a
+   password. The three steps on the machine share one connection, so you type
+   it once per machine.
+5. **The administrator's own `sudo` password on the machine**, as
+   `[sudo] password for ADMIN:`, unless its sudo needs none.
+6. **Your `sudo` password on the controller** again, when it adds the
+   machine, if `sudo` no longer remembers it.
+
+The machine's part ends with the script's output, as in
+[the SSH way](#do-run-the-onboarding-script-over-ssh), and `RESULT: OK`. That
+output still says to paste its last lines on the controller; here the command
+does that for you. The controller's part follows:
+
+```text
+Nothing to paste: this command passes those lines on. Adding VM_ADDRESS on this controller, which needs sudo here:
+Using name=lab-alma address=VM_ADDRESS group=enterprise_linux fingerprint=SHA256:...
+Added lab-alma (VM_ADDRESS) to /opt/ansible-lab/inventories/lab.ini under [enterprise_linux] and trusted its verified host key.
+
+Prepared and in the inventory: ADMIN@VM_ADDRESS
+Next: give Semaphore the sudo password once, sudo python3.12 controller/lab-sudo.py,
+then run the Ping and Baseline preview templates.
+```
+
+The machine is onboarded on its side and in the inventory. Go to
+[Stage 4: give Semaphore the sudo password](stage-4-add-target-first-job.md#do-give-semaphore-the-sudo-password);
+you do not need `add-target.sh` for it.
+
+**Several machines in one run.** Name each one; the password is asked once and
+given to all of them:
+
+```bash
+bash controller/onboard-target.sh ADMIN@VM_ADDRESS_1 ADMIN@VM_ADDRESS_2 ADMIN@VM_ADDRESS_3
+```
+
+The machines are prepared one after the other, each with its own host-key
+question. A machine that fails does not stop the others. The last lines list
+both outcomes, and the run then exits with status 1:
+
+```text
+Prepared and in the inventory: ADMIN@VM_ADDRESS_1 ADMIN@VM_ADDRESS_3
+Not finished: ADMIN@VM_ADDRESS_2
+```
+
+**A hostname the inventory reserves.** A machine whose short hostname is
+`localhost`, `all`, `ungrouped`, `lab`, `ubuntu` or `enterprise_linux`, or not a
+plain name, cannot keep it as its inventory name. Give it one with `--name`,
+for one machine per run:
+
+```bash
+bash controller/onboard-target.sh ADMIN@VM_ADDRESS --name lab-alma
+```
+
+**Keep the existing passwords.** `--keep-password` asks for no password and
+leaves each account's password as it is: use it when you run the command again
+for a machine whose password you do not want to change, or when you give the
+password another way. A new account then has none, the script reports
+`password: NOT SET`, and sudo waits until you set one: run the command again
+without the option.
+
+**Another lab folder.** If you installed with `--lab-dir DIR`, add the same
+`--lab-dir DIR`.
+
+**When it says `Not finished`.** The lines above it, under that machine's
+`=== ADMIN@VM_ADDRESS` header, say why:
+
+| Message | What to do |
+| --- | --- |
+| `Could not log in to ADMIN@VM_ADDRESS.` | SSH's own message above it says why: a wrong name or address, `Permission denied`, a host key you refused, or `REMOTE HOST IDENTIFICATION HAS CHANGED` for a machine that was rebuilt. See [When it fails](#when-it-fails). |
+| `The script did not finish on ADMIN@VM_ADDRESS; its last line above says why.` | The last line is `RESULT: FAILED: ...`, or the administrator's `sudo` refused. Fix what it names. |
+| `ADMIN@VM_ADDRESS is prepared, but add-target.sh did not add it; its message above says what it needs.` | The machine is ready; only adding it failed. When `add-target.sh` asked for a name, run the command again for that machine alone with `--name NAME`. |
+
+Then run the command again for the unfinished machines only. Running it again
+for a machine that is done is safe: the script reports what is unchanged,
+`add-target.sh` says `Already present: ...`, and a password you type again is
+set again, so type the same one, or pass `--keep-password`.
+
+**A key of your own as well.** The account's authorized keys become exactly
+the service key, and any other key is removed. To also log in as `svc_ansible`
+with a key of your own, as the [command-line lessons](05-cli-lessons.md) do,
+name its public half, and name it again on every later run for that machine:
+
+```bash
+bash controller/onboard-target.sh ADMIN@VM_ADDRESS --extra-key ~/.ssh/ansible_lab.pub
+```
+
+It needs a terminal: for the password, for SSH's host-key question and for a
+`sudo` prompt on the machine. Without one it stops with
+`Run it from a terminal to be asked for the sudo password, or pass --keep-password.`;
+with `--keep-password` it runs without a terminal only where nothing has to be
+asked: a pinned host key, key login, an administrator whose `sudo` on the
+machine needs no password, and your own `sudo` on the controller asking for
+none.
 
 ## Do: choose a sudo password and make its hash
 
 **Where: the controller, as your administrator account.**
 
-`svc_ansible` uses sudo with its own password. Choose that password now: at
-least 12 characters, because the bootstrap playbook refuses a shorter one. Use
-**one shared sudo password for every lab target**. Semaphore then needs it
+`svc_ansible` uses sudo with its own password. Use **one shared sudo password
+for every lab target**, at least 12 characters, because the bootstrap playbook
+and the script's `--ask-password` refuse a shorter one. Semaphore then needs it
 only once, as one credential, in Stage 4. Separate passwords per target are
-possible, but they need Ansible Vault; Stage 4 shows both.
+possible, but they need Ansible Vault; Stage 4 shows both. **Save the plain
+password in your password manager now.** Stage 4 needs it again, and you need
+it to use sudo as `svc_ansible` at the machine's console.
 
-**Save the plain password in your password manager now.** Stage 4 needs it
-again, in Semaphore's Key Store, and you need it to use sudo as `svc_ansible`
-at the machine's console. Nothing in the guide can show it to you again.
-
-The onboarding script never takes the password itself, only a SHA-512 hash of
-it. `openssl` makes one; it asks for the password twice and shows nothing:
+**Most ways need no hash.** The one command above, and the script's
+`--ask-password` in the SSH and console ways below, ask for the password and
+make the hash themselves; the bootstrap playbook asks for the password. Make
+a hash yourself only for [Run Command](platform-azure.md#do-onboard-an-existing-vm-with-run-command)
+and for [a copy of the script with its constants edited](#alternative-environment-variables-or-edited-constants).
+`openssl` makes one; it asks for the password twice and shows nothing:
 
 ```bash
 openssl passwd -6
@@ -75,23 +240,20 @@ openssl passwd -6
 
 It prints one line that starts with `$6$`. The hash cannot be turned back into
 the password, but it can be attacked offline, so keep it out of notes, chat
-and shared files. You can make it on any Linux machine with OpenSSL. The two
-script ways below make it on the target itself, as part of the run, so that you
-never copy it; use the line printed here when you edit the script's constants
-instead, or for [Run Command](platform-azure.md#do-onboard-an-existing-vm-with-run-command).
-The bootstrap playbook needs no hash: it asks for the password.
+and shared files.
 
-A script run without a hash keeps the account's existing password; a new
-account then has none, its output says `password: NOT SET`, and sudo waits
-until you run it again with a hash.
+A script run without a password or a hash keeps the account's existing
+password; a new account then has none, its output says `password: NOT SET`,
+and sudo waits until you run it again with one.
 
 ## Do: pin the VM's host key on the controller
 
 **Where: the machine's console, then the controller as your administrator
-account.** Do this before the first SSH connection from the controller to the
-machine, for the SSH and playbook ways. It makes sure that the machine you
-reach over the network is the one you see at its console, so that what it
-prints over SSH, the fingerprint included, can be trusted.
+account.** The bootstrap playbook needs this before its first connection; the
+one command asks SSH's question itself and needs it only if you prefer to
+check first. It makes sure that the machine you reach over the network is the
+one you see at its console, so that what it prints over SSH, the fingerprint
+included, can be trusted.
 
 At the machine's console, logged in as its administrator, read the RSA host
 key's fingerprint. On Proxmox, the node can open that console, as
@@ -131,10 +293,10 @@ explains the same check.
 
 ## Do: run the onboarding script over SSH
 
-**Where: the controller, then the machine, as its administrator.** Use this
-when you can log in from the controller to the machine as its administrator,
-with a password or a key. Pin its host key first, as the previous section
-shows.
+**Where: the controller, then the machine, as its administrator.** This is the
+one command's work, done step by step. Use it when you want to see each step,
+or to authorize a key of your own beside the service key. Pin the machine's
+host key first, as the previous section shows.
 
 On the controller, copy the script and the service key to the administrator's
 home folder on the machine, then log in:
@@ -150,49 +312,42 @@ another machine's key, such as your workstation's; see
 [manual access, step 3](manual-access.md#step-3-prepare-a-dedicated-target-account)
 for two ways around it, or use the console way below.
 
-Now, on the machine, in that SSH session, open a root shell. `sudo -s` keeps
-you in the home folder that holds the two files:
+On the machine, in that SSH session, run the script with its options, with
+`CONTROLLER_IP` replaced by the controller's IP address, then delete the
+copies:
 
 ```bash
-sudo -s
+sudo bash onboard-linux.sh --keys svc_ansible.pub --ask-password --controller-address CONTROLLER_IP
+rm onboard-linux.sh svc_ansible.pub
 ```
 
-In the root shell, give the script its three inputs as environment variables
-and run it. The first line asks twice for the sudo password you chose and
-saves only its hash; replace `CONTROLLER_IP` with the controller's IP address:
+`--ask-password` asks for the sudo password you chose, twice, without echo:
 
-```bash
-ONBOARD_PASSWORD_HASH=$(openssl passwd -6) && export ONBOARD_PASSWORD_HASH
-export ONBOARD_PUBLIC_KEYS="$(cat svc_ansible.pub)"
-export ONBOARD_CONTROLLER_ADDRESS=CONTROLLER_IP
-bash onboard-linux.sh
+```text
+New sudo password for svc_ansible, 12 characters or more:
+The same password again:
 ```
 
-If `openssl` prints `Verify failure`, the two entries differed and the script
-ran without a hash: run the whole block again. To use the hash you made on the controller instead, replace the
-first line with `read -r ONBOARD_PASSWORD_HASH && export ONBOARD_PASSWORD_HASH`
-and paste the hash at the empty prompt.
+It hashes the password with `openssl` on the machine, so neither the password
+nor the hash ever appears in a command line or the shell history. The options:
 
-The script reads `ONBOARD_PUBLIC_KEYS`, `ONBOARD_PASSWORD_HASH` and
-`ONBOARD_CONTROLLER_ADDRESS` when they are set, in place of the constants at
-its top, so your copy needs no editing. `ONBOARD_PUBLIC_KEYS` becomes the
-account's whole list of authorized keys. To run the
-[command-line lessons](05-cli-lessons.md) with a key of your own as well, copy
-that public key over too and list both:
-`export ONBOARD_PUBLIC_KEYS="$(cat svc_ansible.pub ansible_lab.pub)"`.
-`ONBOARD_CONTROLLER_ADDRESS` must be an IP address. It lets the script check
-the SSH policy for connections from the controller, which it requires when the
-SSH configuration has `Match` rules that depend on the client's address, and it
-picks the `address=` line from the route to the controller. Empty, the script
-checks from loopback and prints `address=` only for a machine with exactly one
-IPv4 address.
+- `--keys FILE`: the public keys that may log in as `svc_ansible`, one per
+  line. They become the account's whole list of authorized keys. To run the
+  [command-line lessons](05-cli-lessons.md) with a key of your own as well,
+  copy that public key over too and give both in one file:
+  `cat svc_ansible.pub ansible_lab.pub > keys.pub`, then `--keys keys.pub`.
+- `--ask-password`: ask here for the sudo password and hash it. Leave it out
+  to keep the account's existing password.
+- `--password-hash-file FILE`: a file holding a hash from `openssl passwd -6`,
+  in place of `--ask-password`; the script removes the file when it ends.
+- `--controller-address IP`: the controller's IP address as the machine sees
+  it. It lets the script check the SSH policy for connections from the
+  controller, which it requires when the SSH configuration has `Match` rules
+  that depend on the client's address, and it picks the `address=` line from
+  the route to the controller. Without it, the script checks from loopback and
+  prints `address=` only for a machine with exactly one IPv4 address.
 
-The hash stays in the root shell's environment and never appears in a command
-line, so other accounts cannot see it in the process list, and it is not in
-the shell history. A one-line form such as
-`sudo env ONBOARD_PASSWORD_HASH='HASH' ... bash onboard-linux.sh` also works,
-but needs the single quotes around the hash, and shows the hash to every
-account on the machine in the process list while the script runs.
+`sudo bash onboard-linux.sh --help` lists them.
 
 The output ends like this; the values are this machine's:
 
@@ -227,21 +382,35 @@ left out, and a line `and add --name ...`, `--address ...` or
 Stage 4. **Copy the four lines from `name=` to `fingerprint=`** to a scratch
 file on the controller or to your notes; they are public values. The
 `fingerprint=` line must equal the console value you compared when you pinned
-the host key.
+the host key. Then log out of the machine with `exit`, and add it in
+[Stage 4](stage-4-add-target-first-job.md#do-add-the-target-with-add-targetsh).
 
-Leave the root shell, which also forgets the hash, and delete the copies:
+### Alternative: environment variables or edited constants
+
+The options are the newest way to give the script its three inputs. It still
+reads them from the constants at its top, `PUBLIC_KEYS`, `PASSWORD_HASH` and
+`CONTROLLER_ADDRESS`, and from the environment variables
+`ONBOARD_PUBLIC_KEYS`, `ONBOARD_PASSWORD_HASH` and
+`ONBOARD_CONTROLLER_ADDRESS`, which win over the constants; options given on
+the command line win over both. Azure Run Command uses the variables. In a
+root shell (`sudo -s`) on the machine, the variable form is:
 
 ```bash
-exit
-rm onboard-linux.sh svc_ansible.pub
+ONBOARD_PASSWORD_HASH=$(openssl passwd -6) && export ONBOARD_PASSWORD_HASH
+export ONBOARD_PUBLIC_KEYS="$(cat svc_ansible.pub)"
+export ONBOARD_CONTROLLER_ADDRESS=CONTROLLER_IP
+bash onboard-linux.sh
 ```
 
-Then log out of the machine with `exit`.
+If `openssl` prints `Verify failure`, the two entries differed and the script
+ran without a hash: run the whole block again. The hash stays in the root
+shell's environment and never appears in a command line. A one-line form such
+as `sudo env ONBOARD_PASSWORD_HASH='HASH' ... bash onboard-linux.sh` also
+works, but needs the single quotes around the hash, and shows the hash to
+every account on the machine in the process list while the script runs.
 
-### Alternative: edit the constants
-
-The script also works with its constants edited, as its comments describe.
-On the controller, make a private copy, edit it, and copy it over:
+To edit the constants instead, make a private copy on the controller, edit it,
+and copy it over:
 
 ```bash
 cd ~/ansible-semaphore-guide
@@ -313,21 +482,10 @@ pasting into it;
 [the Proxmox page](platform-proxmox.md#do-read-a-vms-console-and-host-key-fingerprint-from-the-node)
 shows it.
 
-**Run it.** Open a root shell and run the same block as the SSH way:
+**Run it** with the same line as the SSH way, then delete the copies:
 
 ```bash
-sudo -s
-```
-
-```bash
-ONBOARD_PASSWORD_HASH=$(openssl passwd -6) && export ONBOARD_PASSWORD_HASH
-export ONBOARD_PUBLIC_KEYS="$(cat svc_ansible.pub)"
-export ONBOARD_CONTROLLER_ADDRESS=CONTROLLER_IP
-bash onboard-linux.sh
-```
-
-```bash
-exit
+sudo bash onboard-linux.sh --keys svc_ansible.pub --ask-password --controller-address CONTROLLER_IP
 rm onboard-linux.sh svc_ansible.pub
 ```
 
@@ -436,6 +594,14 @@ inventory and a fingerprint read over the SSH session you pinned. Where it
 shows `NAME`, `ADDRESS` or `FINGERPRINT` in capitals, the value did not pass
 its check; replace it with a value you read yourself. A second run with the
 same password reports no changes.
+
+## Azure: Run Command
+
+An Azure VM without an SSH path runs the same script through Azure's Run
+Command, with the key and the hash as parameters:
+[onboard an existing VM with Run Command](platform-azure.md#do-onboard-an-existing-vm-with-run-command)
+on the Azure page. Run Command's output comes through Azure's authenticated
+control plane, so its `fingerprint=` line is one Stage 4 can trust.
 
 ## Do: read a prepared VM's values again
 
@@ -556,6 +722,13 @@ the script does, `sudo -k -n` included, and stops if they are wrong.
 
 ## Check
 
+After the one command, the controller's last lines name the machine under
+`Prepared and in the inventory:`, and the inventory lists it:
+
+```bash
+grep -n '^[^#]*ansible_host' /opt/ansible-lab/inventories/lab.ini
+```
+
 On the machine, the script's first run shows:
 
 ```text
@@ -564,44 +737,49 @@ sudo: /etc/sudoers.d/90-ansible-lab written; svc_ansible's own password is requi
 RESULT: OK
 ```
 
-Running it again with the same inputs is a good check; do it before you leave
-the root shell and delete the files. There, `bash onboard-linux.sh` alone
-reuses the exported values and reports `authorized keys unchanged`,
-`password: unchanged`, and `unchanged` for the sudo rule and the SSH drop-in,
-then the same four lines. Running the whole block again instead makes a new
-hash of the same password, because `openssl passwd -6` picks a new random salt
-each time, so it reports `password: set from PASSWORD_HASH` again; that is
-fine too. To rerun without touching the password, run
-`export ONBOARD_PASSWORD_HASH=` first: the script then reports
-`password: kept`, which means it kept a password set earlier. `NOT SET` means
-there is none yet. After the
-bootstrap playbook, its recap shows `failed=0`, and a repeat run `changed=0`.
-At the machine's console, `sudo -l -U svc_ansible` lists `(ALL : ALL) ALL`
-without `NOPASSWD`. Whether the controller can log in and use sudo is
-checked in Stage 4, by Ping and Baseline preview.
+Running it again is a good check. Without a password option, as
+`sudo bash onboard-linux.sh --keys svc_ansible.pub --controller-address CONTROLLER_IP`
+or the one command with `--keep-password`, it reports
+`authorized keys unchanged`, `password: kept`, and `unchanged` for the sudo
+rule and the SSH drop-in, then the same four lines. `kept` means it kept a
+password set earlier; `NOT SET` means there is none yet. With a password again,
+it reports `password: set from PASSWORD_HASH` again, because each hash of the
+same password has a new random salt; that is fine too. After the bootstrap
+playbook, its recap shows `failed=0`, and a repeat run `changed=0`. At the
+machine's console, `sudo -l -U svc_ansible` lists `(ALL : ALL) ALL` without
+`NOPASSWD`. Whether the controller can log in and use sudo is checked in
+Stage 4, by Ping and Baseline preview.
 
 ## Save these values
 
 | Value | Where it came from | Needed in |
 | --- | --- | --- |
-| The `name=`, `address=`, `group=` and `fingerprint=` lines | The end of the script's output, or `inventory-info.sh` | Stage 4, pasted into `add-target.sh --from-info` |
-| The whole `sudo bash controller/add-target.sh ...` command | The end of the bootstrap playbook's output | Stage 4, run as printed |
 | The plain sudo password of `svc_ansible` | You chose it; saved in your password manager | Stage 4, Semaphore's Key Store; console recovery |
-| The address you pinned | Your choice, the same everywhere | Stage 4 and every later SSH run |
+| The address you typed or pinned | Your choice, the same everywhere | Stage 4 and every later SSH run |
+| The `name=`, `address=`, `group=` and `fingerprint=` lines (not after the one command) | The end of the script's output, or `inventory-info.sh` | Stage 4, pasted into `add-target.sh --from-info` |
+| The whole `sudo bash controller/add-target.sh ...` command | The end of the bootstrap playbook's output | Stage 4, run as printed |
 
 ## When it fails
 
 | Symptom | Likely cause | Next step |
 | --- | --- | --- |
+| `Run it as your administrator account, without sudo: ...` | `onboard-target.sh` ran with `sudo` or as root | Run `bash controller/onboard-target.sh ...` as yourself; it asks for `sudo` where it needs it. |
+| `Run it from a terminal to be asked for the sudo password, or pass --keep-password.` | `onboard-target.sh` has no terminal to ask on | Run it in an interactive SSH session, or pass `--keep-password` and set the password another way. |
+| `The two entries differ; nothing was changed. Run it again.` or `The password has fewer than 12 characters; nothing was changed.` | A typing slip, or a short password | Run it again. |
+| `Could not read /etc/semaphore/svc_ansible.pub. Was this controller made by the guide's installer?` | A controller set up by hand, or the `sudo` password was refused | On a controller set up by hand, use the SSH way with your own key, as [manual access](manual-access.md) shows. |
+| `Could not log in to ADMIN@VM_ADDRESS.` | SSH's message above it names the cause: wrong name or address, `Permission denied`, a refused host key, `REMOTE HOST IDENTIFICATION HAS CHANGED` | Fix that and run it again for that machine. For a changed host key, see the row below. |
+| `ADMIN@VM_ADDRESS is prepared, but add-target.sh did not add it ...` | `add-target.sh` refused, for example for a reserved hostname | Run it again for that machine alone with `--name NAME`, or as `add-target.sh`'s message says; see [Stage 4](stage-4-add-target-first-job.md#when-a-step-fails). |
 | The last line is `RESULT: FAILED: ...` | The message names it: a key this SSH server refuses, a `NOPASSWD` rule, an SSH setting that overrides the account's, an unsupported system | Fix what it names and run the script again. It changed nothing that could lock you out: an SSH or sudo change that failed its check was taken back. The account, its keys and its password may already be updated; running it again is safe. |
-| `RESULT: FAILED: run as root, for example with: sudo bash onboard-linux.sh` | The script ran without root rights | Run it from the `sudo -s` root shell, or with `sudo bash onboard-linux.sh`. |
-| `RESULT: FAILED: replace REPLACE_WITH_AUTOMATION_PUBLIC_KEY with the controller's public key` | `ONBOARD_PUBLIC_KEYS` was empty, for example because `svc_ansible.pub` was not in the current folder, so the script fell back to its unedited constant | Check with `ls` that the key file is there, export the variable again and rerun. |
-| `RESULT: FAILED: PASSWORD_HASH must be a SHA-512 crypt hash ...` | The hash was cut or changed on its way, for example by double quotes that expanded its `$` signs | Make it again with the `openssl` line in the root shell. |
-| `RESULT: FAILED: the SSH configuration has Match rules that depend on the client's address ...` | `ONBOARD_CONTROLLER_ADDRESS` was empty | Export it with the controller's IP address and rerun. |
+| `RESULT: FAILED: run as root, for example with: sudo bash onboard-linux.sh` | The script ran without root rights | Run it with `sudo bash onboard-linux.sh ...`. |
+| `RESULT: FAILED: replace REPLACE_WITH_AUTOMATION_PUBLIC_KEY with the controller's public key` | No key was given, so the script fell back to its unedited constant | Give the key with `--keys svc_ansible.pub`, and check with `ls` that the file is in the current folder. |
+| `RESULT: FAILED: cannot read the key file ...` | The `--keys` file is not in the current folder | `ls`, then run it from the folder that holds the key. |
+| `RESULT: FAILED: --ask-password needs openssl to hash the password; ...` | The machine has no `openssl` command | Install `openssl` on it, or make the hash on the controller and use `--password-hash-file`. |
+| `RESULT: FAILED: PASSWORD_HASH must be a SHA-512 crypt hash ...` | A pasted hash was cut or changed on its way, for example by double quotes that expanded its `$` signs | Use `--ask-password` instead, or make the hash again. |
+| `RESULT: FAILED: the SSH configuration has Match rules that depend on the client's address ...` | No controller address was given | Add `--controller-address CONTROLLER_IP` and rerun. The one command always gives it. |
 | `RESULT: FAILED: none of the keys can log in to this SSH server ...` | A crypto policy, such as FIPS or a STIG, refuses the key type or its size | Use the RSA 4096 service key the installer made. |
-| `password: NOT SET` | No hash was given to a new account | Run the script again with `ONBOARD_PASSWORD_HASH`. |
+| `password: NOT SET` | No password or hash was given to a new account | Run the one command again without `--keep-password`, or the script with `--ask-password`. |
 | `scp` or `ssh` says `Permission denied (publickey)` for the administrator | The administrator accepts another machine's key only | [Manual access, step 3](manual-access.md#step-3-prepare-a-dedicated-target-account), or the console way. |
-| `ssh` says `REMOTE HOST IDENTIFICATION HAS CHANGED`, or the playbook says `Host key verification failed` | The address answered with a different key than the pinned one, or no key is pinned for that exact address | Compare with the console value again. Remove an old entry only after you know why it changed: `ssh-keygen -R VM_ADDRESS`. |
+| `ssh` says `REMOTE HOST IDENTIFICATION HAS CHANGED`, or the playbook says `Host key verification failed` | The address answered with a different key than the pinned one, or no key is pinned for that exact address | Compare with the console value again. Remove an old entry only after you know why it changed: `ssh-keygen -R VM_ADDRESS`. A rebuilt machine also needs Stage 4's [rebuild steps](stage-4-add-target-first-job.md#do-rebuild-or-retire-a-target). |
 | The playbook says `Name one host with --limit` | `--limit` was missing or matched several hosts | Name one host from `inventories/bootstrap.ini`. |
 | The playbook stops with `Missing sudo password`, or `-K` was refused | The administrator's sudo asks for a password | Add `-K` and type the administrator's own sudo password. |
 | `curl` fails at the console | The machine cannot reach GitHub | Copy the files from the controller with `scp`, or use the SSH way. |
@@ -622,7 +800,13 @@ own password, because the sudoers rule has no `NOPASSWD`. The scripts check
 both before SSH reloads, so a mistake stops the run instead of locking the
 account out. What the machine prints is data, not a command:
 [Stage 4 explains why](stage-4-add-target-first-job.md#why-the-vm-prints-lines-not-a-command).
+The one command keeps that rule: it gives `add-target.sh` only the `name=`,
+`group=` and `fingerprint=` values, read over the connection whose host key you
+verified, and the address you typed yourself, never one the machine reports;
+`add-target.sh` then scans the address and trusts only the key with that
+fingerprint.
 
 ## Next
 
-[Stage 4: add the target and run the first job](stage-4-add-target-first-job.md).
+After the one command: [Stage 4: give Semaphore the sudo password](stage-4-add-target-first-job.md#do-give-semaphore-the-sudo-password).
+After the other ways: [Stage 4: add the target and run the first job](stage-4-add-target-first-job.md).

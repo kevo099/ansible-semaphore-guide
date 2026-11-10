@@ -19,6 +19,13 @@ maintenance effects, and verify the result beyond the job's exit status.
 6. Finish jobs before stopping guests. Stop targets first, then the controller,
    using graceful shutdown rather than a forced power cut.
 
+The seeded **Operations** tab holds two templates for this routine:
+**Health report**, a read-only check of every lab host to run at the start
+of a session, and **Reboot one target**, which restarts exactly one host after
+an explicit choice in its Run dialog. [The runbooks](runbooks.md) show how to
+run and read them, with the other day-to-day tasks: onboarding, retiring a
+target and changing the sudo password.
+
 An application service being enabled does not require its VM to run all day.
 Keep VM power scheduling separate from package/service configuration and from
 Semaphore's job schedules.

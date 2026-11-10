@@ -41,7 +41,7 @@ Check, the values to save, and what to do when a step fails.
 flowchart LR
     s0["Stage 0<br/>Plan, and create<br/>the controller VM"] --> s1["Stage 1<br/>Install the<br/>controller"]
     s1 --> q{"The machine<br/>to manage"}
-    q -- "already exists" --> s2["Stage 2<br/>Onboarding script"]
+    q -- "already exists" --> s2["Stage 2<br/>One command<br/>from the controller"]
     q -- "you are creating it" --> s3["Stage 3<br/>cloud-init at<br/>first boot"]
     s2 --> s4["Stage 4<br/>Add the target,<br/>run the first job"]
     s3 --> s4
@@ -51,14 +51,47 @@ flowchart LR
 | Stage | Do | Where it runs | You end with |
 | --- | --- | --- | --- |
 | 0 | [Plan the lab and create the controller VM](docs/stage-0-plan.md) | Your hypervisor or cloud | One clean VM for the controller, and a private worksheet for the values the next stages produce. |
-| 1 | [Install the controller](docs/stage-1-controller.md) | The controller VM | Semaphore with 22 templates, the lab folder, and the service key that targets will trust. One installer for Ubuntu 24.04, one for RHEL, AlmaLinux or Rocky Linux 9.4 or later. |
-| 2 | [Onboard a machine that already exists](docs/stage-2-existing-machines.md) | The machine, as root | The automation account `svc_ansible` on it, made by [`onboard-linux.sh`](onboard/existing/onboard-linux.sh), and four lines of data for the controller. |
-| 3 | [Pre-deploy new VMs with cloud-init](docs/stage-3-new-vms-cloud-init.md) | The new VM, at its first boot | The same account, made by [`cloud-init.yaml`](onboard/new-vm/cloud-init.yaml) before you ever log in, and the same four lines. |
-| 4 | [Add the target and run the first job](docs/stage-4-add-target-first-job.md) | The controller, then Semaphore | The target in the inventory with its verified host key, and **Ping** and **Baseline preview** green for it. |
+| 1 | [Install the controller](docs/stage-1-controller.md) | The controller VM | Semaphore with 24 templates on seven tabs, the lab folder, and the service key that targets will trust, with a copy in your home folder. One installer for Ubuntu 24.04, one for RHEL, AlmaLinux or Rocky Linux 9.4 or later. |
+| 2 | [Onboard a machine that already exists](docs/stage-2-existing-machines.md) | The controller, over SSH to the machine | One command, [`onboard-target.sh`](controller/onboard-target.sh), runs [`onboard-linux.sh`](onboard/existing/onboard-linux.sh) on the machine and adds it to the inventory. By hand, at the console or with Ansible, the script gives four lines of data for the controller instead. |
+| 3 | [Pre-deploy new VMs with cloud-init](docs/stage-3-new-vms-cloud-init.md) | The new VM, at its first boot | The same account, made by [`cloud-init.yaml`](onboard/new-vm/cloud-init.yaml) before you ever log in, optionally with its sudo password set, and the same four lines. |
+| 4 | [Add the target and run the first job](docs/stage-4-add-target-first-job.md) | The controller, then Semaphore | The target in the inventory with its verified host key, the sudo password in Semaphore through [`lab-sudo.py`](controller/lab-sudo.py), and **Ping** and **Baseline preview** green for it. |
 
 Stages 2 and 3 are alternatives, chosen per machine; do either once for each
 machine, then Stage 4. [The whole path as one flowchart](docs/ONBOARDING.md)
 shows every branch with the file for each step.
+
+### The short path
+
+What you type, after Stage 0 gave you a controller VM, for **one machine that
+already exists**. On the controller, as your administrator; install `git`
+first where the image lacks it, read the plan before `--apply`, and use
+`install-controller-el9.sh` on Enterprise Linux:
+
+```bash
+git clone https://github.com/kevo099/ansible-semaphore-guide.git ~/ansible-semaphore-guide
+cd ~/ansible-semaphore-guide
+bash controller/install-controller.sh --plan
+sudo bash controller/install-controller.sh --apply
+bash controller/onboard-target.sh ADMIN@VM_ADDRESS
+sudo python3.12 controller/lab-sudo.py
+```
+
+Then [open Semaphore](docs/stage-1-controller.md#do-open-semaphore) and run
+**Ping** and **Baseline preview** on the **Lessons** tab. The fifth command
+needs SSH from the controller to the machine as its administrator. For **one
+new VM** instead, the last two commands become these three:
+fill the cloud-init file with the sudo password's hash; give the file to the
+VM at its creation, as Stage 3 shows for your platform; then add the VM from
+the lines its console prints, and give Semaphore the password:
+
+```bash
+(umask 077 && bash onboard/new-vm/fill-cloud-init.sh --with-password ~/svc_ansible.pub > ~/onboard-new-vm.yaml)
+sudo bash controller/add-target.sh --from-info
+sudo python3.12 controller/lab-sudo.py
+```
+
+[The runbooks](docs/runbooks.md) give the same kind of short sequence for the
+tasks that come later.
 
 The examples are platform-neutral, with two worked platforms:
 [Proxmox VE](docs/platform-proxmox.md), where the cloud-init file is attached
@@ -73,6 +106,7 @@ A controller with one onboarded target is the starting point for the rest.
 
 | Guide | Result |
 | --- | --- |
+| [Runbooks: common tasks](docs/runbooks.md) | Onboard, check health, reboot, retire, change the sudo password, recover from a rebuild: one short recipe each. |
 | [Command-line Ansible lessons](docs/05-cli-lessons.md) | Preview, apply, repeat and inspect five playbooks from the terminal. |
 | [Semaphore's objects](docs/06-semaphore.md) | Understand the project, keys, inventory and templates the installer seeded, or build them by hand. |
 | [Git and VS Code](docs/07-git-and-vscode.md) | Edit, review and deliberately deliver changes. |
@@ -116,11 +150,11 @@ The folders follow where a file runs.
 
 | Folder | What it holds | Stage |
 | --- | --- | --- |
-| [`controller/`](controller/) | What runs on the controller: the two installers, `add-target.sh`, the updater, the exposure script, the readiness check and the service unit templates. | 1 and 4 |
+| [`controller/`](controller/) | What runs on the controller: the two installers, `onboard-target.sh`, `add-target.sh`, `lab-sudo.py`, `remove-target.sh`, the updater, the exposure script, the readiness check and the service unit templates. | 1, 2 and 4 |
 | [`onboard/existing/`](onboard/README.md) | What prepares a machine that already exists: `onboard-linux.sh` for the machine itself, and `bootstrap-existing-vm.yml` for the controller to run against it. | 2 |
 | [`onboard/new-vm/`](onboard/README.md) | What prepares a new VM at first boot: `cloud-init.yaml`, and `fill-cloud-init.sh` to put the service key into it. | 3 |
 | [`onboard/`](onboard/README.md) | `inventory-info.sh`, which prints a prepared machine's values again and changes nothing, and the folder's README. | 2 and 3 |
-| [`playbooks/`](playbooks/) | The lessons and the STIG playbooks, which the installers copy into the controller's lab folder; [`playbooks/stig/`](playbooks/stig/) has one folder per operating system and version. | After 4 |
+| [`playbooks/`](playbooks/) | The lessons, the operations playbooks and the STIG playbooks, which the installers copy into the controller's lab folder; [`playbooks/stig/`](playbooks/stig/) has one folder per operating system and version. | 4 and after |
 | [`platforms/azure/`](platforms/azure/README.md) | Playbooks that create, stop and remove an Azure lab, in run order. | Optional |
 | [`examples/semaphore/`](examples/semaphore/) | Small playbooks for the Semaphore feature chapters. | Optional |
 | [`inventories/`](inventories/) | Example inventories; your own stay private. | 2, by-hand path |
@@ -134,17 +168,20 @@ The files you run yourself, one by one:
 | --- | --- | --- |
 | [`controller/install-controller.sh`](controller/install-controller.sh) | The controller | Shows a plan by default; `--apply` installs a fresh Ubuntu 24.04 controller and seeds a local-folder practice project. Supports `--editor`, `--lab-dir`, `--expose` and `--address`. |
 | [`controller/install-controller-el9.sh`](controller/install-controller-el9.sh) | The controller | The same installation and options for RHEL, AlmaLinux or Rocky Linux 9.4 or later. |
-| [`onboard/existing/onboard-linux.sh`](onboard/existing/onboard-linux.sh) | The machine, as root | Prepares an existing machine: `sudo bash` over SSH or at the console, or Azure Run Command. Prints the values that `add-target.sh --from-info` reads. |
+| [`controller/onboard-target.sh`](controller/onboard-target.sh) | The controller, as your administrator, without `sudo` | Prepares existing machines over SSH with `onboard-linux.sh` and adds each one with `add-target.sh`, in one command; asks once for the shared sudo password. |
+| [`onboard/existing/onboard-linux.sh`](onboard/existing/onboard-linux.sh) | The machine, as root | Prepares an existing machine: run for you by `onboard-target.sh`, or by hand with `sudo bash` over SSH or at the console (`--keys`, `--ask-password`, `--controller-address`), or through Azure Run Command. Prints the values that `add-target.sh --from-info` reads. |
 | [`onboard/existing/bootstrap-existing-vm.yml`](onboard/existing/bootstrap-existing-vm.yml) | The controller | Prepares an existing machine over SSH as its administrator, one host per run. |
-| [`onboard/new-vm/fill-cloud-init.sh`](onboard/new-vm/fill-cloud-init.sh) | The controller | Prints `cloud-init.yaml` with the service key in place of its one placeholder. |
+| [`onboard/new-vm/fill-cloud-init.sh`](onboard/new-vm/fill-cloud-init.sh) | The controller | Prints `cloud-init.yaml` with the service key in place of its one placeholder; with `--with-password`, also the sudo password's hash, so the VM arrives with it set. |
 | [`onboard/new-vm/cloud-init.yaml`](onboard/new-vm/cloud-init.yaml) | A new VM, at first boot | Prepares the VM before you log in: vendor data on Proxmox or in a NoCloud seed, custom data on Azure. |
 | [`onboard/inventory-info.sh`](onboard/inventory-info.sh) | A prepared machine, read-only | Prints its values for `add-target.sh --from-info` again. |
 | [`controller/add-target.sh`](controller/add-target.sh) | The controller | Adds a host to the lab inventory only when its scanned host key matches the fingerprint you read from its console or from the onboarding output; a repeat changes nothing. With `--from-info` it reads the lines a VM printed as data, never as commands, and checks each value. |
+| [`controller/lab-sudo.py`](controller/lab-sudo.py) | The controller | Stores the targets' shared sudo password in Semaphore as the key **Lab sudo** and chooses it for the lab inventory; `--replace` changes it. |
+| [`controller/remove-target.sh`](controller/remove-target.sh) | The controller | Retires a target: removes its inventory line and trusted host key, keeping a backup of the inventory. Changes only the controller. |
 | [`controller/expose-semaphore.sh`](controller/expose-semaphore.sh) | The controller | Publishes the UI on the VM's address behind an nginx TLS proxy, or in plain HTTP, or reverts to loopback. |
 | [`controller/check-controller.py`](controller/check-controller.py) | The controller | Checks services, permissions and loopback listeners without printing credentials. |
 | [`controller/update-controller.sh`](controller/update-controller.sh) | The controller | Brings an installed controller up to this copy of the guide; plan by default. |
 
-The lesson playbooks:
+The lesson and operations playbooks:
 
 | File | What it does |
 | --- | --- |
@@ -153,11 +190,13 @@ The lesson playbooks:
 | [`playbooks/users.yml`](playbooks/users.yml) | Creates reserved, ordinary practice accounts. |
 | [`playbooks/webserver.yml`](playbooks/webserver.yml) | Deploys a templated nginx page on target loopback port 8080. |
 | [`playbooks/patch.yml`](playbooks/patch.yml) | Updates one target at a time; reboot defaults to disabled. |
+| [`playbooks/report.yml`](playbooks/report.yml) | Reports each host's health without sudo and changes nothing: the **Health report** template on the **Operations** tab. |
+| [`playbooks/reboot.yml`](playbooks/reboot.yml) | Reboots exactly one target per run after an explicit acknowledgement, and shows its boot before and after: **Reboot one target**. |
 | [`playbooks/stig-audit.yml`](playbooks/stig-audit.yml) | Scans each selected target with the OS vendor's STIG content and fetches the report; changes no policy. |
 | [`playbooks/stig-apply.yml`](playbooks/stig-apply.yml) | Applies the vendor's own STIG remediation to exactly one target per run after an explicit recovery-point approval, with before and after scans. |
 | [`playbooks/stig/`](playbooks/stig/) | `rhel/9`, `almalinux/9`, `rocky/9` and `ubuntu/24.04`, each with an `audit.yml` and `apply.yml` for that system only; the seeded Semaphore tabs use them. |
 
-All lesson playbooks require an explicit `--limit`. The nginx lesson owns its
+All these playbooks require an explicit `--limit`. The nginx lesson owns its
 target's entire nginx configuration; use a disposable target where it cannot
 replace an application you need. The users lesson owns only reserved `lab_`
 accounts. Read each playbook before running it.

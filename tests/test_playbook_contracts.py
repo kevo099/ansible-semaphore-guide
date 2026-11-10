@@ -1,6 +1,7 @@
 """Offline checks that the lesson playbooks agree with each other and with the seeder."""
 
 import ast
+import base64
 import datetime
 import importlib.util
 import json
@@ -338,7 +339,7 @@ class PrivilegeTests(unittest.TestCase):
 
     PROBES = ("Gather operating-system facts", "Verify the operating system's package bindings are ready")
     SUDO_PLAYBOOKS = ("playbooks/baseline.yml", "playbooks/users.yml", "playbooks/webserver.yml",
-                      "playbooks/patch.yml") + STIG_PLAYBOOKS
+                      "playbooks/patch.yml", "playbooks/reboot.yml") + STIG_PLAYBOOKS
     # Actions that run on the controller without opening a connection to the host.
     CONTROLLER_ACTIONS = {"assert", "debug", "fail", "include_vars", "meta", "set_fact"}
 
@@ -370,6 +371,306 @@ class PrivilegeTests(unittest.TestCase):
                 if task.get("become") is False:
                     with self.subTest(playbook=playbook, task=task["name"]):
                         self.assertTrue(task["name"] in self.PROBES or task.get("delegate_to") == "localhost")
+
+
+    def test_no_option_is_split_by_a_comma_in_a_bracketed_list(self):
+        # YAML reads [df, --output=size,used] as three items. Every option that takes a
+        # comma-separated value must therefore arrive whole, and no item may be a bare word
+        # that only makes sense as the rest of such a value.
+        for name in ("report.yml", "reboot.yml"):
+            for play in tasks(f"playbooks/{name}"):
+                for task in play.get("pre_tasks", []) + play.get("tasks", []) + play.get("post_tasks", []):
+                    command = task.get("ansible.builtin.command")
+                    if not isinstance(command, dict) or "argv" not in command:
+                        continue
+                    with self.subTest(playbook=name, task=task["name"]):
+                        self.assertTrue(all(isinstance(item, str) for item in command["argv"]), command["argv"])
+                        if command["argv"][0] == "df":
+                            self.assertEqual(command["argv"], ["df", "--output=size,used,avail,pcent", "--block-size=1M", "/"])
+
+    def test_the_health_report_never_asks_for_sudo(self):
+        # It runs right after Ping, before Semaphore holds a sudo password.
+        play = tasks("playbooks/report.yml")[0]
+        self.assertIs(play["become"], False)
+        for task in walk(play["pre_tasks"] + play["tasks"]):
+            with self.subTest(task=task["name"]):
+                self.assertNotEqual(task.get("become"), True)
+                self.assertNotIn("become_user", task)
+
+
+try:
+    from ansible.parsing.dataloader import DataLoader
+    from ansible.template import Templar, trust_as_template
+except ImportError:  # CI and the gate install ansible-core; without it these tests are skipped.
+    Templar = None
+
+
+def trusted(value):
+    """Mark playbook text as a template, as Ansible does for what it reads from a playbook."""
+    if isinstance(value, str):
+        return trust_as_template(value)
+    if isinstance(value, list):
+        return [trusted(item) for item in value]
+    if isinstance(value, dict):
+        return {key: trusted(item) for key, item in value.items()}
+    return value
+
+
+def rendered(play, variables, value):
+    """value as ansible-core renders it, with the play's variables worked out lazily from these.
+
+    Ansible keeps the backslashes of a string literal in an expression, where plain Jinja
+    would read escapes, so regular expressions are checked with its own templating.
+    """
+    # Registered results and extra variables take precedence over play variables, as in Ansible.
+    templar = Templar(loader=DataLoader(), variables=dict(trusted(play["vars"]), **variables))
+    return templar.template(trusted(value))
+
+
+def encoded(text):
+    return {"content": base64.b64encode(text.encode()).decode(), "encoding": "base64"}
+
+
+def command(rc, *lines):
+    return {"rc": rc, "stdout": "\n".join(lines), "stdout_lines": list(lines), "changed": False}
+
+
+SKIPPED = {"changed": False, "skipped": True, "skip_reason": "Conditional result was False"}
+
+
+@unittest.skipUnless(Templar, "needs ansible-core, as CI installs it")
+class ReadOnlyOperationsTests(unittest.TestCase):
+    """report.yml only reads, in check mode too, and reports instead of failing."""
+
+    READS = {"ansible.builtin.slurp", "ansible.builtin.stat", "ansible.builtin.command", "ansible.builtin.setup"}
+    CONTROLLER = {f"ansible.builtin.{action}" for action in PrivilegeTests.CONTROLLER_ACTIONS}
+
+    def test_every_task_only_reads_and_reports_no_change_even_in_check_mode(self):
+        play = tasks("playbooks/report.yml")[0]
+        probes_that_may_fail = set()
+        for task in walk(play["pre_tasks"] + play["tasks"]):
+            module = next(key for key in task if key.startswith("ansible.builtin."))
+            with self.subTest(task=task["name"]):
+                self.assertIn(module, self.READS | self.CONTROLLER)
+                if module == "ansible.builtin.command":
+                    self.assertIs(task["changed_when"], False)
+                    # Commands are skipped in check mode unless told otherwise.
+                    self.assertIs(task["check_mode"], False)
+                    if task.get("failed_when") is False:
+                        probes_that_may_fail.add(task["name"])
+                self.assertNotIn("ignore_errors", task)
+        # Only reading the root file system may fail the host; every other probe reports unknown.
+        commands = {t["name"] for t in walk(play["tasks"]) if "ansible.builtin.command" in t}
+        self.assertEqual(commands - probes_that_may_fail, {"Measure the root file system"})
+
+    def report(self, facts, **registered):
+        play = tasks("playbooks/report.yml")[0]
+        variables = dict(inventory_hostname=facts.pop("host"), ansible_facts=facts, **registered)
+        summary = named(play["tasks"], "Summarize each host")["ansible.builtin.debug"]["msg"]
+        verdict = named(play["tasks"], "Say whether each host needs attention")["ansible.builtin.debug"]["msg"]
+        self.assertIsInstance(rendered(play, variables, "{{ report_attention }}"), list)
+        return ([" ".join(line.split()) for line in rendered(play, variables, summary)],
+                rendered(play, variables, verdict))
+
+    UBUNTU = {"host": "lab-ubuntu", "distribution": "Ubuntu", "distribution_version": "24.04",
+              "os_family": "Debian", "kernel": "6.8.0-88-generic"}
+    ALMA = {"host": "lab-alma", "distribution": "AlmaLinux", "distribution_version": "9.6",
+            "os_family": "RedHat", "kernel": "5.14.0-503.el9.x86_64"}
+
+    def healthy(self, **changes):
+        return dict({
+            "report_uptime": encoded("93784.55 180000.10\n"),
+            "report_meminfo": encoded("MemTotal:        4028000 kB\nMemFree:  100 kB\nMemAvailable:    3021000 kB\n"),
+            "report_root_fs": command(0, "1M-blocks  Used Avail Use%", "    19940  4567 14340  25%"),
+            "report_failed": command(0),
+            "report_reboot_marker": {"changed": False, "stat": {"exists": False}},
+            "report_kernels": SKIPPED,
+            "report_clock": command(0, "NTP=yes", "NTPSynchronized=yes"),
+            "report_apt": command(0, "NOTE: This is only a simulation!", "0 upgraded, 0 newly installed."),
+            "report_dnf": SKIPPED,
+        }, **changes)
+
+    def test_a_healthy_host_is_ok(self):
+        summary, verdict = self.report(dict(self.UBUNTU), **self.healthy())
+        self.assertEqual(summary, [
+            "lab-ubuntu: Ubuntu 24.04, kernel 6.8.0-88-generic, up 1 d 2 h 3 min",
+            "Root file system: 25% used, 14340 MiB free of 19940 MiB. Memory: 25% used, 2950 MiB available of 3933 MiB.",
+            "Failed systemd units: 0",
+            "Reboot pending: no",
+            "Time: synchronized",
+            "Pending package updates: none"])
+        self.assertEqual(verdict, "lab-ubuntu: OK")
+
+    def test_everything_that_needs_attention_is_listed_on_one_line(self):
+        units = ["● nfs.mount loaded failed failed NFS", "-.mount loaded failed failed Root"] + [
+            f"unit{n}.service loaded failed failed Unit {n}" for n in range(5)]
+        summary, verdict = self.report(dict(self.ALMA), **self.healthy(
+            report_meminfo=encoded("MemTotal: 2048000 kB\nMemAvailable: 102400 kB\n"),
+            report_root_fs=command(0, "1M-blocks  Used Avail Use%", "    19940 18943   997  95%"),
+            report_failed=command(0, *units),
+            report_reboot_marker=SKIPPED,
+            report_kernels=command(0, "1730000000 5.14.0-570.el9.x86_64", "1727000000 5.14.0-503.el9.x86_64"),
+            report_clock=command(0, "NTP=no", "NTPSynchronized=no"),
+            report_apt=SKIPPED,
+            report_dnf=command(0, "bash.x86_64", "kernel-core.x86_64", "bash.x86_64")))
+        self.assertIn("Failed systemd units: 7: nfs.mount, -.mount, unit0.service, unit1.service, unit2.service, ...",
+                      summary)
+        self.assertIn("Reboot pending: yes (running 5.14.0-503.el9.x86_64, newest installed 5.14.0-570.el9.x86_64)",
+                      summary)
+        self.assertIn("Pending package updates: 2", summary)
+        self.assertEqual(verdict, "lab-alma: needs attention: root file system 95% full; memory 95% used; "
+                                  "7 failed systemd unit(s); reboot pending; clock not synchronized, time service "
+                                  "inactive; 2 package update(s) pending")
+
+    def test_probes_that_cannot_read_are_reported_not_failed(self):
+        summary, verdict = self.report(dict(self.ALMA), **self.healthy(
+            report_failed=command(1), report_reboot_marker=SKIPPED, report_kernels=command(1),
+            report_clock=command(1), report_apt=SKIPPED, report_dnf=command(1)))
+        self.assertIn("Failed systemd units: unknown, systemctl could not list them", summary)
+        self.assertIn("Reboot pending: unknown", summary)
+        self.assertIn("Time: unknown", summary)
+        self.assertIn("Pending package updates: not checked; the local package data could not be read without sudo",
+                      summary)
+        # A count that could not be made is not a finding.
+        self.assertEqual(verdict, "lab-alma: needs attention: failed systemd units could not be listed; reboot need "
+                                  "unknown; time synchronization unknown")
+
+    def test_the_running_newest_kernel_needs_no_reboot(self):
+        summary, verdict = self.report(dict(self.ALMA, kernel="5.14.0-570.el9.x86_64"), **self.healthy(
+            report_reboot_marker=SKIPPED, report_apt=SKIPPED,
+            report_kernels=command(0, "1727000000 5.14.0-503.el9.x86_64", "1730000000 5.14.0-570.el9.x86_64"),
+            report_dnf=command(0)))
+        self.assertIn("Reboot pending: no", summary)
+        self.assertEqual(verdict, "lab-alma: OK")
+
+    def test_the_ubuntu_reboot_marker_counts(self):
+        _summary, verdict = self.report(dict(self.UBUNTU), **self.healthy(
+            report_reboot_marker={"changed": False, "stat": {"exists": True}},
+            report_apt=command(0, "Inst libc6 [2.39-0ubuntu8.5] (2.39-0ubuntu8.6 Ubuntu:24.04/noble-updates [amd64])",
+                               "Conf libc6 (2.39-0ubuntu8.6 Ubuntu:24.04/noble-updates [amd64])")))
+        self.assertEqual(verdict, "lab-ubuntu: needs attention: reboot pending; 1 package update(s) pending")
+
+
+class RebootTests(unittest.TestCase):
+    """reboot.yml reboots exactly one acknowledged host, and only outside check mode."""
+
+    def play(self):
+        return tasks("playbooks/reboot.yml")[0]
+
+    def test_the_seeded_answer_is_the_one_the_playbook_accepts(self):
+        expression = self.play()["vars"]["reboot_confirm"]
+        prompt = load("seed-semaphore").REBOOT_PROMPT[0]
+        for choice in prompt["values"]:
+            self.assertIs(native(expression, **{prompt["name"]: choice["value"]}), True)
+        self.assertIs(native(expression), False)
+        for answer in ("", "reboot now", prompt["values"][0]["name"]):
+            with self.subTest(answer=answer):
+                self.assertIs(native(expression, **{prompt["name"]: answer}), False)
+
+    def test_one_host_and_the_acknowledgement_are_checked_before_any_connection(self):
+        pre = self.play()["pre_tasks"]
+        names = [t["name"] for t in pre]
+        preflight = names.index("Check scope and supported operating system")
+        one = named(pre, "Reboot exactly one target per run")
+        ack = named(pre, "Require an explicit acknowledgement")
+        self.assertEqual(one["ansible.builtin.assert"]["that"], ["ansible_play_hosts_all | length == 1"])
+        for task in (one, ack):
+            self.assertLess(names.index(task["name"]), preflight)
+            self.assertIn("always", task["tags"])
+        that = ack["ansible.builtin.assert"]["that"]
+        for confirm, check_mode, passes in ((True, False, True), (False, False, False), (False, True, True)):
+            with self.subTest(confirm=confirm, check_mode=check_mode):
+                self.assertIs(all(native("{{ " + c + " }}", reboot_confirm=confirm, ansible_check_mode=check_mode)
+                                  for c in that), passes)
+        # A key=value string is refused, as for the STIG approval.
+        self.assertIs(native("{{ " + that[0] + " }}", reboot_confirm="true"), False)
+
+    def test_the_controller_itself_is_refused_before_the_reboot(self):
+        play = self.play()
+        names = [task["name"] for task in play["tasks"]]
+        guard = named(play["tasks"], "Refuse to reboot the controller this run comes from")
+        # After the read it compares, and before the reboot.
+        self.assertLess(names.index("Read the boot ID before the reboot"), names.index(guard["name"]))
+        self.assertLess(names.index(guard["name"]), names.index("Reboot and wait for the target to answer again"))
+        self.assertNotIn("when", guard)
+        [that] = guard["ansible.builtin.assert"]["that"]
+        self.assertEqual(that, "reboot_id_before != lookup('ansible.builtin.file', "
+                               "'/proc/sys/kernel/random/boot_id') | trim")
+        self.assertIn("Nothing was changed.", guard["ansible.builtin.assert"]["fail_msg"])
+
+    @unittest.skipUnless(Templar and Path("/proc/sys/kernel/random/boot_id").exists(),
+                         "needs ansible-core, as CI installs it, and Linux")
+    def test_the_guard_compares_with_the_boot_id_of_the_machine_ansible_runs_on(self):
+        play = self.play()
+        [that] = named(play["tasks"], "Refuse to reboot the controller")["ansible.builtin.assert"]["that"]
+        here = Path("/proc/sys/kernel/random/boot_id").read_text()
+        # ansible-playbook loads the plugin lists at its start; a bare Templar does not.
+        from ansible.plugins.loader import init_plugin_loader
+        try:
+            init_plugin_loader([])
+        except RuntimeError:  # set up already by an earlier test
+            pass
+        for content, allowed in ((here, False), ("1111-aaaa\n", True)):
+            with self.subTest(content=content):
+                variables = self.registered(reboot_boot_id_before=encoded(content))
+                self.assertIs(rendered(play, variables, "{{ " + that + " }}"), allowed)
+
+    def test_check_mode_reads_and_reboots_nothing(self):
+        play = self.play()
+        reboots = [t for t in walk(play["tasks"]) if "ansible.builtin.reboot" in t]
+        self.assertEqual(len(reboots), 1)
+        self.assertEqual(reboots[0]["when"], "not ansible_check_mode")
+        self.assertGreaterEqual(reboots[0]["ansible.builtin.reboot"]["reboot_timeout"], 600)
+        after = named(play["tasks"], "Read the target after the reboot")
+        self.assertEqual(after["when"], "not ansible_check_mode")
+        preview = named(play["tasks"], "Say what a real run would do")
+        self.assertEqual(preview["when"], "ansible_check_mode")
+        for task in walk(play["tasks"]):
+            if "ansible.builtin.command" in task:
+                with self.subTest(task=task["name"]):
+                    self.assertIs(task["changed_when"], False)
+                    # The reads before the reboot also run in check mode, for its preview.
+                    if task["name"] not in {t["name"] for t in after["block"]}:
+                        self.assertIs(task["check_mode"], False)
+
+    def registered(self, **changes):
+        return dict({
+            "inventory_hostname": "lab-alma", "reboot_target_ack": "REBOOT NOW", "ansible_check_mode": False,
+            "reboot_boot_id_before": encoded("1111-aaaa\n"), "reboot_uptime_before": encoded("200000.5 1.0\n"),
+            "reboot_failed_before": command(0, "unit.service loaded failed failed Unit"),
+            "reboot_system_state": command(0, "running"),
+            "reboot_boot_id_after": encoded("2222-bbbb\n"), "reboot_uptime_after": encoded("41.9 3.0\n"),
+            "reboot_failed_after": command(0),
+        }, **changes)
+
+    def messages(self, **changes):
+        play = self.play()
+        variables = self.registered(**changes)
+        report = named(play["tasks"], "Read the target after the reboot")["block"][-1]["ansible.builtin.debug"]["msg"]
+        preview = named(play["tasks"], "Say what a real run would do")["ansible.builtin.debug"]["msg"]
+        return ([" ".join(line.split()) for line in rendered(play, variables, report)],
+                " ".join(rendered(play, variables, preview).split()))
+
+    @unittest.skipUnless(Templar, "needs ansible-core, as CI installs it")
+    def test_the_report_compares_the_boot_before_and_after(self):
+        report, preview = self.messages()
+        self.assertEqual(report, [
+            "lab-alma rebooted and answers again.",
+            "Boot ID: 1111-aaaa before, 2222-bbbb now (changed).",
+            "Uptime: 2 d 7 h 33 min before, 41 s now.",
+            "System state: running.",
+            "Failed systemd units now: 0 (before the reboot: 1)."])
+        self.assertEqual(preview, "CHECK MODE: a real run reboots lab-alma now and waits up to 15 minutes for it to "
+                                  "answer again. Boot ID 1111-aaaa, up 2 d 7 h 33 min, 1 failed systemd unit(s). The "
+                                  "acknowledgement was given. Nothing was changed.")
+        report, preview = self.messages(reboot_system_state=command(124), reboot_target_ack="",
+                                        reboot_failed_after=command(1, "Failed to connect to bus"))
+        self.assertIn("System state: still starting after 5 minutes, or unknown.", report)
+        self.assertIn("Failed systemd units now: unknown, systemctl could not list them (before the reboot: 1).",
+                      report)
+        report, _preview = self.messages(reboot_failed_after=command(0, "● nfs.mount loaded failed failed NFS"))
+        self.assertIn("Failed systemd units now: 1: nfs.mount (before the reboot: 1).", report)
+        self.assertIn("A real run also needs the acknowledgement, REBOOT NOW.", preview)
 
 
 class PackageLockTests(unittest.TestCase):

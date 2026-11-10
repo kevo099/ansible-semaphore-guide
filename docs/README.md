@@ -15,6 +15,14 @@
 Stages 2 and 3 are alternatives, chosen per machine.
 [The whole path as one flowchart](ONBOARDING.md) shows every branch.
 
+## Runbooks
+
+[Runbooks: common tasks](runbooks.md): onboard one or several machines,
+pre-deploy a batch of VMs from a Proxmox template, give or change the sudo
+password, check every machine's health, reboot one target, retire a target,
+recover from a rebuilt target or controller, update the controller, read a
+target's values again, and unlock `svc_ansible` after hardening.
+
 ## Worked platforms
 
 - [Proxmox VE](platform-proxmox.md): build VMs from an ISO or a cloud image,

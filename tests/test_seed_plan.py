@@ -46,12 +46,12 @@ class SeedPlanTests(unittest.TestCase):
     def test_every_template_is_scoped_and_points_at_a_guide_playbook(self):
         plan = self.plan()
         self.assertEqual(len(plan["templates"]), len(seed.LESSONS))
-        self.assertEqual(len(plan["templates"]), 22)
+        self.assertEqual(len(plan["templates"]), 24)
         for template in plan["templates"]:
             arguments = json.loads(template["arguments"])
             # The limit lives in the template's Ansible options, never duplicated as an argument.
             self.assertNotIn("--limit", " ".join(arguments))
-            if template["playbook"].endswith("/apply.yml"):
+            if template["playbook"].endswith("/apply.yml") or template["playbook"] == "playbooks/reboot.yml":
                 self.assertEqual(template["task_params"], {"limit": [], "allow_override_limit": True})
             elif template["playbook"] in GROUP_OF_PLAYBOOK:
                 self.assertEqual(template["task_params"], {"limit": [GROUP_OF_PLAYBOOK[template["playbook"]]]})
@@ -96,8 +96,32 @@ class SeedPlanTests(unittest.TestCase):
                 self.assertEqual(template["survey_vars"][0]["name"], "recovery_snapshot_ack")
                 self.assertTrue(template["survey_vars"][0]["required"])
                 self.assertEqual(template["survey_vars"][0]["values"][0]["value"], "SNAPSHOT READY")
+            elif template["playbook"] == "playbooks/reboot.yml":
+                self.assertEqual(template["survey_vars"], seed.REBOOT_PROMPT)
             else:
                 self.assertEqual(template["survey_vars"], [])
+
+    def test_the_operations_tab_comes_last_with_its_two_templates(self):
+        plan = self.plan()
+        # An update adds a missing tab after the existing ones, so a fresh seed puts it last too.
+        self.assertEqual(seed.VIEWS[-1], ("Operations", ["Health report", "Reboot one target"]))
+        self.assertEqual([title for title, _names in seed.VIEWS],
+                         ["Lessons", "Patching"] + [f"STIG · {label}" for label, *_rest in seed.STIG_SYSTEMS]
+                         + ["Operations"])
+        positions = {title: body["position"] for title, body in plan["views"].items()}
+        self.assertEqual(max(positions, key=positions.get), "Operations")
+        templates = {t["name"]: t for t in plan["templates"]}
+        report, reboot = templates["Health report"], templates["Reboot one target"]
+        self.assertEqual((report["playbook"], report["task_params"], json.loads(report["arguments"])),
+                         ("playbooks/report.yml", {"limit": ["lab"]}, []))
+        self.assertEqual((reboot["playbook"], reboot["task_params"], json.loads(reboot["arguments"])),
+                         ("playbooks/reboot.yml", {"limit": [], "allow_override_limit": True}, []))
+        self.assertIn("Enter exactly one host in the Limit prompt.", reboot["description"])
+        for template in (report, reboot):
+            self.assertEqual(template["environment_ids"], [IDS["environments"]["Practice defaults"]])
+        prompt = reboot["survey_vars"][0]
+        self.assertEqual((prompt["name"], prompt["type"], prompt["required"]), ("reboot_target_ack", "enum", True))
+        self.assertEqual([choice["value"] for choice in prompt["values"]], ["REBOOT NOW"])
 
     def test_plan_carries_no_private_key_material(self):
         self.assertNotIn("PRIVATE", json.dumps(self.plan()))

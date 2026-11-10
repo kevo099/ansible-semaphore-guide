@@ -160,6 +160,21 @@ project's owner or a manager, as
 shows, pass it as `SEMAPHORE_API_TOKEN` with
 `sudo --preserve-env=SEMAPHORE_API_TOKEN`, and delete the token afterwards.
 
+## The Operations tab
+
+A controller installed before the **Operations** tab existed gets it from the
+update: `--apply` adds the tab after your existing tabs, with its two
+templates, **Health report** and **Reboot one target**, and copies their
+playbooks, `playbooks/report.yml` and `playbooks/reboot.yml`, into the lab
+folder. It changes nothing else: your other tabs keep their order, and no
+other template changes. The plan lists them under `Template tabs to add` and
+`Templates to add`. The new controller tools of the same release,
+`controller/onboard-target.sh`, `controller/lab-sudo.py` and
+`controller/remove-target.sh`, run from the guide's folder and need nothing
+from the update; on a controller installed earlier, make the copy of the
+service key that Stage 3 uses yourself, as
+[Stage 1](stage-1-controller.md#do-save-the-service-key) shows.
+
 ## From one STIG tab to one per system
 
 Release `v1.7.0` replaced the single **STIG** tab with one tab per system and
@@ -237,8 +252,8 @@ The readiness check should still report `"passed": true`. In the test,
 
 The update ends with `Updated to RELEASE_TAG. The readiness check passed.`, or
 with the readiness checks that already failed before it. The **Task Templates**
-page shows the tabs **Lessons**, **Patching** and one **STIG ·** tab per system
-beside **All**, and **Ping** still succeeds. On a controller updated from
+page shows the tabs **Lessons**, **Patching**, one **STIG ·** tab per system and
+**Operations** beside **All**, and **Ping** still succeeds. On a controller updated from
 `v1.6.x`, the old **STIG** tab stays until you remove it; older controllers
 keep their old STIG templates under **All**.
 

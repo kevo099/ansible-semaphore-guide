@@ -14,7 +14,7 @@ newer online documentation exists in the pinned release.
 
 If you used either [installer](stage-1-controller.md),
 the **Ansible Practice** project, its SSH key, inventory, repository, variable
-groups and 22 templates already exist. Do not create a second project with
+groups and 24 templates already exist. Do not create a second project with
 the same name. Read steps 1-6 to understand those objects, and add the sudo
 credential as
 [Stage 4 describes](stage-4-add-target-first-job.md#do-give-semaphore-the-sudo-password).
@@ -207,10 +207,11 @@ Templates**, select the pencil next to **All**, add a tab such as `Lessons` or
 `Patching`, and save; then open each template and choose its tab in the
 **View** field. A tab only changes how the list is shown: a template's limit,
 variables and access stay the same. Tabs cannot be nested, so the seeded
-controllers create **Lessons** and **Patching** plus one flat tab per STIG
-system and version, such as **STIG · RHEL 9** and **STIG · Ubuntu 24.04**,
-and start each STIG template's name with its system, so the **All** tab still
-shows which system each one is for.
+controllers create **Lessons** and **Patching**, one flat tab per STIG
+system and version, such as **STIG · RHEL 9** and **STIG · Ubuntu 24.04**, and
+**Operations**, with **Health report** and **Reboot one target**. They start
+each STIG template's name with its system, so the **All** tab still shows
+which system each one is for.
 
 ## Step 7: qualify a complete job
 

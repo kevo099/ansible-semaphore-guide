@@ -171,7 +171,9 @@ fi
 key_only=no
 if [[ -n "$existing" ]]; then
   if [[ "$existing" != "$name ansible_host=$address" ]]; then
-    echo "Inventory already contains $name with other settings ($existing); edit it by hand instead."; exit 1
+    echo "Inventory already contains $name with other settings ($existing); edit it by hand instead."
+    echo "If that line is an earlier machine's, retire it first: sudo bash controller/remove-target.sh --name $name"
+    exit 1
   fi
   # The section the line is under; a line above every section is in Ansible's ungrouped.
   listed_group=$(awk -v n="$name" '
@@ -181,7 +183,9 @@ if [[ -n "$existing" ]]; then
       }
       $1 == (n "") {print section; exit}' "$inventory")
   if [[ "$listed_group" != "$group" ]]; then
-    echo "Inventory lists $name under [$listed_group], not under [$group]; edit it by hand instead."; exit 1
+    echo "Inventory lists $name under [$listed_group], not under [$group]; edit it by hand instead."
+    echo "If that line is an earlier machine's, retire it first: sudo bash controller/remove-target.sh --name $name"
+    exit 1
   fi
   if [[ $trusted_matches == yes ]]; then
     echo "Already present: $name ($address) is in $inventory and its verified key is trusted; nothing changed."
@@ -199,7 +203,9 @@ if [[ -n "$existing" ]]; then
   key_only=yes
 fi
 if [[ -n "$owner" ]]; then
-  echo "Inventory already lists $address as $owner; edit it by hand instead."; exit 1
+  echo "Inventory already lists $address as $owner; edit it by hand instead."
+  echo "If $owner is an earlier machine at that address, retire it first: sudo bash controller/remove-target.sh --name $owner"
+  exit 1
 fi
 if [[ -n "$trusted" && $trusted_matches == no ]]; then
   echo "Known-hosts already contains a different key for $address. After verifying why its key changed,"
@@ -229,7 +235,15 @@ fi
 
 # The inventory line comes first; a rebuilt VM's line is already there.
 if [[ $key_only == no ]]; then
-  python3 -I - "$inventory" "$group" "$name" "$address" <<'PY'
+  # The lab folder belongs to its editor, who could swap the file for a link while this
+  # runs: write it as its owner, who can reach nothing that way that the account could
+  # not reach before. Root's own rights are used only for the service known-hosts file.
+  lab_owner=$(stat -c %U -- "$(dirname -- "$inventory")")
+  writer=()
+  if [[ $lab_owner != root && $lab_owner != UNKNOWN && $(stat -c %U -- "$inventory") == "$lab_owner" ]]; then
+    writer=(runuser -u "$lab_owner" --)
+  fi
+  "${writer[@]}" python3 -I - "$inventory" "$group" "$name" "$address" <<'PY'
 import re
 import sys
 from pathlib import Path
@@ -257,4 +271,4 @@ else
 fi
 echo "Next: run the Ping template, which covers every host in the lab group. If $name fails with Permission denied (publickey),"
 echo "svc_ansible on $name lacks the key 'sudo cat /etc/semaphore/svc_ansible.pub' shows; if sudo asks for a"
-echo "password, give Semaphore the targets' sudo password, as docs/stage-4-add-target-first-job.md shows."
+echo "password, give Semaphore the targets' sudo password: sudo python3.12 controller/lab-sudo.py"

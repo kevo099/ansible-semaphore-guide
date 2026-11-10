@@ -33,8 +33,12 @@ seed = load("seed-semaphore")
 updater = load("update-controller")
 LabFolder = updater.LabFolder
 LAB = "/opt/ansible-lab"
-LESSON_TEMPLATES = [lesson[0] for lesson in seed.LESSONS if "STIG" not in lesson[0]]
+# The Operations tab and its templates came after 1.9.0; NEW_TEMPLATES is what 1.6.x and earlier lack.
+OPERATIONS_TEMPLATES = dict(seed.VIEWS)["Operations"]
+LESSON_TEMPLATES = [lesson[0] for lesson in seed.LESSONS
+                    if "STIG" not in lesson[0] and lesson[0] not in OPERATIONS_TEMPLATES]
 STIG_TEMPLATES = [lesson[0] for lesson in seed.LESSONS if "STIG" in lesson[0]]
+NEW_TEMPLATES = STIG_TEMPLATES + OPERATIONS_TEMPLATES
 # What installers before template tabs seeded: eleven templates, two variable groups, no tabs.
 OLD_TEMPLATES = LESSON_TEMPLATES + seed.REPLACED_TEMPLATES[:3]
 # What 1.5.0 to 1.6.x seeded: twelve templates on the tabs Lessons, Patching and STIG.
@@ -218,6 +222,18 @@ def tabbed_project(git_url=LAB):
     return fake
 
 
+def release_1_9_project():
+    """A project as 1.7.0 to 1.9.0 seeded it: every template but Operations, each on its tab."""
+    views = [title for title, _names in seed.VIEWS if title != "Operations"]
+    fake = FakeSemaphore(templates=[name for name in seed.VIEW_OF if name not in OPERATIONS_TEMPLATES],
+                         environments=tuple(seed.VARIABLE_GROUPS),
+                         views=tuple((title, index) for index, title in enumerate(views, start=1)))
+    ids = {view["title"]: view["id"] for view in fake.views}
+    for template in fake.templates.values():
+        template["view_id"] = ids[seed.VIEW_OF[template["name"]]]
+    return fake
+
+
 def view_id(fake, title):
     return next(view["id"] for view in fake.views if view["title"] == title)
 
@@ -258,7 +274,7 @@ class SemaphoreUpdateTests(unittest.TestCase):
         plan, backup = self.update(fake)
         self.assertEqual(plan["environments"], ["DISA SCAP file · RHEL 9", "DISA SCAP file · Ubuntu 24.04"])
         self.assertEqual(plan["views"], [title for title, _members in seed.VIEWS])
-        self.assertEqual(plan["templates"], STIG_TEMPLATES)
+        self.assertEqual(plan["templates"], NEW_TEMPLATES)
         self.assertEqual(sorted(t["name"] for t in plan["tabs"]), sorted(LESSON_TEMPLATES))
         self.assertEqual(seed.replaced_names(plan), [f"template {name!r}" for name in sorted(seed.REPLACED_TEMPLATES[:3])])
         view_ids = {view["title"]: view["id"] for view in fake.views}
@@ -375,7 +391,7 @@ class SemaphoreUpdateTests(unittest.TestCase):
         fake = tabbed_project()
         plan, backup = self.update(fake)
         self.assertEqual(plan["views"], [title for title, _members in seed.VIEWS[2:]])
-        self.assertEqual(plan["templates"], STIG_TEMPLATES)
+        self.assertEqual(plan["templates"], NEW_TEMPLATES)
         self.assertEqual((plan["tabs"], plan["in_use"]), ([], []))
         self.assertIsNone(backup)
         self.assertEqual(seed.replaced_names(plan),
@@ -488,7 +504,7 @@ class SemaphoreUpdateTests(unittest.TestCase):
         for template in list(fake.templates.values()):
             fake.store(template["id"], dict(template, vaults=[{"vault_key_id": 77, "type": "password"}]))
         self.update(fake)
-        self.assertEqual(self.posted_vaults(fake), [[{"type": "password", "vault_key_id": 77}]] * len(STIG_TEMPLATES))
+        self.assertEqual(self.posted_vaults(fake), [[{"type": "password", "vault_key_id": 77}]] * len(NEW_TEMPLATES))
         self.assertTrue(any("same vault password" in note for note in self.said))
 
     def test_script_and_named_vaults_are_copied_as_they_are(self):
@@ -506,7 +522,7 @@ class SemaphoreUpdateTests(unittest.TestCase):
                     fake.store(template["id"], dict(template, vaults=vaults))
                 self.update(fake)
                 posted = self.posted_vaults(fake)
-                self.assertEqual(len(posted), len(STIG_TEMPLATES))
+                self.assertEqual(len(posted), len(NEW_TEMPLATES))
                 for copied in posted:
                     self.assertEqual(sorted(json.dumps(v, sort_keys=True) for v in copied),
                                      sorted(json.dumps(v, sort_keys=True) for v in vaults))
@@ -516,9 +532,48 @@ class SemaphoreUpdateTests(unittest.TestCase):
         first = next(iter(fake.templates.values()))
         fake.store(first["id"], dict(first, vaults=[{"vault_key_id": 77, "type": "password"}]))
         self.update(fake)
-        new = [t for t in fake.templates.values() if t["name"] in STIG_TEMPLATES]
+        new = [t for t in fake.templates.values() if t["name"] in NEW_TEMPLATES]
+        self.assertEqual(len(new), len(NEW_TEMPLATES))
         self.assertTrue(all(t["vaults"] == [] for t in new))
         self.assertTrue(any("different vault passwords" in note for note in self.said))
+
+    def test_a_release_1_9_project_gains_only_the_operations_tab_and_its_templates(self):
+        fake = release_1_9_project()
+        before = json.loads(json.dumps(fake.templates))
+        for template in list(fake.templates.values()):
+            fake.store(template["id"], dict(template, vaults=[{"vault_key_id": 77, "type": "password"}]))
+        plan, backup = self.update(fake)
+        self.assertEqual((plan["environments"], plan["views"], plan["templates"], plan["tabs"]),
+                         ([], ["Operations"], OPERATIONS_TEMPLATES, []))
+        self.assertEqual(seed.replaced_names(plan), [])
+        self.assertIsNone(backup)
+        # Nothing existing is changed: the update only adds the tab and the two templates.
+        self.assertEqual([(method, path.rsplit("/", 1)[1]) for method, path, _body in fake.writes()],
+                         [("POST", "views"), ("POST", "templates"), ("POST", "templates")])
+        for number, template in before.items():
+            self.assertEqual(fake.templates[int(number)]["name"], template["name"])
+            self.assertEqual(fake.templates[int(number)]["view_id"], template["view_id"])
+        # The tab goes after the last one, which a fresh seed shows last too.
+        self.assertEqual([v["title"] for v in sorted(fake.views, key=lambda v: v["position"])],
+                         ["All"] + [title for title, _names in seed.VIEWS])
+        operations = view_id(fake, "Operations")
+        self.assertEqual(max(v["position"] for v in fake.views), next(v["position"] for v in fake.views
+                                                                      if v["id"] == operations))
+        added = {t["name"]: t for t in fake.templates.values() if t["name"] in OPERATIONS_TEMPLATES}
+        self.assertEqual(sorted(added), sorted(OPERATIONS_TEMPLATES))
+        practice = next(e["id"] for e in fake.environments if e["name"] == "Practice defaults")
+        for name, template in added.items():
+            with self.subTest(template=name):
+                self.assertEqual(template["view_id"], operations)
+                self.assertEqual(template["environment_ids"], [practice])
+                self.assertEqual([(v["type"], v["vault_key_id"]) for v in template["vaults"]], [("password", 77)])
+        self.assertEqual(added["Health report"]["survey_vars"], [])
+        self.assertEqual(added["Reboot one target"]["survey_vars"], seed.REBOOT_PROMPT)
+        self.assertEqual(added["Reboot one target"]["task_params"], {"limit": [], "allow_override_limit": True})
+        fake.calls.clear()
+        again, _backup = self.update(fake)
+        self.assertEqual((again["views"], again["templates"], again["tabs"]), ([], [], []))
+        self.assertEqual(fake.writes(), [])
 
     def test_vault_passwords_are_read_before_any_change(self):
         fake = tabbed_project()

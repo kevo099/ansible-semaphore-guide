@@ -1,8 +1,9 @@
 #cloud-config
 # Prepare a new Linux VM for the guide's automation account at first boot:
-# svc_ansible with the controller's public key and no password, the sudoers
-# rule and SSH drop-in of docs/manual-access.md, and the Python bindings the
-# lessons need. One file for Ubuntu 24.04 and AlmaLinux, Rocky Linux or RHEL 9.
+# svc_ansible with the controller's public key and, by default, no password,
+# the sudoers rule and SSH drop-in of docs/manual-access.md, and the Python
+# bindings the lessons need. One file for Ubuntu 24.04 and AlmaLinux, Rocky
+# Linux or RHEL 9.
 #
 # Replace REPLACE_WITH_AUTOMATION_PUBLIC_KEY with the one line of the key
 # Semaphore logs in with: on a controller made by either installer, the output
@@ -18,10 +19,16 @@
 # cloud-init reads it at first boot only; for a VM that already exists, use
 # onboard-linux.sh instead.
 #
-# The sudo password is set afterwards, never here: the hypervisor and the VM
-# both keep a readable copy of this file. Stage 3 lists the ways. Do not name
-# the VM's administrator svc_ansible: cloud-init gives that account
-# passwordless sudo.
+# By default this file sets no password, so that it is the same for every VM
+# and carries no secret: the hypervisor and the VM both keep a readable copy of
+# it. The sudo password is then set afterwards; Stage 3 lists the ways. As an
+# opt-in, fill-cloud-init.sh --with-password adds the password's SHA-512 hash,
+# never the password, as one more root-only write_files entry after the key's,
+# and the script below sets it and removes that file. Every copy of the filled
+# file then holds a hash that can be attacked offline: keep it private, never
+# commit it, and use a long random password. Add it only with that script,
+# never to this template, which is committed. Do not name the VM's
+# administrator svc_ansible: cloud-init gives that account passwordless sudo.
 users:
   - default
   - name: svc_ansible
@@ -79,6 +86,31 @@ runcmd:
         fi
       fi
       rm -f "$spare"
+      # fill-cloud-init.sh --with-password adds this root-only file with the sudo
+      # password's hash. Set it as onboard-linux.sh does, through chpasswd's standard
+      # input rather than usermod -p, whose command line any process can read.
+      # chpasswd replaces the whole password field, so the lock that lock_passwd
+      # or useradd put there goes too. The file is removed whatever happens.
+      hash_file=/run/ansible-lab-onboard.hash
+      password_set=
+      if [ -e "$hash_file" ] || [ -L "$hash_file" ]; then
+        password_hash=$(cat -- "$hash_file" 2>/dev/null) || password_hash=
+        rm -f -- "$hash_file" || problem "$hash_file could not be removed"
+        # The pattern onboard-linux.sh checks PASSWORD_HASH with.
+        # shellcheck disable=SC2016  # a literal pattern, not an expansion
+        hash_pattern='^\$6\$(rounds=[1-9][0-9]{3,8}\$)?[./A-Za-z0-9]{1,16}\$[./A-Za-z0-9]{86}$'
+        if ! [[ $password_hash =~ $hash_pattern ]]; then
+          problem "$hash_file did not hold a SHA-512 crypt hash; no password was set"
+        elif ! printf 'svc_ansible:%s\n' "$password_hash" | chpasswd -e; then
+          problem "chpasswd could not set svc_ansible's password"
+        elif [ "$(getent shadow svc_ansible | cut -d: -f2)" != "$password_hash" ]; then
+          problem "svc_ansible's password field is not the given hash; the account may still be locked"
+        else
+          password_set=yes
+          echo "onboard: set svc_ansible's sudo password from the hash fill-cloud-init.sh added"
+        fi
+        password_hash=
+      fi
       # cloud-init drops a key it cannot parse, such as the unreplaced placeholder.
       if ! [ -s "$keys" ] || ! ssh-keygen -lf "$keys" >/dev/null 2>&1; then
         problem "svc_ansible has no valid public key; was the placeholder replaced?"
@@ -263,7 +295,11 @@ runcmd:
         echo "onboard: FAILED; see the errors above" >&2
         exit 1
       fi
-      echo "onboard: svc_ansible is ready; set its sudo password next"
+      if [ -n "$password_set" ]; then
+        echo "onboard: svc_ansible is ready, with its sudo password set"
+      else
+        echo "onboard: svc_ansible is ready; set its sudo password next"
+      fi
       # The values add-target.sh --from-info reads on the controller, as data that only
       # its reviewed code acts on, as in onboard-linux.sh. Without the controller's
       # address, only a single global IPv4 address is used. A value that cannot be

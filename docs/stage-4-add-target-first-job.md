@@ -9,6 +9,15 @@ verified host key, Semaphore has the targets' sudo password, and the seeded
 **Ping** and **Baseline preview** templates succeed for it. The target is then
 onboarded, and every lesson in the guide can run against it.
 
+**Which steps you need.** A machine you onboarded with
+[Stage 2's one command](stage-2-existing-machines.md#do-onboard-it-in-one-command-from-the-controller),
+`controller/onboard-target.sh`, is already in the inventory with its verified
+host key: start at
+[give Semaphore the sudo password](#do-give-semaphore-the-sudo-password).
+Every other machine needs the first step, `add-target.sh`, too: a VM that
+cloud-init prepared in Stage 3, and a machine prepared by the script over SSH
+or at the console, by the bootstrap playbook, or through Azure.
+
 ## Before you start
 
 - **The controller from Stage 1,** with the **Ansible Practice** project the
@@ -19,9 +28,9 @@ onboarded, and every lesson in the guide can run against it.
   copy of the guide you installed from, or the newer one you updated with. It
   is not the lab folder `/opt/ansible-lab`. `add-target.sh` runs from the
   guide's folder.
-- **From Stage 2 or Stage 3, for each target:** the `name=`, `address=`,
-  `group=` and `fingerprint=` lines, or, after the bootstrap playbook, the
-  whole `add-target.sh` command it printed.
+- **From Stage 2 or Stage 3, for each target not added by the one command:**
+  the `name=`, `address=`, `group=` and `fingerprint=` lines, or, after the
+  bootstrap playbook, the whole `add-target.sh` command it printed.
 - **The plain sudo password** you gave `svc_ansible`, from your password
   manager.
 - **A browser session to Semaphore,** as
@@ -57,7 +66,7 @@ Using name=lab-alma address=alma.example.test group=enterprise_linux fingerprint
 Added lab-alma (alma.example.test) to /opt/ansible-lab/inventories/lab.ini under [enterprise_linux] and trusted its verified host key.
 Next: run the Ping template, which covers every host in the lab group. If lab-alma fails with Permission denied (publickey),
 svc_ansible on lab-alma lacks the key 'sudo cat /etc/semaphore/svc_ansible.pub' shows; if sudo asks for a
-password, give Semaphore the targets' sudo password, as docs/stage-4-add-target-first-job.md shows.
+password, give Semaphore the targets' sudo password: sudo python3.12 controller/lab-sudo.py
 ```
 
 Running it again with the same lines changes nothing and says
@@ -134,12 +143,65 @@ from the controller's inventory and a fingerprint it checks.
 
 ## Do: give Semaphore the sudo password
 
-**Where: Semaphore, in your browser, once per password.** The seeded inventory
-has no sudo credential. Until you add one, every template that uses sudo, which
-is all of them except **Ping**, stops with `Missing sudo password`.
+**Where: the controller, as your administrator account, in the guide's
+folder; once per password.** The seeded inventory has no sudo credential.
+Until you add one, every template that uses sudo, which is all of them except
+**Ping** and **Health report**, stops with `Missing sudo password`.
 
 **One shared sudo password, the default.** If every lab target has the same
-`svc_ansible` sudo password, as Stage 2 recommends:
+`svc_ansible` sudo password, as Stage 2 recommends, give it to Semaphore with
+[`controller/lab-sudo.py`](../controller/lab-sudo.py):
+
+```bash
+cd ~/ansible-semaphore-guide
+sudo python3.12 controller/lab-sudo.py
+```
+
+It logs in to Semaphore first, as `admin` with the installer's password. You
+changed that password in Stage 1, so it says so and asks for your Semaphore
+administrator's login and its current password. Then it asks for the sudo
+password twice. Nothing you type is shown:
+
+```text
+The installer's admin password is missing or no longer logs in (changed in the UI?).
+Semaphore administrator login [admin]:
+Password:
+Sudo password of svc_ansible on the lab targets:
+The same password again:
+Stored the targets' sudo password as the key 'Lab sudo' (ID 3), with an empty Username, and chose it as the Sudo Credentials of 'Lab inventory file'.
+Next: run the Baseline preview template. Every lab target needs this same sudo password for svc_ansible.
+```
+
+The ID is your own. Through Semaphore's API on loopback, it stores the
+password as the key **Lab sudo**, of the type **Login with password** and with
+an empty **Username**, and chooses that key as the **Sudo Credentials** of
+**Lab inventory file**. The password goes only to Semaphore and is never
+printed. It warns about a password shorter than 12 characters, which the
+onboarding script and the bootstrap playbook cannot give to a target.
+
+At `Semaphore administrator login [admin]:`, Enter alone means `admin`. An
+administrator with a second factor cannot log in this way: give an API token
+instead, as [updating a controller](controller-update.md#options-and-logins)
+explains, with
+`sudo --preserve-env=SEMAPHORE_API_TOKEN python3.12 controller/lab-sudo.py`.
+
+Running it again changes nothing and says that **Lab inventory file** already
+uses **Lab sudo**. To change the password later, after you changed it on
+every target, store the new one in the same key:
+
+```bash
+sudo python3.12 controller/lab-sudo.py --replace
+```
+
+It refuses, with what to do and `Nothing was changed.`, when the inventory
+already uses another key as its sudo credential, when a key named **Lab sudo**
+has another type, or when two keys share that name. Other
+options: `--lab-dir DIR` for another lab folder, `--project-id ID` when
+several projects are named **Ansible Practice**, and `--password-stdin` to read
+the password from one line of standard input in a script. It exits with
+status 0 on success, 1 when it refuses or fails, and 2 for an unknown option.
+
+**Or in the UI.** The same two steps by hand:
 
 1. Open **Key Store → New Key**. Name it **Lab sudo**, choose the type
    **Login with password**, leave **Username empty**, and enter the sudo
@@ -151,7 +213,10 @@ Leave the Username empty. Semaphore passes it to Ansible as `--become-user`,
 the account to become, so `svc_ansible` there would make every privileged task
 run as `svc_ansible` instead of root: runs that change nothing still look
 green, and the first real change fails with an error such as
-`Destination /etc not writable`. One inventory holds one sudo credential, which
+`Destination /etc not writable`. Semaphore never shows a key's Username again,
+so `lab-sudo.py` cannot see one typed in the UI; when you are not sure, run
+`sudo python3.12 controller/lab-sudo.py --replace`, which stores the password
+anew with an empty Username. One inventory holds one sudo credential, which
 is why this way needs the shared password. You do this once; targets you add
 later with the same password need nothing more here.
 
@@ -212,7 +277,32 @@ run on every host in the `lab` group, the new one included.
    service whose package is not installed yet. The recap shows `failed=0`.
    Success here proves the sudo password.
 
-The natural next lesson continues on the same tab:
+**Then the Operations tab.** Run **Health report**, the next thing to run on
+a new target and at the start of any later session. It reads each host in
+`lab` without sudo, changes nothing, and ends with one line per host:
+
+```text
+ok: [lab-alma] => {
+    "msg": [
+        "lab-alma: AlmaLinux 9.8, kernel 5.14.0-687.61.1.el9_8.x86_64, up 0 d 1 h 12 min",
+        "Root file system: 9% used, 36211 MiB free of 40140 MiB. Memory: 21% used, 2296 MiB available of 2916 MiB.",
+        "Failed systemd units: 0",
+        "Reboot pending: no",
+        "Time: synchronized",
+        "Pending package updates: none"
+    ]
+}
+...
+ok: [lab-alma] => {
+    "msg": "lab-alma: OK"
+}
+```
+
+A host that needs a look says `needs attention:` and why, for example
+`lab-alma: needs attention: reboot pending; 12 package update(s) pending`.
+[The runbooks](runbooks.md#check-every-machines-health) explain each line.
+
+The natural next lesson continues on the **Lessons** tab:
 
 3. Run **Baseline apply**. It makes the changes the preview showed. Check the
    banner and the time service on the target.
@@ -233,15 +323,48 @@ the next section shows.
 
 ## Do: rebuild or retire a target
 
-**Where: the controller, as your administrator account.**
+**Where: the controller, as your administrator account, in the guide's
+folder.**
 
-**A rebuilt or restored target at the same address** presents new host keys.
-Prepare it again, as in Stage 2 or Stage 3, and run `add-target.sh` with its
-new lines. It finds the host in the inventory and a different key trusted for
-its address, changes nothing, and prints the commands that remove the old key.
-After you have confirmed at the console why the key changed, run them:
+**To retire a target, or give its address to another VM,** remove it with
+[`controller/remove-target.sh`](../controller/remove-target.sh), the inverse
+of `add-target.sh`:
 
 ```bash
+cd ~/ansible-semaphore-guide
+sudo bash controller/remove-target.sh --name lab-alma
+```
+
+```text
+Removed lab-alma ansible_host=alma.example.test from /opt/ansible-lab/inventories/lab.ini; the inventory as it was is in /opt/ansible-lab/inventories/lab.ini.before-remove-lab-alma.20261110T143012.bak.
+Removed 1 trusted host key line(s) for alma.example.test from /etc/semaphore/known_hosts:
+  SHA256:... (RSA)
+Only the controller changed: lab-alma itself still has the svc_ansible account, its authorized keys, its sudo rule and its SSH drop-in.
+```
+
+It removes the line `NAME ansible_host=ADDRESS` that `add-target.sh` wrote,
+keeps the inventory as it was beside it, as
+`lab.ini.before-remove-NAME.YYYYmmddTHHMMSS.bak`, and removes every line that
+the service's known-hosts file holds for that address, plain or hashed. Both
+files keep their owner, group and mode, so the service can still read them;
+what changes in the lab folder is done as that folder's owner, never as root.
+A `host_vars` file for the name stays, and the last lines name it, because a
+later host of that name would get its variables. It
+keeps the host key when you pass `--keep-key`, or when another inventory host
+uses the same address. A name that is not in the inventory changes nothing and
+says `NAME is not in FILE; nothing changed.`, so running it again is safe. It
+refuses, changing nothing, a group's name, a name listed on several lines, a
+line with other settings than `add-target.sh` writes, a file that is a link,
+and a known-hosts line that names the address among other hosts; those are
+for editing by hand. `--lab-dir DIR` and `--known-hosts FILE` name other files
+than `/opt/ansible-lab` and `/etc/semaphore/known_hosts`.
+
+By hand, it does what these commands do, the first two as the lab folder's
+owner:
+
+```bash
+cp /opt/ansible-lab/inventories/lab.ini ~/lab.ini.before-retire
+sed -i '/^lab-alma /d' /opt/ansible-lab/inventories/lab.ini
 sudo ssh-keygen -R alma.example.test -f /etc/semaphore/known_hosts
 sudo chown root:semaphore /etc/semaphore/known_hosts && sudo chmod 0640 /etc/semaphore/known_hosts
 ```
@@ -249,37 +372,83 @@ sudo chown root:semaphore /etc/semaphore/known_hosts && sudo chmod 0640 /etc/sem
 `ssh-keygen -R` rewrites the file as `root:root`; without the `chown` the
 service can no longer read it, and every job fails host verification.
 `sudo python3.12 controller/check-controller.py`, run in the guide's folder,
-reports this as `service_can_read_known_hosts`. Then run `add-target.sh` once more with the same
-lines. It checks the new key against the fingerprint as before, adds no second
-inventory line, and says:
+reports this as `service_can_read_known_hosts`.
+
+**The machine itself keeps the account.** Retiring changes only the
+controller. When the machine stays in use and should no longer let the
+controller in, undo by hand, as its administrator, what the onboarding
+created. There is no script for this. Stop any process of the account, delete
+the account only if the onboarding created it (`account: svc_ansible created`
+in its first output), then remove the sudo rule and the SSH drop-in and check
+both configurations before SSH reloads:
+
+```bash
+sudo loginctl terminate-user svc_ansible
+sudo pkill -KILL -u svc_ansible
+sudo userdel -r svc_ansible
+sudo rm /etc/sudoers.d/90-ansible-lab
+sudo visudo -c
+sudo rm /etc/ssh/sshd_config.d/70-ansible-lab.conf
+sudo sshd -t
+sudo systemctl reload ssh
+```
+
+On Enterprise Linux, reload `sshd` in place of `ssh`. The first two lines end
+the account's sessions, such as a connection the controller still holds open;
+`loginctl` complains when the account is not logged in, and `pkill` prints
+nothing and returns 1 when it runs nothing. If `userdel` says the account
+`is currently used by process`, its processes are still ending: wait a few
+seconds and run that line again. On Ubuntu it also notes that there is no mail
+spool, which is harmless. Also on Ubuntu, at the console of a machine nobody
+has connected to since it started, the SSH service is not running yet:
+`sshd -t` then misses `/run/sshd`, so run `sudo mkdir -p /run/sshd` first, and
+the reload answers that the unit is not active, which needs nothing, because
+the service reads the configuration when the next connection starts it. Leave
+out `userdel` for an
+account that existed before the onboarding; then remove its
+`~svc_ansible/.ssh/authorized_keys` instead, which holds the service key.
+
+
+**A rebuilt or restored target at the same address** presents new host keys.
+Your own `~/.ssh/known_hosts` and the service's known-hosts file both still
+trust the old ones. After you have confirmed at the console why the key
+changed, forget the old key in both places, then onboard the machine again:
+
+```bash
+ssh-keygen -R alma.example.test
+sudo bash controller/remove-target.sh --name lab-alma
+bash controller/onboard-target.sh ADMIN@alma.example.test
+```
+
+The last command asks SSH's host-key question again: compare with the console
+as [Stage 2](stage-2-existing-machines.md#do-onboard-it-in-one-command-from-the-controller)
+shows. For a VM that cloud-init prepared again, or a machine you prepare by
+hand, run `add-target.sh` with its new lines instead of the last command. Without
+`remove-target.sh`, `add-target.sh` finds the host in the inventory and a
+different key trusted for its address, changes nothing, and prints the
+commands that remove the old key, the `ssh-keygen -R` and `chown` lines above;
+run them, then run `add-target.sh` once more with the same lines. It checks the
+new key against the fingerprint as before, adds no second inventory line, and
+says:
 
 ```text
 Trusted the verified host key of lab-alma (alma.example.test), which /opt/ansible-lab/inventories/lab.ini already lists.
 ```
 
-**To retire a target, or give its address to another VM,** remove its key as
-above, then, as the lab folder's owner, copy `lab.ini` aside and remove its
-inventory line:
-
-```bash
-cp /opt/ansible-lab/inventories/lab.ini ~/lab.ini.before-retire
-sed -i '/^lab-alma /d' /opt/ansible-lab/inventories/lab.ini
-```
-
 **A rebuilt or reinstalled controller** has a new service key pair, unless
 you restored `/etc/semaphore` from [chapter 10](10-recovery.md). Every target
-still authorizes the old public key, so the new key cannot log in. Save the
-new key as `~/svc_ansible.pub`, as
-[Stage 1](stage-1-controller.md#do-save-the-service-key) shows, and run the
-onboarding of [Stage 2](stage-2-existing-machines.md) again on each target
-with the new key: both the script and the playbook replace the account's
-authorized keys with exactly the ones you give them. The script keeps the
-password when you give it no hash; the playbook asks for one, so type the same
-password. Unless you restored the lab folder and Semaphore from chapter 10,
-the new controller's inventory, its known-hosts file and Semaphore's Key Store
-are empty as well: add each target again with `add-target.sh`, as above, and
+still authorizes the old public key, so the new key cannot log in. Unless you
+restored the lab folder and Semaphore from chapter 10, the new controller's
+inventory, its known-hosts file and Semaphore's Key Store are empty as well.
+Run [Stage 2's one command](stage-2-existing-machines.md#do-onboard-it-in-one-command-from-the-controller)
+again for every target: it reads the new service key, replaces the account's
+authorized keys with it, and adds the target again. Type the same shared
+password when it asks, or pass `--keep-password` to keep each account's
+password. Then
 [give Semaphore the sudo password](#do-give-semaphore-the-sudo-password)
-again.
+again with `lab-sudo.py`. The script and the playbook of Stage 2 also replace
+the authorized keys with exactly the ones you give them, when you onboard by
+hand.
 
 ## Check
 
@@ -287,7 +456,7 @@ On the controller, the inventory lists the target, and the service trusts a key
 for its address:
 
 ```bash
-grep -n ansible_host /opt/ansible-lab/inventories/lab.ini
+grep -n '^[^#]*ansible_host' /opt/ansible-lab/inventories/lab.ini
 sudo ssh-keygen -F alma.example.test -f /etc/semaphore/known_hosts
 cd ~/ansible-semaphore-guide
 sudo python3.12 controller/check-controller.py
@@ -315,14 +484,18 @@ distribution. The target is onboarded.
 | `add-target.sh` says `No SSH host key received from ADDRESS` | The controller cannot reach the VM's SSH port at that address | Nothing changed. Check the address, that the VM is running and its SSH service active, and every firewall between them: `firewalld` or `ufw` on the VM, the hypervisor's firewall, such as Proxmox's, a VLAN or routing rule, or a cloud security group, such as the Azure targets' group, which admits SSH only from `azure_target_ssh_source`. From the controller, `ssh-keyscan -t rsa ADDRESS` should print the VM's key. |
 | `add-target.sh` says `No scanned key matched` | The fingerprint is from another VM, was mistyped, or the VM was rebuilt | Read the fingerprint again at the VM's console; never take it from the scan. |
 | `add-target.sh` says `Known-hosts already contains a different key` | The address belonged to an earlier VM | Verify why, then follow the commands it prints to remove the old key. |
-| `add-target.sh` says `Inventory already lists ADDRESS as NAME`, `Inventory already contains NAME with other settings`, or that the inventory lists the name under another group | The inventory line is from an earlier VM, or from this VM before its address or system changed | Nothing changed. Check which VM the line describes. When that VM is gone, remove the line and the old key as [rebuild or retire a target](#do-rebuild-or-retire-a-target) shows, then run `add-target.sh` again. |
+| `add-target.sh` says `Inventory already lists ADDRESS as NAME`, `Inventory already contains NAME with other settings`, or that the inventory lists the name under another group | The inventory line is from an earlier VM, or from this VM before its address or system changed | Nothing changed. Check which VM the line describes. When that VM is gone, remove its line and its old key with `sudo bash controller/remove-target.sh --name NAME`, as [rebuild or retire a target](#do-rebuild-or-retire-a-target) shows, then run `add-target.sh` again. |
 | `add-target.sh` says `Missing inventory or known-hosts file` | Another lab folder than `/opt/ansible-lab`, or the controller was not made by the installer | Add `--lab-dir DIR`; on a controller set up by hand, follow [manual access](manual-access.md) instead. |
-| Ping fails with `Host key verification failed`, or `add-target.sh` says `NAME (ADDRESS) is in ..., but known-hosts holds a different key` | The VM was rebuilt or restored at the same address and has new host keys | Read its lines again, with `inventory-info.sh` or by preparing it again after a rebuild, and run `add-target.sh --from-info` with them. After verifying why the key changed, run the two commands it prints, then run it once more: it trusts the new key and keeps the inventory line. |
-| Ping fails with `Permission denied (publickey)` | `svc_ansible` lacks the service key, the controller was reinstalled with a new key, or an `AllowUsers`/`AllowGroups` rule leaves the account out | Compare `sudo ssh-keygen -lf /home/svc_ansible/.ssh/authorized_keys` on the VM with `ssh-keygen -lf ~/svc_ansible.pub` on the controller; run the Stage 2 onboarding again with the right key. |
+| Ping fails with `Host key verification failed`, or `add-target.sh` says `NAME (ADDRESS) is in ..., but known-hosts holds a different key` | The VM was rebuilt or restored at the same address and has new host keys | After verifying at the console why the key changed, follow [rebuild or retire a target](#do-rebuild-or-retire-a-target): `remove-target.sh`, then onboard it again. Or read its lines again, with `inventory-info.sh` or by preparing it again, run `add-target.sh --from-info` with them, run the two commands it prints, then run it once more: it trusts the new key and keeps the inventory line. |
+| Ping fails with `Permission denied (publickey)` | `svc_ansible` lacks the service key, the controller was reinstalled with a new key, or an `AllowUsers`/`AllowGroups` rule leaves the account out | Compare `sudo ssh-keygen -lf /home/svc_ansible/.ssh/authorized_keys` on the VM with `sudo ssh-keygen -lf /etc/semaphore/svc_ansible.pub` on the controller; run [Stage 2's one command](stage-2-existing-machines.md#do-onboard-it-in-one-command-from-the-controller) again, which gives the account the controller's current key. |
 | Ping or Baseline fails for every host while only one is broken | The lessons stop all hosts when one fails, and an unreachable host fails the run | Fix or retire the broken host, then run again. |
-| Baseline preview says `Missing sudo password` | Semaphore has no sudo password for the inventory | [Give Semaphore the sudo password](#do-give-semaphore-the-sudo-password). |
-| A task fails with `Destination /etc not writable`, or similar only when something must change | **Lab sudo** has a Username | Edit the key and leave Username empty. |
-| `Incorrect sudo password`, or the account is locked after several tries | Semaphore's password differs from the VM's, for example one shared credential for targets whose passwords differ; after a vendor STIG, `faillock` locks the account after three failures | Fix the password in Semaphore, or give each target its own with Vault. Reset the lock at the VM's console as its administrator with `sudo faillock --user svc_ansible --reset`, or through Azure Run Command. |
+| Baseline preview says `Missing sudo password` | Semaphore has no sudo password for the inventory | [Give Semaphore the sudo password](#do-give-semaphore-the-sudo-password): `sudo python3.12 controller/lab-sudo.py`. |
+| A task fails with `Destination /etc not writable`, or similar only when something must change | **Lab sudo** has a Username | `sudo python3.12 controller/lab-sudo.py --replace` stores the password anew with an empty Username. |
+| `Incorrect sudo password`, or the account is locked after several tries | Semaphore's password differs from the VM's, for example one shared credential for targets whose passwords differ; after a vendor STIG, `faillock` locks the account after three failures | Reset the lock at the VM's console as its administrator with `sudo faillock --user svc_ansible --reset`, or through Azure Run Command, before the next run. Then make the two agree: `sudo python3.12 controller/lab-sudo.py --replace` with the targets' password, or give each target its own with Vault. [The runbooks](runbooks.md#svc_ansible-is-locked-out-after-hardening) have the sequence. |
+| `lab-sudo.py` says `'Lab inventory file' already uses the key ... as its Sudo Credentials, not 'Lab sudo'` | The inventory already has another sudo credential, such as one you made by hand | Nothing changed. Choose **Lab sudo** under **Inventory → Lab inventory file → Sudo Credentials** in the UI, or empty that field and run it again. |
+| `lab-sudo.py` says `The key 'Lab sudo' (ID N) has the type ...` or `N keys are named 'Lab sudo'` | A key of another type, or a second key, has that name | Nothing changed. Rename or delete the extra key in **Key Store**, then run it again. |
+| `lab-sudo.py` says `The installer's admin password is missing or no longer logs in` and the login it asks for is refused | The administrator's password was mistyped, or it uses a second factor | Type the current password, or give an API token with `SEMAPHORE_API_TOKEN`, as [updating a controller](controller-update.md#options-and-logins) explains. |
+| `lab-sudo.py` says `semaphore.service is not running; start it first.` | Semaphore is stopped | `sudo systemctl start semaphore`, then run it again. |
 | Semaphore says `Permission denied` reading a host variables file | The file is not in the `semaphore` group | Run the `chgrp` and `chmod` from the per-target way again. |
 
 [Troubleshooting](11-troubleshooting.md) covers the rest, in the same order

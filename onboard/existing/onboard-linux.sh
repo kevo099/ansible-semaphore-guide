@@ -43,6 +43,14 @@ CONTROLLER_ADDRESS=''
 # the file needs no editing: ONBOARD_PUBLIC_KEYS, ONBOARD_PASSWORD_HASH and
 # ONBOARD_CONTROLLER_ADDRESS. A managed Run Command passes its parameters that
 # way, the hash as a protected one.
+#
+# From a terminal, options do the same and win over both:
+#   sudo bash onboard-linux.sh --keys svc_ansible.pub --ask-password
+# --keys FILE                 the public keys, one per line, in place of setting 1
+# --ask-password              ask here for the sudo password and hash it
+# --password-hash-file FILE   a file holding the hash; removed when the script ends
+# --controller-address IP     setting 3
+# controller/onboard-target.sh runs it this way for you from the controller.
 
 set -euo pipefail
 umask 022
@@ -62,6 +70,7 @@ log_file=/var/log/ansible-lab-onboard.log
 # command, and cleanup reports any other failed exit, such as one inside a
 # function, where the ERR trap does not run.
 reported=
+keys_file='' hash_file='' ask_password=''
 fail() { printf 'onboard: %s\n' "$*" >&2; reported=yes; printf 'RESULT: FAILED: %s\n' "$*"; exit 1; }
 note() { printf '%s\n' "$*"; }
 trap 'reported=yes; printf "RESULT: FAILED: unexpected error at line %s; see the error output\n" "$LINENO"; exit 1' ERR
@@ -69,6 +78,8 @@ work=$(mktemp -d)
 cleanup() {
   local status=$?
   rm -rf "$work"
+  # A hash file was made for this run only.
+  [ -z "$hash_file" ] || rm -f -- "$hash_file"
   # Action Run Command leaves a root-only copy of the script on the VM; drop
   # this run's copy when a hash was pasted into it.
   if [ -n "$pasted_hash" ] && [[ $0 == /var/lib/waagent/run-command/download/*/script.sh ]]; then
@@ -80,7 +91,58 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# --- Options -------------------------------------------------------------------
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --keys|--password-hash-file|--controller-address)
+      [ $# -ge 2 ] && [ -n "$2" ] || fail "$1 needs a value"
+      case "$1" in
+        --keys) keys_file=$2 ;;
+        --password-hash-file) hash_file=$2 ;;
+        --controller-address) CONTROLLER_ADDRESS=$2 ;;
+      esac
+      shift ;;
+    --ask-password) ask_password=yes ;;
+    -h|--help)
+      printf '%s\n' 'Usage: sudo bash onboard-linux.sh [--keys FILE] [--ask-password | --password-hash-file FILE]' \
+        '                                  [--controller-address IP]' \
+        'Prepares this machine for the automation account svc_ansible; the comments at the top' \
+        'of the file describe the settings, and docs/stage-2-existing-machines.md each way to run it.'
+      reported=yes; exit 0 ;;
+    *) fail "unknown option $1; the options are --keys FILE, --ask-password, --password-hash-file FILE and --controller-address IP" ;;
+  esac
+  shift
+done
+
 [ "$(id -u)" -eq 0 ] || fail "run as root, for example with: sudo bash onboard-linux.sh"
+
+# --- Inputs given as options ---------------------------------------------------
+if [ -n "$keys_file" ]; then
+  [ -f "$keys_file" ] && [ -r "$keys_file" ] || fail "cannot read the key file $keys_file"
+  PUBLIC_KEYS=$(cat -- "$keys_file")
+fi
+if [ -n "$hash_file" ]; then
+  [ -z "$ask_password" ] || fail "give the password one way: --ask-password or --password-hash-file"
+  [ -f "$hash_file" ] && [ -r "$hash_file" ] || fail "cannot read the hash file $hash_file"
+  PASSWORD_HASH=$(sed -e 's/\r$//' -e '/^[[:space:]]*$/d' -- "$hash_file" | head -n 1)
+  [ -n "$PASSWORD_HASH" ] || fail "the hash file $hash_file is empty"
+fi
+if [ -n "$ask_password" ]; then
+  [ -t 0 ] || fail "--ask-password needs a terminal; without one, give a hash with --password-hash-file"
+  command -v openssl >/dev/null 2>&1 ||
+    fail "--ask-password needs openssl to hash the password; install it, or give a hash made on the controller"
+  # The bootstrap playbook asks for the same length.
+  IFS= read -rs -p "New sudo password for $account, 12 characters or more: " first || fail "no password was entered"
+  printf '\n' >&2
+  IFS= read -rs -p "The same password again: " second || fail "no password was entered"
+  printf '\n' >&2
+  [ "$first" = "$second" ] || fail "the two entries differ; nothing was changed, run it again"
+  # Characters, not bytes, as the bootstrap playbook counts them.
+  [ "$(printf '%s' "$first" | LC_ALL=C.UTF-8 wc -m)" -ge 12 ] || fail "the password has fewer than 12 characters; nothing was changed"
+  # On standard input, so that it never appears in a command line.
+  PASSWORD_HASH=$(printf '%s' "$first" | openssl passwd -6 -stdin) || fail "openssl could not hash the password"
+  first='' second=''
+fi
 
 # --- Inputs, checked before anything changes -----------------------------------
 key_pattern='^(ssh-rsa|ssh-ed25519|ecdsa-sha2-nistp(256|384|521)) [A-Za-z0-9+/]+={0,3}( [^[:cntrl:]]*)?$'
