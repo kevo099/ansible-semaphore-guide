@@ -1,0 +1,13 @@
+# The machines that onboard/existing/bootstrap-existing-vm.yml prepares.
+# Copy this file to bootstrap.ini in the same folder, then replace the examples:
+#   cp inventories/bootstrap.ini.example inventories/bootstrap.ini
+#
+# One line per machine: the inventory name it should have on the controller,
+# then ansible_host= and the address the controller reaches it at. Use exactly
+# the address whose host key you pinned in your ~/.ssh/known_hosts. The name
+# must not be localhost, all, ungrouped, lab, ubuntu or enterprise_linux.
+#
+# The playbook prepares one machine per run (--limit NAME), whatever the file
+# lists. This file holds no login password, sudo password or private key.
+lab-ubuntu ansible_host=ubuntu.example.test
+lab-alma ansible_host=alma.example.test
