@@ -28,6 +28,8 @@ destroyed or rolled back afterwards.
   not clicked through.
 - The commands on the controller were typed in a terminal session, prompts
   included; no password was passed on a command line.
+- Enterprise Linux was restarted through the reboot template only in the
+  regression after the review, on RHEL.
 
 ## Results
 
@@ -50,7 +52,25 @@ destroyed or rolled back afterwards.
 | Runbook | A Proxmox template from the prepared VM, and a linked clone | The clone kept `cicustom`, prepared itself at its first boot with the password set, and was added from its console lines; **Ping**, **Baseline preview** and **Health report** passed. |
 | Update | A controller installed from `v1.9.0`, then `update-controller.sh` | The plan listed two guide files to add, one tab and two templates. `--apply` added them and passed readiness; a second plan had nothing to do; **Health report** then ran. |
 | Runbook | The controller was rebuilt | A new controller with a new service key ran the one command with `--keep-password` for a machine the old controller had prepared; the key was replaced, the password kept, and after `lab-sudo.py` **Baseline preview** passed. |
-| Stage 4 | Removing the account by hand on a retired machine | On Ubuntu 24.04 the page's lines removed the account, its home, the sudo rule and the SSH drop-in; `visudo -c` and `sshd -t` passed. On AlmaLinux 9.8 the same lines without the first one had already done so. |
+| Stage 4 | Removing the account by hand on a retired machine | On Ubuntu 24.04, and on RHEL 9.8 while Ansible still held a session of the account, the page's lines removed the account, its home, the sudo rule and the SSH drop-in; `visudo -c` and `sshd -t` passed. On AlmaLinux 9.8 the same lines without the first one had done so. |
+
+## After the review
+
+Two independent reviews followed the runs above, one of the new scripts and
+one of the pages against the code. Their fixes are listed in the next
+section; because they touch the two scripts every target passes through, an
+Ubuntu 24.04.5 controller was installed once more from the corrected files,
+with the RHEL 9.8 guest as its target.
+
+| What ran | Result |
+| --- | --- |
+| `onboard-target.sh` for the RHEL machine, then `remove-target.sh`, then the one command again | Added, removed and added again. `lab.ini` and its backup stayed with the lab folder's owner, its group and mode 0640, and the known-hosts file with `root:semaphore`, mode 0640; readiness passed. |
+| The same removal and addition after the lab folder was given to another account, run from the administrator's home | Both worked; the inventory stayed that account's file, readable by the service, and **Ping** passed afterwards. |
+| Ctrl-C at the machine's own `sudo` prompt during the one command | `sudo: a password is required`, `The script did not finish on ...`, `Not finished: ...`, exit status 1; the machine had no temporary folder and no hash file left. |
+| The controller onboarded as a target of itself, then **Reboot one target** with its name in **Limit** and `REBOOT NOW`, as a run and as a Dry Run | Both stopped with `... is the controller this run comes from ... Nothing was changed.`; the controller kept its one boot. |
+| **Reboot one target** for the RHEL 9.8 machine | It restarted and answered again: the boot ID changed, the system state was `running`, no unit had failed. |
+| **Health report** | `NAME: OK` for RHEL; `needs attention: 101 package update(s) pending` for the Ubuntu controller. |
+| `fill-cloud-init.sh --password-hash-file` over a file that existed with mode 0664 | The file had mode 0600 afterwards and held the entry; `cloud-init schema` accepted it. |
 
 ## What the runs and the review changed
 
@@ -69,13 +89,36 @@ destroyed or rolled back afterwards.
   in characters in the bootstrap playbook; all three now count characters.
 - **The one command removed any other key** the account had, because the
   script replaces the list. `--extra-key` keeps a key of your own.
+- **Root wrote in the editor's lab folder.** `add-target.sh` and
+  `remove-target.sh` wrote the inventory as root, in a folder whose owner
+  could swap a name for a link between two steps. Both now make every change
+  there as the folder's owner; root's rights are used only for the service's
+  known-hosts file. `add-target.sh` had written as root in every earlier
+  release.
+- **A filled cloud-init file with a hash could stay readable by others**: the
+  shell keeps the mode of a file that exists, and Stage 3 first makes that file
+  without a secret. `fill-cloud-init.sh` now gives an output file that holds a
+  hash mode 0600 itself, and refuses a key comment outside plain ASCII, which
+  could produce a file cloud-init cannot read.
+- **The one command** could leave its temporary folder, with the password's
+  hash, on a machine when the shell there was killed; the command it sends now
+  removes the folder on every way out. It sent `scp` an IPv6 address without
+  brackets, and two key files could run into one line when the first had no
+  final line break.
+- **Reboot one target** would have restarted the controller itself, had it
+  been in its own inventory; it now refuses.
+- **The pages** showed `lab-sudo.py`'s prompts in the wrong order, told the
+  reader to pause schedules after changing the password instead of before, and
+  showed sample output the code does not print; these and smaller points were
+  corrected.
 
 ## Not established by this run
 
 - **A RHEL controller, Baseline on RHEL, and the opt-in password on RHEL.**
   The RHEL guest's registration was still removed on the vendor's side, as in
   the earlier record, so it served only as a machine that already existed:
-  onboarded with the one command, Ping and the Health report.
+  onboarded with the one command, Ping, the Health report and, after the
+  review, the reboot template.
 - **Azure** was not rerun. The cloud-init file's default, without a password,
   is what the Azure page uses, and Run Command still gives the script its
   inputs as environment variables; offline tests cover both.
@@ -83,15 +126,18 @@ destroyed or rolled back afterwards.
   password, a DNS name or an IPv6 address in place of an IPv4 address, a
   machine already hardened with the vendor STIG, and a run without a terminal.
   Offline tests, with stand-ins for SSH, cover the option handling, the
-  refusals, the hand-off to `add-target.sh`, and that the command sent to the
-  machine removes its temporary folder; no run looked for a leftover folder.
-- **Reboot one target** on Enterprise Linux, and its refusal of a group in
-  **Limit**, which offline tests cover.
+  refusals and the hand-off to `add-target.sh`.
+- **Reboot one target** with a group or several hosts in **Limit**, which
+  offline tests cover, and on AlmaLinux and Rocky Linux.
 - **The Health report's other reasons** for `needs attention`: a full root
   file system or memory, failed units, a pending reboot and an unsynchronized
   clock were not provoked on a live host.
-- **The by-hand account removal's first line**, `loginctl terminate-user`, on
-  Enterprise Linux.
+- **A dropped connection** during the one command, and an IPv6 address:
+  offline tests run the command it sends in real shells, with a signal and
+  with a bracketed address for the copy.
+- **One known gap, left as it is:** cloud-init writes the hash file and sets
+  its root-only mode right after, so for an instant at the first boot the file
+  has the default mode. The script's header says so.
 - **A browser walk through Semaphore's forms**, including the reboot
   template's prompt as the UI draws it; the task ran with the value the prompt
   sends.
