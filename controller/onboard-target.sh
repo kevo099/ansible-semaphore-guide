@@ -158,8 +158,9 @@ for target in "${targets[@]}"; do
   [[ -z $name ]] || add_options+=(--name "$name")
   [[ -z $lab_dir ]] || add_options+=(--lab-dir "$lab_dir")
   echo
-  echo "Adding it on this controller, which needs sudo here:"
-  if sudo bash "$here/add-target.sh" "${add_options[@]}" < "$work/lines"; then
+  echo "Nothing to paste: this command passes those lines on. Adding $address on this controller, which needs sudo here:"
+  # add-target.sh's closing hint is for a run by hand; this command ends with its own.
+  if sudo bash "$here/add-target.sh" "${add_options[@]}" < "$work/lines" | sed -e '/^Next: run the Ping template/,$d'; then
     added+=("$target")
   else
     echo "$target is prepared, but add-target.sh did not add it; its message above says what it needs."
