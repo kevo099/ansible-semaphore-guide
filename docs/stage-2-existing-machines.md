@@ -161,7 +161,6 @@ In the root shell, give the script its three inputs as environment variables
 and run it. The first line asks twice for the sudo password you chose and
 saves only its hash; replace `CONTROLLER_IP` with the controller's IP address:
 
-<!-- VERIFY-LIVE: run this exact block in a root shell from `sudo -s` on Ubuntu 24.04, AlmaLinux 9, Rocky Linux 9 and RHEL 9 targets; check that `openssl passwd -6` prompts inside $(...), that the output says `password: set from PASSWORD_HASH`, and that openssl is present on a minimal install of each -->
 ```bash
 ONBOARD_PASSWORD_HASH=$(openssl passwd -6) && export ONBOARD_PASSWORD_HASH
 export ONBOARD_PUBLIC_KEYS="$(cat svc_ansible.pub)"
@@ -307,10 +306,11 @@ machine and `ssh-keygen -lf ~/svc_ansible.pub` on the controller must print
 the same `SHA256:` value. A console that shows the screen as a picture may not
 paste at all; then copy the key with `scp` as above, or use the SSH way.
 
-<!-- VERIFY-LIVE: Proxmox: does the default noVNC console paste text into a text-mode Linux console? Does the xterm.js console or qm terminal (VM with serial0: socket and a getty on ttyS0) paste a 740-character line intact and allow copying the output? -->
-On Proxmox, a VM's serial console, in the web UI's **Console** (xterm.js) or
-with `qm terminal VMID` on the node, copies and pastes text like a terminal,
-while the graphical **noVNC** console is a picture of the screen;
+On Proxmox, a VM's serial console is a text terminal: `qm terminal VMID` on
+the node pastes the whole key intact and lets you copy the output, and the web
+UI's **Console** opens the same serial console (xterm.js) when the VM has one.
+The graphical **noVNC** console is a picture of the screen; do not count on
+pasting into it;
 [the Proxmox page](platform-proxmox.md#do-read-a-vms-console-and-host-key-fingerprint-from-the-node)
 shows it.
 
@@ -368,7 +368,6 @@ It needs:
    ssh ADMIN@VM_ADDRESS true
    ```
 
-   <!-- VERIFY-LIVE: ssh-copy-id against a fresh ISO-installed Ubuntu 24.04 and EL9 target whose administrator has password SSH only -->
    The last command must finish without asking for a password. If you gave the
    key a passphrase, load it first with `eval "$(ssh-agent -s)"` and
    `ssh-add ~/.ssh/id_rsa`. When the administrator accepts only your

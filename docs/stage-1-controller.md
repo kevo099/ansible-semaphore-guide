@@ -386,7 +386,6 @@ run:
 sudo bash controller/expose-semaphore.sh --mode https
 ```
 
-<!-- VERIFY-LIVE: on a Proxmox VM on a bridged lab network, the default address (source of `ip -4 route get 1`) is the VM's own LAN address, and the printed https URL opens from the workstation without --address -->
 The certificate and the printed URL name the IPv4 address of the controller's
 default route. On a LAN or a hypervisor bridge, such as a Proxmox lab network,
 that is the controller's own address, the one you browse to, so the default is

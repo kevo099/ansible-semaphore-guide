@@ -34,7 +34,6 @@ ships no fixed VM IDs, storage names or deletion script.
 - Check the node's current guests, free memory and storage before you
   allocate anything, and choose unused VM IDs and guest names of your own.
 
-  <!-- VERIFY-LIVE: on Proxmox VE 8 and 9, pvesm status, qm list and pvesh get /cluster/nextid print storages, guests and the next free VM ID -->
   ```bash
   pvesm status
   qm list
@@ -116,7 +115,6 @@ attached, a Stage 3 VM.
    node's CPU features; in a cluster with different CPUs, choose a common
    model instead.
 
-   <!-- VERIFY-LIVE: on Proxmox VE 8 and 9: qm create with these options, and qm set --scsi0 STORAGE:0,import-from=FILE imports a qcow2 or raw cloud image as scsi0 -->
    ```bash
    qm create VMID --name NAME --ostype l26 --cpu host --cores 2 --memory 4096 \
      --scsihw virtio-scsi-single --net0 virtio,bridge=vmbr0 --agent enabled=1
@@ -129,7 +127,6 @@ attached, a Stage 3 VM.
    places. The serial console is also how you read the VM from the node,
    [below](#do-read-a-vms-console-and-host-key-fingerprint-from-the-node).
 
-   <!-- VERIFY-LIVE: on Proxmox VE 8 and 9, --ide2 STORAGE:cloudinit adds the cloud-init drive, and --serial0 socket --vga serial0 gives a working login on qm terminal for Ubuntu 24.04 and AlmaLinux 9 cloud images -->
    ```bash
    qm set VMID --ide2 STORAGE:cloudinit
    qm set VMID --serial0 socket --vga serial0
@@ -165,7 +162,6 @@ attached, a Stage 3 VM.
 6. **Grow the disk, then start.** Cloud images ship small disks; resize
    before the first boot and cloud-init grows the partition to fill it.
 
-   <!-- VERIFY-LIVE: qm resize VMID scsi0 32G sets the absolute size on Proxmox VE 8 and 9, and the guest's root filesystem fills it after first boot -->
    ```bash
    qm resize VMID scsi0 32G
    qm start VMID
@@ -181,7 +177,6 @@ attached, a Stage 3 VM.
    cloud image does not include the agent. To let the web UI show the guest's
    address, install it inside the guest, then check from the node:
 
-   <!-- VERIFY-LIVE: the Ubuntu 24.04 cloud image lacks qemu-guest-agent; after installing it, qm guest cmd VMID network-get-interfaces returns the guest's addresses -->
    ```bash
    sudo apt-get install -y qemu-guest-agent
    sudo systemctl start qemu-guest-agent
@@ -214,7 +209,6 @@ type. The default `local` directory storage keeps them in
 `/var/lib/vz/snippets/`. The content list is replaced as a whole, so read it
 first and add `snippets` to what is there:
 
-<!-- VERIFY-LIVE: on Proxmox VE 8 and 9, the dir: local entry in /etc/pve/storage.cfg lists its content; pvesm set local --content with the existing types plus snippets keeps them and creates /var/lib/vz/snippets -->
 ```bash
 grep -A 4 '^dir: local$' /etc/pve/storage.cfg
 pvesm set local --content iso,vztmpl,backup,snippets
@@ -256,16 +250,19 @@ through a channel that does not depend on the VM's own SSH host key, above all
 the VM's RSA host-key fingerprint, which Stage 4 trusts. The hypervisor's
 console is that channel. With the serial console from the cloud-image build:
 
-<!-- VERIFY-LIVE: qm terminal VMID attaches to serial0 on Proxmox VE 8 and 9, shows a login prompt after Enter, and Ctrl-O detaches -->
 ```bash
 qm terminal VMID
 ```
 
-Press Enter for a login prompt, and press Ctrl-O to leave. Text there can be
-copied from your terminal, unlike the graphical noVNC console. In the web UI,
-the VM's **Console** opens the same serial console (xterm.js) when the VM has
-one. Log in as the administrator, which needs a console password, then read
-the fingerprint:
+It answers `starting serial terminal on interface serial0 (press Ctrl+O to
+exit)`. Press Enter for a login prompt, and press Ctrl-O to leave. It is a
+text terminal: you can paste into it, a 740-character key included, and copy
+from it, unlike the graphical noVNC console. In the web UI, the VM's
+**Console** opens the same serial console (xterm.js) when the VM has one. The
+serial port serves one session at a time: while one is attached, a second
+`qm terminal` or Console window stays blank until the first one leaves. Log in
+as the administrator, which needs a console password, then read the
+fingerprint:
 
 ```bash
 sudo ssh-keygen -lf /etc/ssh/ssh_host_rsa_key.pub
@@ -284,12 +281,11 @@ shows.
 can look like a way to onboard a VM without SSH. Do not rely on it for this
 guide:
 
-<!-- VERIFY-LIVE: Ubuntu 24.04 cloud images ship without qemu-guest-agent; AlmaLinux/Rocky/RHEL 9 images ship it with guest-exec blocked by the RPC filter in /etc/sysconfig/qemu-ga; qm guest exec returns after its default timeout while a longer command keeps running -->
 - Ubuntu's cloud image does not include the agent, so there is nothing to talk
   to until you install it.
-- Enterprise Linux images include it but commonly block `guest-exec` in the
-  agent's default policy. You do not need to relax that policy to complete
-  this guide.
+- The AlmaLinux and Rocky Linux images include it, running, but refuse
+  `guest-exec`: `Command guest-exec has been disabled`. You do not need to
+  relax that policy to complete this guide.
 - `qm guest exec` returns after a timeout while a longer command keeps running,
   so a script such as `onboard-linux.sh` may still be working when it returns.
 
