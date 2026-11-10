@@ -60,7 +60,7 @@ def package_tasks(data):
 
 
 def load(name):
-    spec = importlib.util.spec_from_file_location(name, ROOT / "scripts" / f"{name}.py")
+    spec = importlib.util.spec_from_file_location(name, ROOT / "controller" / f"{name}.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -382,13 +382,14 @@ class PackageLockTests(unittest.TestCase):
 
     def test_apt_tasks_wait_for_the_lock_as_long_as_onboarding(self):
         onboarding = set()
-        for path in ("examples/onboard/cloud-init.yaml", "examples/onboard/onboard-linux.sh"):
+        for path in ("onboard/new-vm/cloud-init.yaml", "onboard/existing/onboard-linux.sh"):
             text = (ROOT / path).read_text()
             onboarding |= {int(seconds) for seconds in re.findall(r"DPkg::Lock::Timeout=(\d+)", text)}
         (timeout,) = onboarding
         modules, files = set(), set()
         # The lessons, and the examples, such as the bootstrap playbook that onboards a VM.
-        for path in sorted((ROOT / "playbooks").rglob("*.yml")) + sorted((ROOT / "examples").rglob("*.yml")):
+        for path in sorted(path for folder in ("playbooks", "examples", "onboard", "platforms")
+                           for path in (ROOT / folder).rglob("*.yml")):
             for task in package_tasks(yaml.safe_load(path.read_text())):
                 module = next(key for key in task if key in ("ansible.builtin.apt", "ansible.builtin.dnf"))
                 modules.add(module)
@@ -396,7 +397,7 @@ class PackageLockTests(unittest.TestCase):
                 with self.subTest(path=str(path.relative_to(ROOT)), task=task["name"]):
                     self.assertEqual(task[module].get("lock_timeout"), timeout)
         self.assertEqual(modules, {"ansible.builtin.apt", "ansible.builtin.dnf"})
-        self.assertIn("examples/bootstrap-existing-vm.yml", files)
+        self.assertIn("onboard/existing/bootstrap-existing-vm.yml", files)
 
 
 class PreflightPathTests(unittest.TestCase):
@@ -575,7 +576,7 @@ class ControllerPathTests(unittest.TestCase):
     def test_only_the_preflight_lets_a_fact_choose_a_file(self):
         named_by_target, checked = set(), set()
         # The per-system STIG playbooks only import the shared ones.
-        for pattern in ("playbooks/*.yml", "examples/*.yml", "examples/semaphore/*.yml"):
+        for pattern in ("playbooks/*.yml", "onboard/existing/*.yml", "examples/semaphore/*.yml"):
             for path in sorted(ROOT.glob(pattern)):
                 for play in yaml.safe_load(path.read_text()):
                     # A play on the controller itself has no target.
@@ -597,10 +598,10 @@ class ControllerPathTests(unittest.TestCase):
 class LabFolderTests(unittest.TestCase):
     def test_seeded_lab_folder_contains_every_script_the_playbooks_call(self):
         # Join continued lines so a wrapped install command still counts as one.
-        installer = (ROOT / "scripts" / "controller-common.sh").read_text().replace("\\\n", " ")
+        installer = (ROOT / "controller" / "controller-common.sh").read_text().replace("\\\n", " ")
         for name in ("install-controller.sh", "install-controller-el9.sh"):
             with self.subTest(installer=name):
-                source = (ROOT / "scripts" / name).read_text()
+                source = (ROOT / "controller" / name).read_text()
                 self.assertIn('source "$script_dir/controller-common.sh"', source)
                 self.assertRegex(source, r"(?m)^controller_seed_lab$")
         called = set()

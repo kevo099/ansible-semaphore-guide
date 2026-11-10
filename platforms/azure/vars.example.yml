@@ -25,7 +25,7 @@ azure_admin_user: azadmin
 # Enterprise Linux hardened to FIPS:STIG refuses Ed25519 keys:
 #   ssh-keygen -t rsa -b 4096 -f ~/.ssh/azure_bootstrap
 azure_admin_public_key_file: ~/.ssh/azure_bootstrap.pub
-# The key svc_ansible accepts, copied into examples/azure/files/, which Git ignores.
+# The key svc_ansible accepts, copied into platforms/azure/files/, which Git ignores.
 # On a controller made by either installer it is a copy of /etc/semaphore/svc_ansible.pub,
 # the key Semaphore logs in with; on a controller you set up by hand, of ~/.ssh/ansible_lab.pub.
 # The playbooks stop before creating anything while a key file is missing or holds

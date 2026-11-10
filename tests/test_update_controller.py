@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def load(name):
-    spec = importlib.util.spec_from_file_location(name.replace("-", "_"), ROOT / "scripts" / f"{name}.py")
+    spec = importlib.util.spec_from_file_location(name.replace("-", "_"), ROOT / "controller" / f"{name}.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -1333,7 +1333,7 @@ class ReadinessTests(unittest.TestCase):
 
 class UpdateScriptTests(unittest.TestCase):
     def run_script(self, *arguments):
-        return subprocess.run(["/bin/bash", str(ROOT / "scripts" / "update-controller.sh"), *arguments],
+        return subprocess.run(["/bin/bash", str(ROOT / "controller" / "update-controller.sh"), *arguments],
                               capture_output=True, text=True, timeout=10)
 
     def test_help_describes_a_read_only_default(self):
@@ -1346,8 +1346,8 @@ class UpdateScriptTests(unittest.TestCase):
         self.assertEqual(self.run_script("--frobnicate").returncode, 2)
 
     def test_the_wrapper_passes_every_option_the_updater_defines(self):
-        options = set(re.findall(r'add_argument\("(--[a-z-]+)"', (ROOT / "scripts" / "update-controller.py").read_text()))
-        wrapper = (ROOT / "scripts" / "update-controller.sh").read_text()
+        options = set(re.findall(r'add_argument\("(--[a-z-]+)"', (ROOT / "controller" / "update-controller.py").read_text()))
+        wrapper = (ROOT / "controller" / "update-controller.sh").read_text()
         accepted = set(re.search(r"\n    (--plan\|[^)]*)\) ;;", wrapper).group(1).split("|"))
         self.assertTrue(options)
         self.assertLessEqual(options, accepted)

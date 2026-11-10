@@ -55,7 +55,7 @@ Follow [HTTPS browser access](appendices/browser-access.md#https-on-the-vms-addr
 including its firewall restrictions, using:
 
 ```bash
-bash scripts/expose-semaphore.sh --mode https --address controller.example.test
+bash controller/expose-semaphore.sh --mode https --address controller.example.test
 openssl x509 -in /etc/semaphore/tls/semaphore.crt -noout -fingerprint -sha256 -ext subjectAltName
 ```
 
@@ -70,7 +70,7 @@ Through an authenticated transfer, put the controller's public
 Also transfer the target's already verified entries from
 `/etc/semaphore/known_hosts` as `/tmp/runner-known-hosts`. Include the exact
 hostname used by the new inventory. Verify host fingerprints through the
-target's console as in [chapter 4](04-access.md); an unverified scan is not a pin.
+target's console as in [the by-hand access page](manual-access.md#step-2-authenticate-each-targets-host-key); an unverified scan is not a pin.
 
 ## Do: install the runtime
 
@@ -147,14 +147,14 @@ rm /tmp/runner-server-ca.pem /tmp/runner-known-hosts
 }
 ```
 
-Install the [runner unit](../templates/semaphore-runner.service) from the guide checkout.
+Install the [runner unit](../controller/templates/semaphore-runner.service) from the guide checkout.
 Its process `PATH` must name the venv first to find `ansible-playbook`. It retains
 the controller's hardening, allowing persistent writes only under the runner home.
 
 ```bash
 chown root:semaphore-runner /etc/semaphore-runner/config.json
 chmod 0640 /etc/semaphore-runner/config.json
-install -m 0644 templates/semaphore-runner.service /etc/systemd/system/semaphore-runner.service
+install -m 0644 controller/templates/semaphore-runner.service /etc/systemd/system/semaphore-runner.service
 systemctl daemon-reload
 runuser -u semaphore-runner -- test -r /etc/semaphore-runner/server-ca.pem
 runuser -u semaphore-runner -- test -r /etc/semaphore-runner/known_hosts

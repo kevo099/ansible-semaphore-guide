@@ -11,8 +11,8 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-HERE = Path(__file__).resolve().parents[1] / "examples" / "onboard"
-ADD_TARGET = (Path(__file__).resolve().parents[1] / "scripts" / "add-target.sh").read_text()
+HERE = Path(__file__).resolve().parents[1] / "onboard"
+ADD_TARGET = (Path(__file__).resolve().parents[1] / "controller" / "add-target.sh").read_text()
 TEST_NET = ".".join(("192", "0", "2"))
 SOURCE = (
     (HERE / "inventory-info.sh")
@@ -72,7 +72,7 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(
             API["build_info"]("lab-alma", f"{TEST_NET}.12", "enterprise_linux", FINGERPRINT),
             "Add this VM on the controller: in the guide's folder, run\n"
-            "  sudo bash scripts/add-target.sh --from-info\n"
+            "  sudo bash controller/add-target.sh --from-info\n"
             "then paste these lines and press Ctrl-D:\n"
             f"name=lab-alma\naddress={TEST_NET}.12\ngroup=enterprise_linux\nfingerprint={FINGERPRINT}\n",
         )
@@ -149,14 +149,14 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(lines[2], "SSH keys present; password set; sudo syntax OK")
         self.assertEqual(lines[-7:], [
             "Add this VM on the controller: in the guide's folder, run",
-            "  sudo bash scripts/add-target.sh --from-info",
+            "  sudo bash controller/add-target.sh --from-info",
             "then paste these lines and press Ctrl-D:",
             "name=target-ubuntu", f"address={TEST_NET}.10", "group=ubuntu", "fingerprint=" + FINGERPRINT,
         ])
         self.assertTrue(text.endswith("\n"))
         # The only command is the one the operator runs; the VM's values are data for it.
         self.assertEqual([line for line in lines if "add-target.sh" in line],
-                         ["  sudo bash scripts/add-target.sh --from-info"])
+                         ["  sudo bash controller/add-target.sh --from-info"])
         for code in ("python3", "<<", "ADD_ANSIBLE_TARGET", "$(", "`", "--name", "--lab-dir"):
             self.assertNotIn(code, text)
 

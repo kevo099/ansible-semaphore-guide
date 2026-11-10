@@ -32,78 +32,119 @@ SSH; the targets do not need an Ansible agent. Semaphore supplies the web
 interface, credentials, job configuration and task history. It runs Ansible;
 it does not replace the playbooks.
 
-**Have a VM to bring under Ansible?** [From a VM to an onboarded
-target](docs/ONBOARDING.md) shows every path, new or existing VM, Azure or any
-other platform, as one flowchart with the file for each step.
+## The workflow
 
-## Choose your route
+Follow the stages in order. Each one is a page with the same shape: Goal, Do,
+Check, the values to save, and what to do when a step fails.
 
-Everyone starts with route A. Routes B and C both build on it; take either or
-both, in any order. Each chapter links to the next one, and
-[troubleshooting](docs/11-troubleshooting.md) is there whenever a check fails.
+```mermaid
+flowchart LR
+    s0["Stage 0<br/>Plan, and create<br/>the controller VM"] --> s1["Stage 1<br/>Install the<br/>controller"]
+    s1 --> q{"The machine<br/>to manage"}
+    q -- "already exists" --> s2["Stage 2<br/>Onboarding script"]
+    q -- "you are creating it" --> s3["Stage 3<br/>cloud-init at<br/>first boot"]
+    s2 --> s4["Stage 4<br/>Add the target,<br/>run the first job"]
+    s3 --> s4
+    s4 --> more(["Go further"])
+```
 
-**Route A: a first working lab.** You finish with a controller, verified
-target access and a real job run from both the terminal and Semaphore.
+| Stage | Do | Where it runs | You end with |
+| --- | --- | --- | --- |
+| 0 | [Plan the lab and create the controller VM](docs/stage-0-plan.md) | Your hypervisor or cloud | One clean VM for the controller, and a private worksheet for the values the next stages produce. |
+| 1 | [Install the controller](docs/stage-1-controller.md) | The controller VM | Semaphore with 22 templates, the lab folder, and the service key that targets will trust. One installer for Ubuntu 24.04, one for RHEL, AlmaLinux or Rocky Linux 9.4 or later. |
+| 2 | [Onboard a machine that already exists](docs/stage-2-existing-machines.md) | The machine, as root | The automation account `svc_ansible` on it, made by [`onboard-linux.sh`](onboard/existing/onboard-linux.sh), and four lines of data for the controller. |
+| 3 | [Pre-deploy new VMs with cloud-init](docs/stage-3-new-vms-cloud-init.md) | The new VM, at its first boot | The same account, made by [`cloud-init.yaml`](onboard/new-vm/cloud-init.yaml) before you ever log in, and the same four lines. |
+| 4 | [Add the target and run the first job](docs/stage-4-add-target-first-job.md) | The controller, then Semaphore | The target in the inventory with its verified host key, and **Ping** and **Baseline preview** green for it. |
 
-| Step | Guide | Result |
-| --- | --- | --- |
-| 1 | [Design and prerequisites](docs/01-design.md) | Choose resources, networks and account boundaries. |
-| 2 | [Create the VMs](docs/02-create-vms.md) | Build a controller and two fresh targets. |
-| 3 | **One of:** [Ubuntu controller](docs/03-controller.md) or [Enterprise Linux 9 seeded controller](docs/03-controller-el9.md) | Both installers create a local-folder practice project with 22 templates, including STIG lessons on one tab per OS and version, with no Git remote needed. Ubuntu also has a manual walkthrough. |
-| 4 | [SSH, sudo and target bootstrap](docs/04-access.md), or [the onboarding files](docs/ONBOARDING.md) | Establish verified, key-based automation access, by hand or with one script per VM. |
-| 5 | [Command-line Ansible lessons](docs/05-cli-lessons.md) | Preview, apply, repeat and inspect five playbooks. |
-| 6 | [Configure Semaphore](docs/06-semaphore.md) | Run the same lessons from named task templates. |
+Stages 2 and 3 are alternatives, chosen per machine; do either once for each
+machine, then Stage 4. [The whole path as one flowchart](docs/ONBOARDING.md)
+shows every branch with the file for each step.
 
-[Browser access](docs/appendices/browser-access.md) covers the private tunnel
-and, if you need it, publishing the UI on the controller's address.
+The examples are platform-neutral, with two worked platforms:
+[Proxmox VE](docs/platform-proxmox.md), where the cloud-init file is attached
+to a VM or a template as vendor data, and [Azure](docs/platform-azure.md),
+where it is custom data and Run Command stands in for the console.
 
-**Route B: develop and operate safely.**
+## Go further
 
-| Step | Guide | Result |
-| --- | --- | --- |
-| 7 | [Git and VS Code](docs/07-git-and-vscode.md) | Edit, review and deliberately deliver changes. |
-| 10 | [Backup, restore and rebuild](docs/10-recovery.md) | Take a recovery capture before you patch or harden anything. |
-| 8 | [Patching and daily operations](docs/08-operations.md) | Handle maintenance, reboots, drift and failures. |
-| 9 | [Optional CIS/STIG practice](docs/09-security-benchmarks.md) | Assess a specific vendor baseline, or a DISA SCAP benchmark file you supply, and interpret findings, on disposable targets. The [security baseline catalog](docs/appendices/security-baselines.md) compares STIG, CIS and other baselines by platform. |
-| 12 | [Learning exercises and RHCE alignment](docs/12-learning-path.md) | Progress toward independently written automation. |
-| Optional | [Azure and cloud-init](docs/13-azure.md) | Create, bootstrap, stop and remove Azure targets with Ansible, prepare a VM that already exists with Run Command and no SSH, and run the STIG lessons on Azure targets. |
+A controller with one onboarded target is the starting point for the rest.
 
-**Route C: Semaphore Community features.** Each chapter was written from a
-live test of Semaphore Community 2.19.12 and says what is free, what is paid
-and what to watch for. Read 14 and 15 first; then 16, 17 and 18 as you need
-them.
+**Learn and operate.** Take them in this order.
 
-| Step | Guide | Result |
-| --- | --- | --- |
-| 14 | [Inputs and templates](docs/14-inputs-and-templates.md) | Variable groups, surveys, launch options, build and deploy templates. |
-| 15 | [Identity, roles and credentials](docs/15-identity.md) | Users, the four project roles, API tokens, TOTP and where secrets belong. |
-| 16 | [Schedules, notifications and task control](docs/16-semaphore-operations.md) | Run on a timetable, get alerts, limit concurrency and stop tasks safely. |
-| 17 | [API and integrations](docs/17-api-and-integrations.md) | Launch and watch tasks from scripts and authenticated webhooks. |
-| 18 | [Runners](docs/18-runners.md) | Run tasks on a separate execution host. |
+| Guide | Result |
+| --- | --- |
+| [Command-line Ansible lessons](docs/05-cli-lessons.md) | Preview, apply, repeat and inspect five playbooks from the terminal. |
+| [Semaphore's objects](docs/06-semaphore.md) | Understand the project, keys, inventory and templates the installer seeded, or build them by hand. |
+| [Git and VS Code](docs/07-git-and-vscode.md) | Edit, review and deliberately deliver changes. |
+| [Backup, restore and rebuild](docs/10-recovery.md) | Take a recovery capture before you patch or harden anything. |
+| [Patching and daily operations](docs/08-operations.md) | Handle maintenance, reboots, drift and failures. |
+| [Optional CIS/STIG practice](docs/09-security-benchmarks.md) | Assess a vendor baseline, or a DISA SCAP benchmark file you supply, on disposable targets. The [security baseline catalog](docs/appendices/security-baselines.md) compares baselines by platform. |
+| [Learning exercises and RHCE alignment](docs/12-learning-path.md) | Progress toward independently written automation. |
+| [Troubleshooting](docs/11-troubleshooting.md) | Whenever a check fails: network, SSH, sudo, then Semaphore. |
+
+**Semaphore Community features.** Each chapter was written from a live test of
+Semaphore Community 2.19.12 and says what is free, what is paid and what to
+watch for. Read 14 and 15 first; then 16, 17 and 18 as you need them.
+
+| Guide | Result |
+| --- | --- |
+| [14. Inputs and templates](docs/14-inputs-and-templates.md) | Variable groups, surveys, launch options, build and deploy templates. |
+| [15. Identity, roles and credentials](docs/15-identity.md) | Users, the four project roles, API tokens, TOTP and where secrets belong. |
+| [16. Schedules, notifications and task control](docs/16-semaphore-operations.md) | Run on a timetable, get alerts, limit concurrency and stop tasks safely. |
+| [17. API and integrations](docs/17-api-and-integrations.md) | Launch and watch tasks from scripts and authenticated webhooks. |
+| [18. Runners](docs/18-runners.md) | Run tasks on a separate execution host. |
 
 [Community coverage](docs/COMMUNITY-COVERAGE.md) lists every capability with
-its edition and test result. Optional appendices cover
+its edition and test result. Appendices cover
+[browser access](docs/appendices/browser-access.md),
+[moving the lab folder to Git](docs/appendices/git-migration.md),
 [other task apps](docs/appendices/other-apps.md),
 [OpenID Connect and LDAP](docs/appendices/identity-providers.md),
 [task identity with OpenBao](docs/appendices/task-identity.md) and
 [export, key rotation and upgrades](docs/appendices/maintenance.md).
 
-Each walkthrough uses **Goal → Do → Check → Concept**. Commands identify
-whether they run on your workstation, controller or target. Finish a check
-before proceeding to the next layer.
+**How it works underneath.** The installer and the onboarding files do in one
+run what these pages do by hand:
+[build the Ubuntu controller by hand](docs/manual-controller-ubuntu.md) and
+[SSH, sudo and the automation account by hand](docs/manual-access.md).
+To bring an installed controller up to a newer release of this guide, see
+[update a controller](docs/controller-update.md).
 
 ## What is in this repository
 
-| Folder | What it holds |
-| --- | --- |
-| [`playbooks/`](playbooks/) | The lessons and the STIG playbooks, which the installers copy into the controller's lab folder. |
-| [`playbooks/stig/`](playbooks/stig/) | One folder per operating system and version for the STIG lessons. |
-| [`examples/onboard/`](examples/onboard/README.md) | Everything that prepares a target VM, and which file to use when. |
-| [`examples/azure/`](examples/azure/README.md) | Playbooks that create, stop and remove an Azure lab, in run order. |
-| [`scripts/`](scripts/) | The controller's installers, `add-target.sh`, the updater and the checks. |
-| [`docs/`](docs/) | The chapters, appendices and validation records. |
+The folders follow where a file runs.
 
-The runnable files, one by one:
+| Folder | What it holds | Stage |
+| --- | --- | --- |
+| [`controller/`](controller/) | What runs on the controller: the two installers, `add-target.sh`, the updater, the exposure script, the readiness check and the service unit templates. | 1 and 4 |
+| [`onboard/existing/`](onboard/README.md) | What prepares a machine that already exists: `onboard-linux.sh` for the machine itself, and `bootstrap-existing-vm.yml` for the controller to run against it. | 2 |
+| [`onboard/new-vm/`](onboard/README.md) | What prepares a new VM at first boot: `cloud-init.yaml`, and `fill-cloud-init.sh` to put the service key into it. | 3 |
+| [`onboard/`](onboard/README.md) | `inventory-info.sh`, which prints a prepared machine's values again and changes nothing, and the folder's README. | 2 and 3 |
+| [`playbooks/`](playbooks/) | The lessons and the STIG playbooks, which the installers copy into the controller's lab folder; [`playbooks/stig/`](playbooks/stig/) has one folder per operating system and version. | After 4 |
+| [`platforms/azure/`](platforms/azure/README.md) | Playbooks that create, stop and remove an Azure lab, in run order. | Optional |
+| [`examples/semaphore/`](examples/semaphore/) | Small playbooks for the Semaphore feature chapters. | Optional |
+| [`inventories/`](inventories/) | Example inventories; your own stay private. | 2, by-hand path |
+| [`docs/`](docs/README.md) | The stage pages, chapters, appendices and validation records. | |
+| [`scripts/`](scripts/) | `summarize_xccdf.py`, which the lab folder copies for the STIG lessons, `validate.py` for this repository's own checks, and the wrappers `add-target.sh` and `update-controller.sh`, which call the files in `controller/` for copies that still name the old path. | |
+| [`tests/`](tests/) | Offline tests of the scripts, playbooks and documents. | |
+
+The files you run yourself, one by one:
+
+| File | Runs on | What it does |
+| --- | --- | --- |
+| [`controller/install-controller.sh`](controller/install-controller.sh) | The controller | Shows a plan by default; `--apply` installs a fresh Ubuntu 24.04 controller and seeds a local-folder practice project. Supports `--editor`, `--lab-dir`, `--expose` and `--address`. |
+| [`controller/install-controller-el9.sh`](controller/install-controller-el9.sh) | The controller | The same installation and options for RHEL, AlmaLinux or Rocky Linux 9.4 or later. |
+| [`onboard/existing/onboard-linux.sh`](onboard/existing/onboard-linux.sh) | The machine, as root | Prepares an existing machine: `sudo bash` over SSH or at the console, or Azure Run Command. Prints the values that `add-target.sh --from-info` reads. |
+| [`onboard/existing/bootstrap-existing-vm.yml`](onboard/existing/bootstrap-existing-vm.yml) | The controller | Prepares an existing machine over SSH as its administrator, one host per run. |
+| [`onboard/new-vm/fill-cloud-init.sh`](onboard/new-vm/fill-cloud-init.sh) | The controller | Prints `cloud-init.yaml` with the service key in place of its one placeholder. |
+| [`onboard/new-vm/cloud-init.yaml`](onboard/new-vm/cloud-init.yaml) | A new VM, at first boot | Prepares the VM before you log in: vendor data on Proxmox or in a NoCloud seed, custom data on Azure. |
+| [`onboard/inventory-info.sh`](onboard/inventory-info.sh) | A prepared machine, read-only | Prints its values for `add-target.sh --from-info` again. |
+| [`controller/add-target.sh`](controller/add-target.sh) | The controller | Adds a host to the lab inventory only when its scanned host key matches the fingerprint you read from its console or from the onboarding output; a repeat changes nothing. With `--from-info` it reads the lines a VM printed as data, never as commands, and checks each value. |
+| [`controller/expose-semaphore.sh`](controller/expose-semaphore.sh) | The controller | Publishes the UI on the VM's address behind an nginx TLS proxy, or in plain HTTP, or reverts to loopback. |
+| [`controller/check-controller.py`](controller/check-controller.py) | The controller | Checks services, permissions and loopback listeners without printing credentials. |
+| [`controller/update-controller.sh`](controller/update-controller.sh) | The controller | Brings an installed controller up to this copy of the guide; plan by default. |
+
+The lesson playbooks:
 
 | File | What it does |
 | --- | --- |
@@ -112,26 +153,42 @@ The runnable files, one by one:
 | [`playbooks/users.yml`](playbooks/users.yml) | Creates reserved, ordinary practice accounts. |
 | [`playbooks/webserver.yml`](playbooks/webserver.yml) | Deploys a templated nginx page on target loopback port 8080. |
 | [`playbooks/patch.yml`](playbooks/patch.yml) | Updates one target at a time; reboot defaults to disabled. |
-| [`playbooks/stig-audit.yml`](playbooks/stig-audit.yml) | Scans each selected target with the OS vendor's STIG content (SCAP Security Guide or Ubuntu Security Guide) and fetches the report; changes no policy. |
+| [`playbooks/stig-audit.yml`](playbooks/stig-audit.yml) | Scans each selected target with the OS vendor's STIG content and fetches the report; changes no policy. |
 | [`playbooks/stig-apply.yml`](playbooks/stig-apply.yml) | Applies the vendor's own STIG remediation to exactly one target per run after an explicit recovery-point approval, with before and after scans. |
-| [`playbooks/stig/`](playbooks/stig/) | One folder per operating system and version, `rhel/9`, `almalinux/9`, `rocky/9` and `ubuntu/24.04`, each with an `audit.yml` and `apply.yml` that run the two STIG playbooks for that system only; the seeded Semaphore tabs use them. |
-| [`examples/onboard/cloud-init.yaml`](examples/onboard/cloud-init.yaml) | Prepares a new VM for the automation account at first boot; insert the controller's public key. |
-| [`examples/onboard/onboard-linux.sh`](examples/onboard/onboard-linux.sh) | Prepares an existing VM as root, through Azure Run Command or `sudo bash`, and prints the values that `add-target.sh --from-info` reads on the controller. See [chapter 13](docs/13-azure.md#do-onboard-an-existing-vm-with-run-command). |
-| [`examples/bootstrap-existing-vm.yml`](examples/bootstrap-existing-vm.yml) | Prepares an existing VM from the controller over SSH: chapter 4, steps 3 and 4, in one run per host. |
-| [`examples/onboard/inventory-info.sh`](examples/onboard/inventory-info.sh) | Reads a prepared VM through Azure Run Command, read-only, and prints the values that `add-target.sh --from-info` reads on the controller. See [chapter 13](docs/13-azure.md#do-read-a-vms-values-for-the-controller). |
-| [`examples/azure/`](examples/azure/README.md) | Creates, stops and removes an Azure lab network, optional controller and cloud-init targets; see [chapter 13](docs/13-azure.md). |
-| [`scripts/install-controller.sh`](scripts/install-controller.sh) | Shows a plan by default; `--apply` bootstraps a fresh Ubuntu 24.04 controller and seeds a local-folder practice project through the API. Supports `--editor`, `--lab-dir`, `--expose` and `--address`. |
-| [`scripts/install-controller-el9.sh`](scripts/install-controller-el9.sh) | Same seeded installation and options for RHEL, AlmaLinux or Rocky Linux 9.4 or later. |
-| [`scripts/seed-semaphore.py`](scripts/seed-semaphore.py) | Creates the practice project, keys, local repository, file inventory and templates on loopback; prints names and ids only. |
-| [`scripts/expose-semaphore.sh`](scripts/expose-semaphore.sh) | Publishes the UI on the VM's address behind an nginx TLS proxy, or in plain HTTP, or reverts to loopback. It restarts Semaphore only when the bind address changes or the running process still uses an earlier one, and refuses that while a task runs unless you add `--force`. |
-| [`scripts/add-target.sh`](scripts/add-target.sh) | Adds a host to the local inventory only when its scanned host key matches the fingerprint you read from its console or from the onboarding output; a repeat changes nothing. With `--from-info` it reads the lines a VM printed as data, never as commands, and checks each value. |
-| [`scripts/check-controller.py`](scripts/check-controller.py) | Checks controller services, permissions and loopback listeners without printing credentials. |
-| [`scripts/validate.py`](scripts/validate.py) | Checks repository links, examples and publication boundaries locally. |
+| [`playbooks/stig/`](playbooks/stig/) | `rhel/9`, `almalinux/9`, `rocky/9` and `ubuntu/24.04`, each with an `audit.yml` and `apply.yml` for that system only; the seeded Semaphore tabs use them. |
 
 All lesson playbooks require an explicit `--limit`. The nginx lesson owns its
 target's entire nginx configuration; use a disposable target where it cannot
 replace an application you need. The users lesson owns only reserved `lab_`
 accounts. Read each playbook before running it.
+
+### Coming from an earlier copy
+
+Up to v1.8.0 the controller's tools were in `scripts/`, the onboarding files
+in `examples/onboard/` and the Azure playbooks in `examples/azure/`. Most
+files only moved, and the paths they print now name the new folders. Three
+things changed with them: `cloud-init.yaml` now also
+works as vendor data, `add-target.sh --from-info` also reads lines with a
+console or journal stamp before `onboard:`, and `fill-cloud-init.sh` is new.
+Use this copy's files, not copies you filled from an earlier one:
+
+| Earlier path | Now |
+| --- | --- |
+| `scripts/install-controller.sh`, `install-controller-el9.sh`, `add-target.sh`, `update-controller.sh`, `update-controller.py`, `expose-semaphore.sh`, `check-controller.py`, `seed-semaphore.py`, `controller-common.sh`, `controller_config.py`, `create-admin.py`, `create-database.py` | `controller/`, with the same names; `scripts/add-target.sh` and `scripts/update-controller.sh` remain as wrappers that call the new files |
+| `templates/` | `controller/templates/` |
+| `examples/onboard/onboard-linux.sh`, `examples/bootstrap-existing-vm.yml` | `onboard/existing/` |
+| `examples/onboard/cloud-init.yaml` | `onboard/new-vm/` |
+| `examples/onboard/inventory-info.sh`, `examples/onboard/README.md` | `onboard/` |
+| `examples/azure/` | `platforms/azure/` |
+| Chapters 1 to 4 and 13 | The stage pages, the by-hand pages and the platform pages above |
+
+Nothing moves on an installed controller: its lab folder keeps `playbooks/`,
+`ansible.cfg` and `scripts/summarize_xccdf.py`, and its Semaphore templates
+keep their paths. `scripts/add-target.sh` and `scripts/update-controller.sh`
+still work in this copy and pass their options on to the new files, because
+VMs prepared earlier print the first and the update steps of earlier releases
+name the second. [Update a controller](docs/controller-update.md) has the
+steps.
 
 ## Version baseline
 
@@ -171,45 +228,6 @@ verified, the 2.21.4 requalification and the Community feature campaign, what
 they did not establish, and how to repeat the offline checks.
 This is a learning setup, not a high-availability production design or a claim
 of compliance with a security standard.
-
-## Quick orientation
-
-On a new controller, get a copy of this repository and read the installer's
-plan; it makes no changes:
-
-```bash
-git clone https://github.com/kevo099/ansible-semaphore-guide.git
-cd ansible-semaphore-guide
-bash scripts/install-controller.sh --plan        # Ubuntu 24.04
-bash scripts/install-controller-el9.sh --plan    # RHEL, AlmaLinux or Rocky Linux 9
-```
-
-Follow [the Ubuntu chapter](docs/03-controller.md) or
-[the Enterprise Linux chapter](docs/03-controller-el9.md) before using
-`--apply`. Both installers create `/opt/ansible-lab` by default, with an empty
-inventory and 22 Semaphore templates. Then onboard each target as
-[the onboarding page](docs/ONBOARDING.md) shows: prepare it with the
-controller's key, paste the lines it prints into
-`scripts/add-target.sh --from-info`, which adds it with its verified host key,
-and run **Ping**. A Git remote is optional.
-To bring a controller installed from an earlier release up to date, run
-`scripts/update-controller.sh` from the newer copy; see
-[update a controller](docs/03-controller.md#update-a-controller-to-a-newer-guide-release).
-
-For the Ubuntu **manual path**, after target bootstrap a first scoped test from
-the controller's guide working copy looks like this:
-
-```bash
-cp inventories/lab.ini.example inventories/lab.ini
-$EDITOR inventories/lab.ini
-/opt/ansible-venv/bin/ansible-playbook playbooks/ping.yml \
-  --limit lab-ubuntu --private-key ~/.ssh/ansible_lab
-```
-
-Your private inventory is ignored by Git. Secrets belong in a password manager,
-protected local files, an approved secrets service or Semaphore's Key Store.
-Even encrypted lab Vault files should stay in your own private repository for
-these exercises.
 
 ## Reading further
 

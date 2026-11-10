@@ -1,6 +1,6 @@
 # Appendix: browser access
 
-[Back to the guide](../../README.md) · [Ubuntu controller](../03-controller.md) · [Enterprise Linux controller](../03-controller-el9.md)
+[Back to the guide](../../README.md) · [Stage 1: install the controller](../stage-1-controller.md)
 
 ## Goal
 
@@ -42,7 +42,7 @@ Use this when the VM sits on its own, with no VPN or jump host, and you want
 to browse to its address. **Where: the controller, from the repository root.**
 
 ```bash
-sudo bash scripts/expose-semaphore.sh --mode https
+sudo bash controller/expose-semaphore.sh --mode https
 ```
 
 The script works on both installation paths, and either installer can also do
@@ -66,13 +66,13 @@ default route. On a cloud VM behind NAT, that is the private address. There,
 pass `--address` with the public IP address or DNS name you browse to, either
 to this script or to the installer together with `--expose`. On an Azure
 controller made by the guide's playbooks, open port 443 with
-`azure_controller.https_cidr`, as [chapter 13](../13-azure.md#optional-do-run-the-controller-in-azure)
+`azure_controller.https_cidr`, as [the Azure page](../platform-azure.md#optional-do-run-the-controller-in-azure)
 shows; the playbook removes a rule you add by hand. The certificate is created
 only once, so to give it a new address later, remove it first:
 
 ```bash
 sudo rm /etc/semaphore/tls/semaphore.key /etc/semaphore/tls/semaphore.crt
-sudo bash scripts/expose-semaphore.sh --mode https \
+sudo bash controller/expose-semaphore.sh --mode https \
   --address controller.example.test
 ```
 
@@ -90,7 +90,7 @@ finished, or add `--force` to restart anyway.
 
 **Check:** from another machine, `curl -k https://VM_ADDRESS/api/ping` prints
 `pong`, while `curl http://VM_ADDRESS:3000/` and `curl http://VM_ADDRESS/`
-cannot connect. `sudo python3 scripts/check-controller.py` reports the
+cannot connect. `sudo python3 controller/check-controller.py` reports the
 exposure it found and fails if nginx listens anywhere other than 443.
 
 **Concept:** the script changes the host, not the cloud. Allow port 443 in the
@@ -101,7 +101,7 @@ For a separately designed HTTPS deployment with your own certificate
 authority, read the [official reverse-proxy
 guide](https://semaphoreui.com/docs/admin-guide/reverse-proxy/nginx). An
 optional loopback-only nginx example is in
-[`templates/nginx-loopback.conf`](../../templates/nginx-loopback.conf); it is
+[`controller/templates/nginx-loopback.conf`](../../controller/templates/nginx-loopback.conf); it is
 not needed for the tunnel and no script installs it. If you choose it,
 configure nginx on a dedicated controller, disable its default public
 listener, validate with `nginx -t`, and forward to loopback port 8080.
@@ -109,7 +109,7 @@ listener, validate with `nginx -t`, and forward to loopback port 8080.
 ## Return to loopback
 
 ```bash
-sudo bash scripts/expose-semaphore.sh --mode loopback
+sudo bash controller/expose-semaphore.sh --mode loopback
 ```
 
 This closes the firewall port, removes the proxy site, binds Semaphore to

@@ -12,13 +12,12 @@ target bootstrap. Labels below are the ones Semaphore Community 2.19.12 shows;
 older releases call variable groups “environments.” Do not assume a feature in
 newer online documentation exists in the pinned release.
 
-If you used the [Ubuntu installer](03-controller.md) or the
-[Enterprise Linux installer](03-controller-el9.md),
+If you used either [installer](stage-1-controller.md),
 the **Ansible Practice** project, its SSH key, inventory, repository, variable
 groups and 22 templates already exist. Do not create a second project with
 the same name. Read steps 1-6 to understand those objects, and add the sudo
 credential as
-[3b describes](03-controller-el9.md#do-give-the-templates-the-targets-sudo-password).
+[Stage 4 describes](stage-4-add-target-first-job.md#do-give-semaphore-the-sudo-password).
 Then qualify the seeded lesson templates with step 7's sequence. Their names
 have no `Ubuntu —` prefix, and their limit is the whole `lab` group, so one run
 covers every target you added; read each host's recap. Each STIG audit runs on

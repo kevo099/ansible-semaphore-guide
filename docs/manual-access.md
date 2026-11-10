@@ -1,22 +1,12 @@
-# 4. Bootstrap SSH, Python and sudo
+# SSH, sudo and the automation account by hand
 
-[Previous: controller](03-controller.md) or [Enterprise Linux controller](03-controller-el9.md) · [Next: command-line lessons](05-cli-lessons.md)
+[Back to the guide](../README.md) · [Previous: the controller by hand](manual-controller-ubuntu.md) · [Next: command-line lessons](05-cli-lessons.md)
 
-**Coming from a controller made by either installer (chapter 3 or 3b)?** Semaphore already
-has its own key pair, and `add-target.sh` pinned each target's host key in
-`/etc/semaphore/known_hosts`. Do steps 2 to 4 on each target, but in step 3
-copy the service's public key, which `sudo cat /etc/semaphore/svc_ansible.pub`
-prints, instead of `~/.ssh/ansible_lab.pub`, as
-[3b shows](03-controller-el9.md#do-add-a-target-without-leaving-the-terminal).
-Skip step 6: it replaces `/etc/semaphore/known_hosts` rather than adding to
-it, so any host that only `add-target.sh` pinned would lose its pin. Steps 1
-and 5 are only for running chapter 5 from the terminal as well. If you do,
-append your own public key to `authorized_keys` as 3b shows instead of
-replacing the file, and run the Ansible commands of step 5 and chapter 5 from
-`/opt/ansible-lab` (or your `--lab-dir`), whose `ansible.cfg` reads the
-inventory Semaphore uses, instead of copying `lab.ini.example`. If you chose
-3b's Vault option for sudo passwords, add `--ask-vault-pass` to those commands
-and leave out `-K`.
+Most readers prepare their targets with the scripts of
+[Stage 2](stage-2-existing-machines.md) or [Stage 3](stage-3-new-vms-cloud-init.md)
+and add them in [Stage 4](stage-4-add-target-first-job.md). This page reaches
+the same result by hand, step by step, and continues
+[the manual controller path](manual-controller-ubuntu.md).
 
 ## Goal
 
@@ -84,20 +74,19 @@ requires independent verification. Do not turn off host checking to bypass it.
 ## Step 3: prepare a dedicated target account
 
 Steps 3 and 4 are also available as one playbook,
-[`examples/bootstrap-existing-vm.yml`](../examples/bootstrap-existing-vm.yml),
-run from the controller as the target's own administrator. It is useful for a
-VM that already exists, such as a cloud VM created in a portal;
-[chapter 13](13-azure.md#do-finish-access-with-one-playbook) shows it end to
-end. On a seeded controller, pass it the exported service key as well, as that
-chapter shows, or it replaces the key Semaphore uses. Without SSH, the same
-steps run as root through Azure Run Command or `sudo bash` with
-[`examples/onboard/onboard-linux.sh`](../examples/onboard/onboard-linux.sh), and
-a new VM can do them at first boot with
-[`examples/onboard/cloud-init.yaml`](../examples/onboard/cloud-init.yaml); see
-[chapter 13](13-azure.md#do-onboard-an-existing-vm-with-run-command). On a
-seeded controller, each of them ends with what `add-target.sh` needs to add the
-VM, as [the onboarding page](ONBOARDING.md#step-by-step) shows. The manual
-steps below explain what they do.
+[`onboard/existing/bootstrap-existing-vm.yml`](../onboard/existing/bootstrap-existing-vm.yml),
+run from the controller as the target's own administrator, as
+[Stage 2](stage-2-existing-machines.md#do-let-the-controller-do-it-with-the-bootstrap-playbook)
+shows. On a controller made by the installer, pass it the exported service key,
+or it replaces the key Semaphore uses. The same steps also run as root on the
+target with [`onboard/existing/onboard-linux.sh`](../onboard/existing/onboard-linux.sh),
+over SSH, from the console or through Azure Run Command, and a new VM can do
+them at first boot with
+[`onboard/new-vm/cloud-init.yaml`](../onboard/new-vm/cloud-init.yaml), as
+[Stage 3](stage-3-new-vms-cloud-init.md) shows. On a controller made by the
+installer, each of them ends with what `add-target.sh` needs to add the VM, as
+[Stage 4](stage-4-add-target-first-job.md#do-add-the-target-with-add-targetsh)
+shows. The manual steps below explain what they do.
 
 First copy the public key from the controller to each target administrator's
 home directory. This `scp`, like step 2's first connection, logs in to the
@@ -128,8 +117,15 @@ sudo install -o svc_ansible -g svc_ansible -m 0600 ~/ansible_lab.pub \
   /home/svc_ansible/.ssh/authorized_keys
 ```
 
-Choose a unique password for each target and store it in your password manager.
-It is used for sudo and console recovery; the SSH configuration below requires
+Choose the account's password and store it in your password manager. One
+password shared by the lab targets keeps Semaphore's setup to one credential;
+a unique password per target is stronger and needs a credential per target:
+one inventory per target, as
+[chapter 6](06-semaphore.md#step-2-add-credentials-in-key-store) builds by
+hand, or Vault host variables on an installer's controller, as
+[Stage 4](stage-4-add-target-first-job.md#do-give-semaphore-the-sudo-password)
+shows. It is
+used for sudo and console recovery; the SSH configuration below requires
 a key for this account. Enter the password interactively, not in a shell
 command, inventory or playbook.
 
@@ -227,7 +223,7 @@ sudo id -u
 
 The noninteractive `sudo -n true` should fail because a password is required.
 `sudo -v` should accept the account's password; `sudo id -u` should then print
-`0`. Repeat on the Enterprise Linux target with its own password.
+`0`. Repeat on the Enterprise Linux target with its password.
 
 Next, create the controller's private inventory from the repository root:
 
@@ -254,8 +250,9 @@ in the public inventory; see [Git and Vault](07-git-and-vscode.md).
 
 The service uses a separate known-hosts file. Skip this step on a controller
 made by either installer: `add-target.sh` already maintains that file, and the
-block below replaces it. After chapter 3's manual path, on the controller, copy
-only the already verified entries for the addresses your inventory uses:
+block below replaces it. After
+[the manual controller path](manual-controller-ubuntu.md), on the controller,
+copy only the already verified entries for the addresses your inventory uses:
 
 ```bash
 (

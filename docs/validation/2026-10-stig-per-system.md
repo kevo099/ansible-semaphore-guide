@@ -1,6 +1,6 @@
 # Validation record: STIG lessons per system, October 2026
 
-[Back to validation and limits](../VALIDATION.md) · [The seeded STIG templates](../09-security-benchmarks.md#the-seeded-stig-templates) · [Update a controller](../03-controller.md#update-a-controller-to-a-newer-guide-release)
+[Back to validation and limits](../VALIDATION.md) · [The seeded STIG templates](../09-security-benchmarks.md#the-seeded-stig-templates) · [Update a controller](../controller-update.md)
 
 On 11 October 2026, the per-system STIG playbooks, tabs and templates, and the
 update from release `v1.6.1`, were tested on Azure in a disposable resource

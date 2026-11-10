@@ -58,7 +58,7 @@ private recovery set; do not assume they are all under these paths.
 
 The capture is written for both controllers and has been captured and
 restored on both (see [validation](VALIDATION.md)). On the
-[Enterprise Linux controller](03-controller-el9.md) it records PostgreSQL's
+[Enterprise Linux controller](stage-1-controller.md#enterprise-linux-differences-worth-knowing) it records PostgreSQL's
 `postgresql.conf` and `pg_hba.conf` from `/var/lib/pgsql/data` instead of
 `/etc/postgresql/16/main`, and the lab folder `/opt/ansible-lab`. If you
 installed with `--lab-dir`, add that path to the `for extra in` list.
@@ -114,7 +114,7 @@ Check application readiness afterward and reopen normal job access only when
 the owning checks pass:
 
 ```bash
-sudo python3 scripts/check-controller.py
+sudo python3 controller/check-controller.py
 ```
 
 Copy the recovery set through an authenticated encrypted path to independently
@@ -173,7 +173,7 @@ as soon as the application starts.
 
 These steps and the commands below restore an Ubuntu controller onto an
 Ubuntu replacement, which is the drill recorded in [validation](VALIDATION.md).
-For a capture from the [Enterprise Linux controller](03-controller-el9.md),
+For a capture from the [Enterprise Linux controller](stage-1-controller.md#enterprise-linux-differences-worth-knowing),
 use a replacement with the same Enterprise Linux release and change these
 parts. This variant was run on a registered RHEL 9.8 controller:
 
@@ -257,7 +257,7 @@ If your configuration still uses the guide's generated 48-character hex
 database password, the helper reads it without printing it:
 
 ```bash
-sudo python3 scripts/create-database.py
+sudo python3 controller/create-database.py
 ```
 
 It refuses an existing role/database. If you have rotated credentials or

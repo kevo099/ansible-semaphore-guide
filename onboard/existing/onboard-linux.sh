@@ -1,15 +1,17 @@
 #!/bin/bash
-# Onboard an existing Linux VM for the guide's automation account, as root and
-# without SSH: paste it into Azure Run Command (RunShellScript), or run it with
-# sudo bash onboard-linux.sh on the VM itself. It is the Run Command form of
-# examples/bootstrap-existing-vm.yml and is safe to run again.
+# Onboard an existing Linux VM for the guide's automation account. Run it as
+# root on the VM itself: sudo bash onboard-linux.sh over SSH or at the console,
+# or paste it into Azure Run Command (RunShellScript), which needs no SSH. It
+# does on the VM what onboard/existing/bootstrap-existing-vm.yml does from the
+# controller, and is safe to run again. docs/stage-2-existing-machines.md shows
+# each way.
 #
 # It creates or completes svc_ansible, authorizes exactly the public keys below,
 # installs the Python bindings the lessons need, writes the sudoers rule and the
-# SSH drop-in from chapter 4, and checks both before SSH reloads, including that
+# SSH drop-in of docs/manual-access.md, and checks both before SSH reloads, including that
 # AllowUsers, AllowGroups, DenyUsers and DenyGroups let the account in. It prints
 # the host-key fingerprints to compare with ssh-keyscan from the controller, and
-# the lines to paste into scripts/add-target.sh --from-info there to add this VM.
+# the lines to paste into controller/add-target.sh --from-info there to add this VM.
 #
 # Supported: Ubuntu 24.04, AlmaLinux, Rocky Linux and RHEL 9.
 
@@ -30,15 +32,17 @@ END_OF_KEYS
 # 2. Optional: the sudo password, as a SHA-512 hash, never the password itself.
 #    Make it on the controller with: openssl passwd -6   (it prompts)
 #    Left empty, an existing password is kept and a new account has none, so
-#    its sudo waits until you set one; chapter 13 lists the ways.
+#    its sudo waits until you set one; docs/stage-2-existing-machines.md shows how.
 PASSWORD_HASH=''
 #
 # 3. Optional: the controller's address as this VM sees it, so the SSH check
 #    also evaluates Match Address rules for it. Empty checks from loopback.
 CONTROLLER_ADDRESS=''
 #
-# A managed Run Command can pass these as parameters instead, the hash as a
-# protected one: ONBOARD_PUBLIC_KEYS, ONBOARD_PASSWORD_HASH, ONBOARD_CONTROLLER_ADDRESS.
+# Environment variables of these names win over the three settings above, so
+# the file needs no editing: ONBOARD_PUBLIC_KEYS, ONBOARD_PASSWORD_HASH and
+# ONBOARD_CONTROLLER_ADDRESS. A managed Run Command passes its parameters that
+# way, the hash as a protected one.
 
 set -euo pipefail
 umask 022
@@ -76,7 +80,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-[ "$(id -u)" -eq 0 ] || fail "run as root; Azure Run Command already does"
+[ "$(id -u)" -eq 0 ] || fail "run as root, for example with: sudo bash onboard-linux.sh"
 
 # --- Inputs, checked before anything changes -----------------------------------
 key_pattern='^(ssh-rsa|ssh-ed25519|ecdsa-sha2-nistp(256|384|521)) [A-Za-z0-9+/]+={0,3}( [^[:cntrl:]]*)?$'
@@ -510,7 +514,7 @@ else
   options+=("--fingerprint with the RSA host key's fingerprint, read from the console")
 fi
 note "Add this VM on the controller: in the guide's folder, run"
-note "  sudo bash scripts/add-target.sh --from-info"
+note "  sudo bash controller/add-target.sh --from-info"
 for option in "${options[@]}"; do
   note "and add $option,"
 done

@@ -103,7 +103,7 @@ class ExposureTests(unittest.TestCase):
             executable.chmod(0o755)
         # Only the filesystem locations are relocated. The original script's
         # argument handling, distro branches, readiness checks and transitions run.
-        script = (ROOT / "scripts" / "expose-semaphore.sh").read_text()
+        script = (ROOT / "controller" / "expose-semaphore.sh").read_text()
         for original, replacement in (("/etc/semaphore", self.configuration),
                                       ("/etc/nginx", self.nginx),
                                       ("/etc/os-release", self.os_release)):

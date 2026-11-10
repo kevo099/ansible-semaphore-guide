@@ -79,10 +79,12 @@ controller_require_fresh_state() {
 }
 
 controller_check_sources() {
-  for path in controller_config.py create-database.py create-admin.py check-controller.py seed-semaphore.py add-target.sh expose-semaphore.sh summarize_xccdf.py; do
+  for path in controller_config.py create-database.py create-admin.py check-controller.py seed-semaphore.py add-target.sh expose-semaphore.sh; do
     [[ -f "$script_dir/$path" ]] || { echo "Missing helper: $path"; exit 1; }
   done
-  [[ -f "$repo_dir/templates/$1" ]] || { echo 'Missing service template.'; exit 1; }
+  # The lab folder gets its own copy of this one, at the same path the playbooks call.
+  [[ -f "$repo_dir/scripts/summarize_xccdf.py" ]] || { echo 'Missing helper: scripts/summarize_xccdf.py'; exit 1; }
+  [[ -f "$script_dir/templates/$1" ]] || { echo 'Missing service template.'; exit 1; }
   [[ -d "$repo_dir/playbooks" && -f "$repo_dir/ansible.cfg" ]] || { echo 'Missing guide playbooks.'; exit 1; }
   [[ -f "$repo_dir/requirements-controller.txt" ]] || { echo 'Missing requirements-controller.txt.'; exit 1; }
 }
@@ -169,7 +171,7 @@ controller_start() {
   if [[ "$controller_family" == el ]]; then restorecon -F /usr/local/bin/semaphore; fi
   runuser -u semaphore -- /usr/local/bin/semaphore migrate --config /etc/semaphore/config.json
   python3.12 "$script_dir/create-admin.py"
-  install -o root -g root -m 0644 "$repo_dir/templates/$1" /etc/systemd/system/semaphore.service
+  install -o root -g root -m 0644 "$script_dir/templates/$1" /etc/systemd/system/semaphore.service
   systemctl daemon-reload
   systemctl enable --now semaphore
 
@@ -203,7 +205,7 @@ controller_seed_lab() {
 # Local lab inventory read by Semaphore at every run. Add one line per target
 # under the matching group, for example:
 #   lab-ubuntu ansible_host=ubuntu.example.test
-# Use scripts/add-target.sh to add a host together with its verified host key.
+# Use controller/add-target.sh to add a host together with its verified host key.
 [ubuntu]
 
 [enterprise_linux]
@@ -257,7 +259,7 @@ controller_finish() {
   fi
 
   printf '\nController installed and seeded. Next: authorize the automation key on each target\n'
-  printf 'and add each target with its verified host key (scripts/add-target.sh --lab-dir %s).\n' "$lab_dir"
+  printf 'and add each target with its verified host key (controller/add-target.sh --lab-dir %s).\n' "$lab_dir"
   printf 'Automation public key: /etc/semaphore/svc_ansible.pub\n'
   printf 'Local lab folder (edit as %s): %s\n' "$editor" "$lab_dir"
   printf 'The initial admin password is in /etc/semaphore/initial-admin-password (root only).\n'

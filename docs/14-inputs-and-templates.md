@@ -41,7 +41,7 @@ find /opt/ansible-lab ! -group semaphore
 ```
 
 The `find` must print nothing; see
-[3b's group rule](03-controller-el9.md#do-give-the-templates-the-targets-sudo-password).
+[Stage 4's group rule](stage-4-add-target-first-job.md#do-give-semaphore-the-sudo-password).
 
 Assertions check the playbook's allowed values, including inputs supplied by
 an API caller. They are not a sandbox for hostile Jinja: Ansible can evaluate
@@ -83,7 +83,7 @@ working inventory from chapter 6, and both **Variable Groups**. Set **Ansible
 options → Limit** to one inventory alias, such as `lab-ubuntu`. Leave **CLI
 args** empty and check boxes under **Prompts** and **Ansible prompts** off.
 
-If your inventory uses chapter 3b's encrypted host variables, also select
+If your inventory uses Stage 4's encrypted host variables, also select
 **Lab vault password** under **Ansible options → Vaults**, as on your working
 lesson templates; without it the play stops before the demo's assertions.
 

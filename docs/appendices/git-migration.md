@@ -1,6 +1,6 @@
 # Appendix: move the seeded lab folder to a Git repository
 
-[Back to the Enterprise Linux controller](../03-controller-el9.md) · [Git and VS Code](../07-git-and-vscode.md)
+[Back to Stage 4](../stage-4-add-target-first-job.md) · [Git and VS Code](../07-git-and-vscode.md)
 
 ## Goal
 
@@ -8,7 +8,7 @@ Publish the seeded controller's playbooks to a private Git repository without
 publishing its inventory, Vault files or history you did not mean to share,
 and switch templates to it one at a time.
 
-This applies to the [Enterprise Linux seeded controller](../03-controller-el9.md),
+This applies to a controller made by either [installer](../stage-1-controller.md),
 whose **Local lab folder** repository is `/opt/ansible-lab`. The
 [Git chapter](../07-git-and-vscode.md) explains the difference between edited,
 committed, pushed and executed code; read it first.
@@ -79,7 +79,7 @@ git log --oneline -- inventories/
 
 The last command now prints nothing, and the working tree, `inventories/`
 included, is unchanged. Keep `local-history` on the controller: until an update
-has written `.guide-files.json`, `scripts/update-controller.sh` finds the
+has written `.guide-files.json`, `controller/update-controller.sh` finds the
 guide's earlier versions in the installer's first commit, which now lives only
 on that branch. Running one update before re-rooting avoids depending on it. Push only to a **private** repository:
 

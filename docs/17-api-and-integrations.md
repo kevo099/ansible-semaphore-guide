@@ -37,7 +37,7 @@ the pinned 2.19.12 implementation.
 A user API token acts as its user; it is not scoped to a project or resource.
 Use a dedicated low-privilege user per integration, with membership only where
 needed. The one exception is the token for the guide's own
-`scripts/update-controller.sh`, which must belong to a Semaphore administrator
+`controller/update-controller.sh`, which must belong to a Semaphore administrator
 or to the project's owner or a manager; create it for that run and delete it
 afterwards. Arrange it through [identity and roles](15-identity.md); keep resource
 setup with the project owner. A token acts with its user's **current** project

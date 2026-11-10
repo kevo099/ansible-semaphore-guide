@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def load(name):
-    spec = importlib.util.spec_from_file_location(name, ROOT / "scripts" / f"{name}.py")
+    spec = importlib.util.spec_from_file_location(name, ROOT / "controller" / f"{name}.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -153,7 +153,7 @@ class SeedPlanTests(unittest.TestCase):
                                  "reboot" in old)
 
     def test_installers_create_a_content_folder_for_each_stig_system(self):
-        common = (ROOT / "scripts/controller-common.sh").read_text()
+        common = (ROOT / "controller/controller-common.sh").read_text()
         folders = re.search(r"for system in ([^;]+); do", common).group(1).split()
         self.assertEqual(folders, [folder for _label, folder, _group, _file in seed.STIG_SYSTEMS])
 

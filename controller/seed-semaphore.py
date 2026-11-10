@@ -6,7 +6,7 @@ logs in with the locally generated admin password, creates one project and its
 dependent objects through the HTTP API on loopback, including the vendor STIG
 lessons, and prints only names and numeric identifiers. It refuses to run twice.
 
-With --update, scripts/update-controller.sh runs it on a controller that is
+With --update, controller/update-controller.sh runs it on a controller that is
 already seeded: it adds the variable groups, template tabs and templates this
 release seeds that the project lacks, and puts untabbed seeded templates on
 their tab. Seeded objects that this release replaces are reported and kept;
@@ -639,7 +639,7 @@ def save_verified(client, path, before, desired, backup_dir):
 def seeded_vaults(client, base, found):
     """The vault passwords that every seeded template shares, for the templates an update adds.
 
-    Chapter 3b's per-target sudo option adds a vault password to every template.
+    Stage 4's per-target sudo option adds a vault password to every template.
     Returns (vaults, note): vaults is empty when the seeded templates use none or
     differ, and note says what a person should check then.
     """

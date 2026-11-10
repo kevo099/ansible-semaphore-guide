@@ -20,7 +20,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def load(name):
-    spec = importlib.util.spec_from_file_location(name, ROOT / "scripts" / f"{name}.py")
+    # The controller's tools live in controller/; scripts/ keeps what the lab folder copies.
+    folder = "controller" if (ROOT / "controller" / f"{name}.py").is_file() else "scripts"
+    spec = importlib.util.spec_from_file_location(name, ROOT / folder / f"{name}.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -62,7 +64,7 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(config_module.make_config()["home_dir_mode"], "user_home")
         for unit in ("semaphore.service", "semaphore-el9.service", "semaphore-runner.service"):
             with self.subTest(unit=unit):
-                lines = (ROOT / "templates" / unit).read_text().splitlines()
+                lines = (ROOT / "controller" / "templates" / unit).read_text().splitlines()
                 self.assertIn("ProtectSystem=strict", lines)
                 home = next(line for line in lines if line.startswith("Environment=HOME=")).partition("HOME=")[2]
                 writable = next(line for line in lines if line.startswith("ReadWritePaths=")).partition("=")[2]
@@ -181,7 +183,7 @@ module.exit_json(changed=True)
 """
 
     def tasks(self, playbook):
-        content = yaml.safe_load((ROOT / "examples" / "azure" / playbook).read_text())
+        content = yaml.safe_load((ROOT / "platforms" / "azure" / playbook).read_text())
         return content[0]["tasks"] if "hosts" in content[0] else content
 
     def disk_expression(self, playbook, task_prefix):
@@ -245,7 +247,7 @@ module.exit_json(changed=True)
                 self.assertEqual(results, ["True", str(accepted)])
 
     def test_https_is_opened_only_from_the_given_prefix_and_ahead_of_the_deny_rule(self):
-        play = yaml.safe_load((ROOT / "examples" / "azure" / "controller.yml").read_text())[0]
+        play = yaml.safe_load((ROOT / "platforms" / "azure" / "controller.yml").read_text())[0]
         task = next(t for t in play["tasks"] if t["name"].startswith("Network security group"))
         self.assertIs(task["azure.azcollection.azure_rm_securitygroup"]["purge_rules"], True)
         expression = task["azure.azcollection.azure_rm_securitygroup"]["rules"].strip()
@@ -427,7 +429,7 @@ module.exit_json(changed=True)
         for playbook, task_prefix, owner in (("targets.yml", "Target VMs", "item"),
                                              ("controller.yml", "Controller VM", "azure_controller")):
             with self.subTest(playbook=playbook):
-                tasks = yaml.safe_load((ROOT / "examples" / "azure" / playbook).read_text())[0]["tasks"]
+                tasks = yaml.safe_load((ROOT / "platforms" / "azure" / playbook).read_text())[0]["tasks"]
                 task = next(t for t in tasks if t["name"].startswith(task_prefix))
                 self.assertEqual(task["azure.azcollection.azure_rm_virtualmachine"]["plan"],
                                  "{{ " + owner + ".plan | default(omit) }}")
@@ -461,7 +463,7 @@ class BootstrapKeyPathTests(unittest.TestCase):
     ]
 
     def test_relative_token_and_absolute_paths_resolve(self):
-        play = yaml.safe_load((ROOT / "examples" / "bootstrap-existing-vm.yml").read_text())[0]
+        play = yaml.safe_load((ROOT / "onboard" / "existing" / "bootstrap-existing-vm.yml").read_text())[0]
         expression = None
         for task in play["tasks"]:
             for inner in task.get("block", []):

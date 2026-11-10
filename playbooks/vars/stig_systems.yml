@@ -1,7 +1,7 @@
 ---
 # The systems that have their own STIG playbooks under playbooks/stig/, keyed the
 # way the STIG playbooks name a host's system (stig_os_key). The seeded Semaphore
-# templates of each system start with its label; scripts/seed-semaphore.py lists the same.
+# templates of each system start with its label; controller/seed-semaphore.py lists the same.
 stig_systems:
   RedHat-9: {label: RHEL 9, folder: rhel/9}
   AlmaLinux-9: {label: AlmaLinux 9, folder: almalinux/9}

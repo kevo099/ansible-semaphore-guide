@@ -20,13 +20,13 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ONBOARD = (ROOT / "examples" / "onboard" / "onboard-linux.sh").read_text()
-CLOUD_INIT_TEXT = (ROOT / "examples" / "onboard" / "cloud-init.yaml").read_text()
+ONBOARD = (ROOT / "onboard" / "existing" / "onboard-linux.sh").read_text()
+CLOUD_INIT_TEXT = (ROOT / "onboard" / "new-vm" / "cloud-init.yaml").read_text()
 CLOUD_INIT = yaml.safe_load(CLOUD_INIT_TEXT)
-PLAYBOOK_TEXT = (ROOT / "examples" / "bootstrap-existing-vm.yml").read_text()
+PLAYBOOK_TEXT = (ROOT / "onboard" / "existing" / "bootstrap-existing-vm.yml").read_text()
 PLAYBOOK = yaml.safe_load(PLAYBOOK_TEXT)[0]
-CHAPTER_4 = (ROOT / "docs" / "04-access.md").read_text()
-ADD_TARGET = (ROOT / "scripts" / "add-target.sh").read_text()
+CHAPTER_4 = (ROOT / "docs" / "manual-access.md").read_text()
+ADD_TARGET = (ROOT / "controller" / "add-target.sh").read_text()
 BASH = shutil.which("bash")
 # Documentation addresses (RFC 5737), built in parts so the publication check accepts them.
 TEST_NET = ".".join(("192", "0", "2"))
@@ -120,7 +120,7 @@ class AddTargetLineMixin:
         self.assertEqual(sorted(CHECKS), ["address", "fingerprint", "name"])
         self.assertEqual(GROUPS, ["ubuntu", "enterprise_linux"])
         words = shlex.split(line)
-        self.assertEqual(words[:3], ["sudo", "bash", "scripts/add-target.sh"], line)
+        self.assertEqual(words[:3], ["sudo", "bash", "controller/add-target.sh"], line)
         options = dict(zip(words[3::2], words[4::2]))
         self.assertEqual(len(words), 3 + 2 * len(options), line)
         self.assertEqual(set(options) - {"--lab-dir"}, {"--name", "--address", "--group", "--fingerprint"}, line)
@@ -149,7 +149,7 @@ class AddTargetInfoMixin:
         lines = [line.removeprefix(prefix) for line in lines]
         left_out = [key for key, value in expected.items() if value is None]
         self.assertEqual(lines[:2], ["Add this VM on the controller: in the guide's folder, run",
-                                     "  sudo bash scripts/add-target.sh --from-info"])
+                                     "  sudo bash controller/add-target.sh --from-info"])
         self.assertEqual(lines[2:2 + len(left_out)], [f"and add {self.OPTIONS[key]}," for key in left_out])
         self.assertEqual(lines[2 + len(left_out)], "then paste these lines and press Ctrl-D:")
         values = dict(line.split("=", 1) for line in lines[3 + len(left_out):])
@@ -184,7 +184,7 @@ class AddTargetInfoMixin:
             Path(work, "known_hosts").write_text("")
             # add-target.sh needs root and scans the target; stand-ins answer for both.
             path = stand_ins(work, {"id": "echo 0", "ssh-keyscan": f'for last; do :; done; echo "$last {key}"'})
-            result = subprocess.run([BASH, str(ROOT / "scripts" / "add-target.sh"), "--from-info", *options,
+            result = subprocess.run([BASH, str(ROOT / "controller" / "add-target.sh"), "--from-info", *options,
                                      "--lab-dir", str(Path(work, "lab")),
                                      "--known-hosts", str(Path(work, "known_hosts"))],
                                     input=output, capture_output=True, text=True, env=dict(os.environ, PATH=path),
@@ -194,7 +194,7 @@ class AddTargetInfoMixin:
 
 
 class SharedSettingsTests(unittest.TestCase):
-    """cloud-init, onboard-linux.sh, the playbook and chapter 4 each carry the same settings."""
+    """cloud-init, onboard-linux.sh, the playbook and the by-hand access page (once chapter 4) each carry the same settings."""
 
     def cloud_init_file(self, path):
         return next(entry["content"] for entry in CLOUD_INIT["write_files"] if entry["path"] == path)
@@ -244,7 +244,7 @@ class SharedSettingsTests(unittest.TestCase):
     def test_the_scripts_leave_out_every_name_add_target_refuses(self):
         # Printed, such a name would be refused, and so would --name next to it, as a value
         # given both ways; left out, the output asks for --name.
-        common = (ROOT / "scripts" / "controller-common.sh").read_text()
+        common = (ROOT / "controller" / "controller-common.sh").read_text()
         seeded = re.search(r"<<'INVENTORY'\n(.*?)^INVENTORY$", common, re.S | re.M)[1]
         groups = {header.split(":")[0] for header in re.findall(r"^\[([^]]+)\]$", seeded, re.M)}
         self.assertEqual(set(RESERVED_NAMES), {"localhost", "all", "ungrouped"} | groups)
@@ -260,7 +260,7 @@ class SharedSettingsTests(unittest.TestCase):
             for name in RESERVED_NAMES:
                 with self.subTest(name=name):
                     result = subprocess.run(
-                        [BASH, str(ROOT / "scripts" / "add-target.sh"), "--name", name, "--address", f"{TEST_NET}.12",
+                        [BASH, str(ROOT / "controller" / "add-target.sh"), "--name", name, "--address", f"{TEST_NET}.12",
                          "--group", "ubuntu", "--fingerprint", FINGERPRINT, "--lab-dir", str(lab),
                          "--known-hosts", str(Path(work, "known_hosts"))],
                         capture_output=True, text=True, env=dict(os.environ, PATH=path), timeout=60)
@@ -723,11 +723,11 @@ class PlaybookTests(AddTargetLineMixin, unittest.TestCase):
     def test_targets_yml_passes_cloud_init_yaml_through_unchanged(self):
         # It reads the file with a lookup and replaces only the key placeholder; nothing in
         # the file, such as Bash's ${#array[@]}, may be taken for a template.
-        targets = yaml.safe_load((ROOT / "examples" / "azure" / "targets.yml").read_text())[0]["vars"]
+        targets = yaml.safe_load((ROOT / "platforms" / "azure" / "targets.yml").read_text())[0]["vars"]
         key = "ssh-rsa AAAAB3NzaC1yc2E= ansible-practice"
-        path = str(ROOT / "examples" / "onboard" / "cloud-init.yaml")
+        path = str(ROOT / "onboard" / "new-vm" / "cloud-init.yaml")
         given = {"automation_public_key": key, "cloud_init_data": targets["cloud_init_data"],
-                 "cloud_init_template": targets["cloud_init_template"].replace("../onboard/cloud-init.yaml", path)}
+                 "cloud_init_template": targets["cloud_init_template"].replace("../../onboard/new-vm/cloud-init.yaml", path)}
         self.assertNotEqual(given["cloud_init_template"], targets["cloud_init_template"])
         [rendered] = self.render("cloud_init_data", [given])
         self.assertEqual(rendered, CLOUD_INIT_TEXT.rstrip().replace('"REPLACE_WITH_AUTOMATION_PUBLIC_KEY"', json.dumps(key)))

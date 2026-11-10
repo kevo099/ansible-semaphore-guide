@@ -27,10 +27,16 @@ run; this page only summarizes them.
 | Azure (chapter 13) | The example playbooks created a controller and two cloud-init targets; a one-shot playbook prepared a third VM created outside Ansible; all lessons, a Semaphore run, reboots, stop and start, and removal passed, with `changed=0` repeats. A review's fixes were retested on a second lab. | [Azure record](validation/2026-09-azure.md) |
 | Onboarding, STIG and seeded controllers on Azure | The universal cloud-init file and the Run Command script prepared Ubuntu 24.04, AlmaLinux 9.8 and RHEL 9.8 VMs, including existing VMs without SSH, and refused the unsafe inputs and configurations two reviews raised. The vendor STIG with reboot hardened Ubuntu Pro, AlmaLinux and RHEL targets, after which the lessons still repeated with `changed=0`. Both seeded installers, including all Ubuntu exposure modes, ran on Azure, and the local SCAP content template scanned with DISA's RHEL 9 and Ubuntu 24.04 benchmarks. | [Onboarding and STIG record](validation/2026-09-onboard-stig.md) |
 | From a VM to an onboarded target | Every way of preparing a VM in [the onboarding map](ONBOARDING.md) ran on Azure in October, the console path over SSH, first from `v1.7.1` and then with this release, on RHEL, AlmaLinux and Rocky Linux 9.8 and Ubuntu 24.04 targets, with an AlmaLinux controller and then a fresh Ubuntu one. The review's fixes were checked live, including the bootstrap playbook's key-path fix, Rocky Linux's Marketplace plan, kept scheduled templates and SSH connection reuse. The vendor STIG with reboot ran on all four systems, Rocky Linux for the first time. | [October onboarding record](validation/2026-10-onboarding.md) |
-| Inventory info-grabber and `add-target.sh --from-info` | Offline tests cover address selection, the printed values and how `add-target.sh --from-info` reads them, duplicate/conflict refusal, SSH fingerprint verification and the Azure output limit. Live: the lines VMs printed through Run Command, cloud-init's log and `inventory-info.sh`, pasted at the prompt in an SSH terminal or piped in, added three VMs, and the command the bootstrap playbook printed added a fourth; a late remainder never reached the shell, Ctrl-C cancelled, hostile values were refused with nothing changed, and a rebuilt VM's new key was trusted after the two commands its refusal printed. | [Usage and limits](13-azure.md#do-read-a-vms-values-for-the-controller), [the record](validation/2026-10-onboarding.md#a-fresh-ubuntu-controller-and-the-data-handoff), `tests/test_inventory_info.py` and `tests/test_add_target.py` |
+| The five stages on Proxmox | The stage pages were followed on Proxmox VE 9.2 in November: an Ubuntu controller and an AlmaLinux controller from `controller/`, a `v1.8.0` controller updated in place, `onboard-linux.sh` and the bootstrap playbook on machines that existed, `cloud-init.yaml` as vendor data on new Ubuntu 24.04, AlmaLinux 9.8 and Rocky Linux 9.8 VMs and on a clone, a NoCloud seed, and `add-target.sh --from-info` with console-stamped lines; Ping and Baseline passed on all three systems. RHEL as a controller, Azure and a browser walk through Semaphore were not rerun. | [Record](validation/2026-11-workflow-proxmox.md) |
+| Inventory info-grabber and `add-target.sh --from-info` | Offline tests cover address selection, the printed values and how `add-target.sh --from-info` reads them, duplicate/conflict refusal, SSH fingerprint verification and the Azure output limit. Live: the lines VMs printed through Run Command, cloud-init's log and `inventory-info.sh`, pasted at the prompt in an SSH terminal or piped in, added three VMs, and the command the bootstrap playbook printed added a fourth; a late remainder never reached the shell, Ctrl-C cancelled, hostile values were refused with nothing changed, and a rebuilt VM's new key was trusted after the two commands its refusal printed. | [Usage and limits](platform-azure.md#do-read-a-vms-values-for-the-controller), [the record](validation/2026-10-onboarding.md#a-fresh-ubuntu-controller-and-the-data-handoff), `tests/test_inventory_info.py` and `tests/test_add_target.py` |
 | Updating a controller | Controllers installed from `v1.4.0` were updated in place: three guide files updated, the operator's own playbook and a committed `ansible.cfg` change kept across repeated updates, the new variable group, template and tabs added with every template setting intact; Ping, the vendor STIG audit and the local SCAP content audit then ran. Unsafe lab-folder states were refused with nothing changed, a fresh install seeded the tabs, and repeat updates changed nothing. | [Update record](validation/2026-09-update.md) |
 | STIG lessons per system | A controller installed from `v1.6.1` was updated to one STIG tab per system and version: per-system audits scanned only their own hosts and skipped the others, an audit with no host of its system and an apply on the wrong system stopped with explanations, both DISA SCAP file templates scanned from their system folders, and an AlmaLinux apply with reboot matched the earlier record. `--remove-replaced` deleted the old templates and tab after a backup, kept a variable group holding the operator's values, and took the old templates' task history with them. A fresh install seeded the same tabs. | [Per-system STIG record](validation/2026-10-stig-per-system.md) |
 | Reorganized chapters | Chapter 3b's exposure, STIG and repository-migration sections moved to [browser access](appendices/browser-access.md), [chapter 9](09-security-benchmarks.md#the-seeded-stig-templates) and [the Git migration appendix](appendices/git-migration.md) with their commands unchanged. The moves passed the offline checks. | This page |
+
+Records from before the stage reorganization name pages by their former
+chapter numbers: chapters 1 and 2 are now Stage 0 and the Proxmox page, 3 and
+3b Stage 1 and the by-hand controller page, 4 the by-hand access page, and 13
+the Azure page.
 
 ## Not established
 
@@ -61,9 +67,10 @@ run; this page only summarizes them.
 - Clicking every UI form. The feature campaign drove Semaphore through its API
   and command line, with the same request bodies the UI sends; the chapters name
   the UI labels of 2.19.12.
-- Chapter 2's manual ISO installation, editing through VS Code Remote SSH in
-  chapter 7, and the troubleshooting chapter's diagnostics as a separate
-  exercise. The Azure chapter's own limits are in
+- The manual ISO installation of
+  [the Proxmox page](platform-proxmox.md#do-build-a-vm-from-an-iso), editing
+  through VS Code Remote SSH in chapter 7, and the troubleshooting chapter's
+  diagnostics as a separate exercise. The Azure page's own limits are in
   [its record](validation/2026-09-azure.md#not-established) and the
   [onboarding and STIG record](validation/2026-09-onboard-stig.md#not-established).
 
@@ -77,13 +84,13 @@ python3.12 -m venv .venv
 .venv/bin/python -m pip install -r requirements-dev.txt
 .venv/bin/python scripts/validate.py
 .venv/bin/python -m unittest discover -s tests -v
-.venv/bin/ansible-galaxy collection install -r examples/azure/requirements.yml
-for playbook in playbooks/*.yml examples/*.yml examples/semaphore/*.yml \
-    examples/azure/{network,controller,targets,power,remove}.yml; do
+.venv/bin/ansible-galaxy collection install -r platforms/azure/requirements.yml
+for playbook in playbooks/*.yml playbooks/stig/*/*/*.yml onboard/existing/*.yml examples/semaphore/*.yml \
+    platforms/azure/{network,controller,targets,power,remove}.yml; do
   .venv/bin/ansible-playbook -i inventories/lab.ini.example --syntax-check "$playbook"
 done
-.venv/bin/ansible-lint --offline playbooks/ examples/
-for installer in scripts/install-controller.sh scripts/install-controller-el9.sh; do
+.venv/bin/ansible-lint --offline playbooks/ examples/ onboard/ platforms/
+for installer in controller/install-controller.sh controller/install-controller-el9.sh; do
   bash "$installer" | grep '^Plan:'
   bash "$installer" --plan >/dev/null
 done
@@ -105,7 +112,7 @@ The unit tests cover unique locally generated secrets, refusing file
 overwrite/symlinks, the Semaphore seeding plan (local repository, file
 inventory, scoped templates, preview-only arguments, no key material), the
 publication-boundary rules of `scripts/validate.py`, the readiness parsers in
-`scripts/check-controller.py`, and the contracts between the lesson playbooks
+`controller/check-controller.py`, and the contracts between the lesson playbooks
 and the seeder: the accepted distributions and their STIG data streams, the
 approval phrase, and the helper scripts the playbooks call. They also cover
 XCCDF assessments containing repeated rules, multiple results, missing results
