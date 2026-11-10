@@ -1,6 +1,6 @@
 # Stage 4: add the target and run the first job
 
-[Back to the guide](../README.md) · [Previous: Stage 2, existing machines](stage-2-existing-machines.md) or [Stage 3, new VMs](stage-3-new-vms-cloud-init.md) · [Next: go further](../README.md)
+[Back to the guide](../README.md) · [Previous: Stage 2, existing machines](stage-2-existing-machines.md) or [Stage 3, new VMs](stage-3-new-vms-cloud-init.md) · [Next: go further](../README.md#go-further)
 
 ## Goal
 
@@ -55,7 +55,7 @@ Using name=lab-alma address=alma.example.test group=enterprise_linux fingerprint
 Added lab-alma (alma.example.test) to /opt/ansible-lab/inventories/lab.ini under [enterprise_linux] and trusted its verified host key.
 Next: run the Ping template, which covers every host in the lab group. If lab-alma fails with Permission denied (publickey),
 svc_ansible on lab-alma lacks the key 'sudo cat /etc/semaphore/svc_ansible.pub' shows; if sudo asks for a
-password, give Semaphore the targets' sudo password, as chapter 3b shows.
+password, give Semaphore the targets' sudo password, as docs/stage-4-add-target-first-job.md shows.
 ```
 
 Running it again with the same lines changes nothing and says
@@ -353,4 +353,4 @@ The target is onboarded. Go further, in this order:
    templates need the recovery preparation first.
 6. [The learning path](12-learning-path.md).
 
-[The guide's front page](../README.md) lists the rest.
+[Go further](../README.md#go-further) on the front page lists the rest.

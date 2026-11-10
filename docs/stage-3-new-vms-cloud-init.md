@@ -26,9 +26,9 @@ place.
   Linux or RHEL 9, the systems `cloud-init.yaml` names in its header. Use the
   official image and verify it as [Stage 0](stage-0-plan.md) describes.
   Cloud images ship cloud-init; an installer ISO does not run this file.
-- **A platform that passes user data to cloud-init**: Proxmox VE (worked
-  below), any hypervisor that can attach a small ISO (a NoCloud seed, below),
-  or Azure (custom data).
+- **A platform that hands cloud-init its data at the first boot**: Proxmox VE
+  (worked below), any hypervisor that can attach a small ISO (a NoCloud seed,
+  below), or Azure (custom data).
 - **An administrator for the VM** other than `svc_ansible`, with your own SSH
   public key. The VM's administrator is how you reach it if something goes
   wrong, and how you set the sudo password below. Never name it `svc_ansible`:
@@ -38,8 +38,10 @@ place.
 What the file does at the first boot, as its own text shows:
 
 - creates `svc_ansible` with the service key, a login shell and **no
-  password** (`lock_passwd: true`), and keeps the image's default user
-  (`users: [default, svc_ansible]`);
+  password**, and keeps the image's default user. Its `users:` list does that
+  where cloud-init applies it. Where the platform's own user data replaces
+  that list, as Proxmox's does, the file's script creates the account itself
+  and says so: `onboard: created svc_ansible here, ...`;
 - writes the sudoers rule `/etc/sudoers.d/90-ansible-lab`
   (`svc_ansible ALL=(ALL:ALL) ALL`, so sudo asks for its password) and the SSH
   drop-in `/etc/ssh/sshd_config.d/70-ansible-lab.conf` (public key only for
@@ -103,12 +105,12 @@ svc_ansible ssh-rsa AAAAB3NzaC1y
 Where cloud-init is installed, for example on an Ubuntu 24.04 controller,
 also validate it as cloud-config:
 
-<!-- VERIFY-LIVE: cloud-init schema --config-file on Ubuntu 24.04 runs without root and prints "Valid schema" plus the path for the filled file -->
 ```bash
 cloud-init schema --config-file ~/onboard-new-vm.yaml
 ```
 
-It should report a valid schema. The same filled copy serves every new VM
+It prints `Valid schema` and the file's path; warnings above that line about
+files it may not read are harmless. The same filled copy serves every new VM
 that this controller manages; keep it with the guide's folder, not in a
 public repository of your own (it holds only a public key, but it is your
 lab's).
@@ -120,6 +122,11 @@ lab's).
 this section gives the order. `VMID`, `NAME`, `STORAGE` (a storage for VM
 disks, such as `local-lvm`) and `vmbr0` are your own values. Check the node's
 free memory and storage first.
+
+On Proxmox the file is **vendor data**. Proxmox writes each VM's user data
+itself, from the settings on the VM's **Cloud-Init** panel: the administrator,
+its SSH key, the hostname and the network. Vendor data sits beside that, so
+the panel keeps working, and one copy of the file serves every VM.
 
 1. **Once per storage: allow snippets.** cloud-init files live on a storage
    with the `snippets` content type. On the default `local` directory storage
@@ -140,23 +147,23 @@ free memory and storage first.
    [the cloud-image example](platform-proxmox.md#do-build-a-vm-from-a-cloud-image)
    explains, but do not start it yet:
 
-   <!-- VERIFY-LIVE: on Proxmox VE 8 and 9: qm create with these options, scsi0 import-from a qcow2/.img cloud image, ide2 cloudinit, boot order, serial console, ciuser/sshkeys/ipconfig0/searchdomain, and qm resize to an absolute size -->
    ```bash
-   qm create VMID --name NAME --ostype l26 --cpu host --cores 2 --memory 3072 \
+   qm create VMID --name NAME --ostype l26 --cpu host --cores 2 --memory 2048 \
      --scsihw virtio-scsi-single --net0 virtio,bridge=vmbr0 \
      --serial0 socket --vga serial0 --agent enabled=1
    qm set VMID --scsi0 STORAGE:0,import-from=/root/IMAGE_FILE
    qm set VMID --ide2 STORAGE:cloudinit --boot order=scsi0
-   qm set VMID --ciuser ADMIN --sshkeys /root/ADMIN_KEY.pub --ipconfig0 ip=dhcp \
-     --searchdomain lab.example
-   qm resize VMID scsi0 40G
+   qm set VMID --ciuser ADMIN --sshkeys /root/ADMIN_KEY.pub --ipconfig0 ip=dhcp
+   qm resize VMID scsi0 20G
    ```
 
    For a fixed address use `--ipconfig0 ip=VM_ADDRESS/PREFIX,gw=GATEWAY_ADDRESS` and
-   `--nameserver`. Proxmox names the guest after the VM's `--name`.
+   `--nameserver`. Proxmox names the guest after the VM's `--name`, on Ubuntu
+   and on Enterprise Linux alike, so choose a name the inventory can use: not
+   `localhost`, `lab`, `ubuntu` or `enterprise_linux`.
 
-4. **Enterprise Linux only: add the VirtIO RNG and a full name.** Without the
-   RNG device, Rocky Linux's `rngd` fails at boot, as
+4. **Enterprise Linux only: add the VirtIO RNG.** Without it, Rocky Linux's
+   `rngd` fails at boot, as
    [the RNG section](platform-proxmox.md#do-give-enterprise-linux-guests-a-virtio-rng)
    explains:
 
@@ -164,99 +171,80 @@ free memory and storage first.
    qm set VMID --rng0 source=/dev/urandom
    ```
 
-   Enterprise Linux cloud images ignore a short hostname and keep the static
-   name `localhost` unless cloud-init also gets an `fqdn`. Then the VM leaves
-   its `name=` line out, and Stage 4 asks for `--name`. Alternative A below
-   relies on Proxmox to supply `fqdn` from the VM name and `--searchdomain`;
-   Alternative B writes it into the file.
+5. **Attach the file as vendor data**, and look at what Proxmox will send:
 
-5. **Attach the file, in one of the two ways below.** Only one of them is
-   right on Proxmox VE 9; until it is confirmed, the two are kept apart. Read
-   both checks before you choose.
+   ```bash
+   qm set VMID --cicustom "vendor=local:snippets/onboard-new-vm.yaml"
+   qm cloudinit dump VMID user
+   ```
 
-<!-- VERIFY-LIVE: Alternative A, on Proxmox VE 9 with an Ubuntu 24.04 and an AlmaLinux 9 cloud image. Before start: `qm cloudinit dump VMID user` still shows Proxmox's own hostname, fqdn, user (ADMIN) and ssh_authorized_keys, and note whether it also contains `users:` with `- default`. After first boot: `id svc_ansible` succeeds; `sudo grep 'onboard:' /var/log/cloud-init-output.log` ends with name=, address=, group= and fingerprint= lines and shows no `onboard: ERROR`; ADMIN logs in with its key; `hostnamectl` shows NAME (not localhost) on AlmaLinux. If Proxmox's `users:` list replaces the file's, svc_ansible is missing and the log says `onboard: ERROR: svc_ansible has no valid public key`: then delete Alternative A. -->
-### Alternative A: the file as vendor data
+   ```text
+   #cloud-config
+   hostname: NAME
+   manage_etc_hosts: true
+   fqdn: NAME
+   user: ADMIN
+   ssh_authorized_keys:
+     - ssh-ed25519 AAAA...
+   chpasswd:
+     expire: False
+   users:
+     - default
+   package_upgrade: true
+   ```
 
-Proxmox keeps generating the user data from the VM's own settings (`ciuser`,
-`sshkeys`, the VM name, `searchdomain`), and cloud-init reads this file as
-vendor data beside it. One copy of the file serves every VM.
+   The dump is Proxmox's own user data, unchanged by the snippet: your
+   administrator, key and hostname. Its `users:` list is the one that replaces
+   the file's, which is why the file creates `svc_ansible` in its script here.
+   `package_upgrade: true` makes the first boot install every pending update,
+   which can take several minutes; `qm set VMID --ciupgrade 0` turns that off.
 
-```bash
-qm set VMID --cicustom "vendor=local:snippets/onboard-new-vm.yaml"
-qm cloudinit dump VMID user
-```
-
-The dump is Proxmox's generated user data. cloud-init merges vendor data
-under user data, and user data wins a key both define. If the dump has its
-own `users:` list, it can replace the file's list, and `svc_ansible` would not
-be created; the check after the first boot shows it.
-
-<!-- VERIFY-LIVE: Alternative B, on Proxmox VE 9 with an Ubuntu 24.04 and an AlmaLinux 9 cloud image. Before start: `qm cloudinit dump VMID user` prints the per-VM snippet itself, not Proxmox's generated data (ciuser/sshkeys no longer appear). After first boot: `id svc_ansible` succeeds; ADMIN from the added block logs in with its key; `hostnamectl` shows NAME, also on AlmaLinux; the `onboard:` lines include name=, address=, group= and fingerprint=. Also note whether --ipconfig0 networking still applies (it comes from the separate network data). If ADMIN cannot log in or svc_ansible is missing, delete Alternative B. -->
-### Alternative B: the file as the whole user data
-
-With `user=`, the snippet **replaces** the user data Proxmox would generate,
-so the VM's `ciuser`, `sshkeys`, password and hostname no longer reach it.
-Without them, the image's default user has no key and the hostname stays the
-image's (`ubuntu` or `localhost`), which the scripts refuse as a name. So make
-one copy per VM that adds them. **Where: the controller, in your home
-folder**, with the administrator's public key copied there as
-`~/ADMIN_KEY.pub`:
-
-```bash
-python3 - NAME lab.example ADMIN ~/ADMIN_KEY.pub ~/onboard-new-vm.yaml ~/onboard-NAME.yaml <<'PY'
-import json
-import sys
-
-name, domain, admin, key_file, source, target = sys.argv[1:]
-if admin == "svc_ansible":
-    sys.exit("choose another administrator name")
-key = open(key_file).read().strip()
-extra = (
-    "hostname: " + name + "\n"
-    "fqdn: " + name + "." + domain + "\n"
-    "manage_etc_hosts: true\n"
-    "user: " + admin + "\n"
-    "ssh_authorized_keys:\n"
-    "  - " + json.dumps(key) + "\n"
-)
-open(target, "w").write(open(source).read().rstrip("\n") + "\n" + extra)
-print("Wrote " + target)
-PY
-scp ~/onboard-NAME.yaml root@PROXMOX_NODE:/var/lib/vz/snippets/onboard-NAME.yaml
-```
-
-The top-level `user:` renames the image's default user to your
-administrator, and the top-level `ssh_authorized_keys:` belongs to that
-user. Check the copy with the same `grep` and Python commands as above,
-then, on the node:
-
-```bash
-qm set VMID --cicustom "user=local:snippets/onboard-NAME.yaml"
-qm cloudinit dump VMID user
-```
-
-The dump should be your per-VM file.
+   Do not use `user=` in place of `vendor=`. That replaces Proxmox's user data
+   with the file: the administrator, its key and the hostname from the panel
+   then never reach the VM, and you cannot log in to it.
 
 6. **Start the VM and watch its console.** cloud-init prints the `onboard:`
-   lines on the serial console at the end of the first boot, so attach right
+   lines on the serial console near the end of the first boot, so attach right
    after the start; press Ctrl-O to leave the console:
 
-   <!-- VERIFY-LIVE: qm terminal attaches to serial0 right after qm start, shows cloud-init's final-stage output including the onboard: lines on Ubuntu 24.04 and AlmaLinux 9 cloud images, and Ctrl-O detaches -->
    ```bash
    qm start VMID
    qm terminal VMID
    ```
 
-   The first boot can take several minutes while the image upgrades packages
-   and installs what is missing.
+   ```text
+   [   83.041046] cloud-init[1026]: onboard: created svc_ansible here, because the users: list of this file was not applied
+   [   83.108933] cloud-init[1026]: onboard: svc_ansible is ready; set its sudo password next
+   [   83.116552] cloud-init[1026]: onboard: Add this VM on the controller: in the guide's folder, run
+   [   83.116766] cloud-init[1026]: onboard:   sudo bash controller/add-target.sh --from-info
+   [   83.116887] cloud-init[1026]: onboard: then paste these lines and press Ctrl-D:
+   [   83.117215] cloud-init[1026]: onboard: name=NAME
+   [   83.117352] cloud-init[1026]: onboard: address=VM_ADDRESS
+   [   83.117427] cloud-init[1026]: onboard: group=ubuntu
+   [   83.117498] cloud-init[1026]: onboard: fingerprint=SHA256:...
+   ```
 
-<!-- VERIFY-LIVE: after editing a snippet or a cloud-init setting (ciuser, sshkeys, ipconfig0) of a VM that has booted, compare `qm cloudinit dump VMID meta` before and after `qm cloudinit update VMID`, then reboot: does the instance-id change, and does cloud-init then run again and create new SSH host keys? -->
-Changing the snippet after the first boot does not prepare the VM again.
-cloud-init ran the file's steps once for this instance. If a changed setting
-makes Proxmox write a new instance ID, cloud-init treats the VM as a new
-instance at the next boot, can run again and create new SSH host keys,
-which Stage 4 then reports as a changed key. To change a VM that exists, use
-[Stage 2](stage-2-existing-machines.md); to start over, create the VM again.
+   The console also shows the VM's address and, between
+   `-----BEGIN SSH HOST KEY FINGERPRINTS-----` lines, its host-key
+   fingerprints; the `(RSA)` one equals the `fingerprint=` value. The console
+   has no scrollback: if you attached too late, read the log on the VM as the
+   check below shows.
+
+**For many VMs, set this on a template.** Make one VM as above, do not start
+it, and convert it to a template with `qm template VMID`. Every clone keeps
+the `--cicustom` setting and prepares itself at its own first boot. Give each
+clone its own name, and its own address if you use fixed ones, before you
+start it.
+
+**After the first boot, leave the VM's cloud-init settings alone.** A change
+to the administrator, key, name, search domain or network gives the VM a new
+instance ID. At its next boot cloud-init then treats it as a new machine: it
+creates **new SSH host keys** and runs the file again. The account and its
+password stay as they were, but the controller sees a changed host key, and
+Stage 4's
+[rebuild steps](stage-4-add-target-first-job.md#do-rebuild-or-retire-a-target)
+apply. Editing the snippet alone changes nothing on a VM that has booted. To
+change a VM that exists, use [Stage 2](stage-2-existing-machines.md).
 
 ## Do: on another hypervisor, build a NoCloud seed
 
@@ -264,29 +252,38 @@ which Stage 4 then reports as a changed key. To change a VM that exists, use
 workstation or the controller.**
 
 Without Proxmox's cloud-init drive, give cloud-init a small ISO with the
-volume label `cidata`, which its NoCloud source reads. It holds two files:
-`user-data`, which is all the user data the VM gets, and `meta-data`, which
-names the instance. So start from the per-VM copy that
-[Alternative B](#alternative-b-the-file-as-the-whole-user-data) builds, with
-your administrator, key, hostname and `fqdn` added; the same
-`python3 - NAME lab.example ADMIN ...` command makes it.
+volume label `cidata`, which its NoCloud source reads. It holds three files:
+`meta-data`, which names the instance; `user-data`, which is yours, with the
+VM's name and your administrator's key; and `vendor-data`, which is the
+filled copy, unchanged. Replace `NAME` and the key line with your own:
 
-<!-- VERIFY-LIVE: cloud-localds (cloud-image-utils), genisoimage and xorriso build a seed that the Ubuntu 24.04 and AlmaLinux 9 cloud images read as NoCloud when attached as a CD-ROM on a non-Proxmox hypervisor (for example Hyper-V or plain QEMU); the VM gets ADMIN, NAME and the onboard: lines -->
 ```bash
 mkdir -p ~/seed-NAME
-cp ~/onboard-NAME.yaml ~/seed-NAME/user-data
-printf 'instance-id: %s\nlocal-hostname: %s\n' NAME-1 NAME > ~/seed-NAME/meta-data
 cd ~/seed-NAME
-cloud-localds ~/seed-NAME.iso user-data meta-data
+cp ~/onboard-new-vm.yaml vendor-data
+printf 'instance-id: %s\nlocal-hostname: %s\n' NAME-1 NAME > meta-data
+cat > user-data <<'USERDATA'
+#cloud-config
+hostname: NAME
+fqdn: NAME.lab.example
+ssh_authorized_keys:
+  - ssh-ed25519 AAAA... you@workstation
+USERDATA
+xorriso -as mkisofs -output ~/seed-NAME.iso -volid cidata -joliet -rock user-data meta-data vendor-data
 ```
 
-Without `cloud-localds` (package `cloud-image-utils` on Ubuntu), either of
-these makes the same ISO:
+The top-level `ssh_authorized_keys` belongs to the image's default user, which
+becomes your administrator: `ubuntu`, `almalinux`, `rocky` or `cloud-user`.
+This `user-data` has no `users:` list, so the file's own list applies, and
+with it `svc_ansible`.
+
+`genisoimage` takes the same options as `xorriso -as mkisofs`, and
+`cloud-localds` from Ubuntu's `cloud-image-utils` package builds the same ISO:
 
 ```bash
 cd ~/seed-NAME
-genisoimage -output ~/seed-NAME.iso -volid cidata -joliet -rock user-data meta-data
-xorriso -as mkisofs -output ~/seed-NAME.iso -volid cidata -joliet -rock user-data meta-data
+genisoimage -output ~/seed-NAME.iso -volid cidata -joliet -rock user-data meta-data vendor-data
+cloud-localds --vendor-data vendor-data ~/seed-NAME.iso user-data meta-data
 ```
 
 Attach `seed-NAME.iso` to the new VM as a CD/DVD drive before its first
@@ -294,6 +291,11 @@ boot, with your platform's own tools, and boot it. The `instance-id` must be
 new for each VM: cloud-init runs the file again only for an instance ID it
 has not seen. Detach the ISO once the VM has booted; it holds no secret, but
 it is not needed again.
+
+If your `user-data` has its own `write_files:` or `runcmd:`, it replaces the
+file's, and the VM is not prepared; the log then has no `onboard:` line. Put
+your own first-boot steps in other cloud-init keys, or prepare such a VM with
+[Stage 2](stage-2-existing-machines.md) instead.
 
 ## Azure: custom data
 
@@ -335,12 +337,11 @@ onboard: fingerprint=SHA256:...
 ```
 
 Copy the `onboard: name=`, `address=`, `group=` and `fingerprint=` lines, or
-the whole output: `add-target.sh --from-info` reads a line that starts with
-`onboard: ` followed by one of the four keys, and ignores every other line.
-Take them from this log or from the console, **not from the journal**: there
-each line starts with a prefix such as `cloud-init[1234]: `, which
-`add-target.sh` does not accept, so it would report that the paste has no
-`name=` line.
+the whole output: `add-target.sh --from-info` reads a line that ends with
+`onboard: ` and one of the four keys with its value, and ignores every other
+line. The serial console and the journal put a stamp such as
+`[   83.117215] cloud-init[1026]: ` before `onboard:`; lines copied from there
+work as they are.
 
 The `fingerprint=` value is what Stage 4 trusts when it scans the VM, so read
 it through a channel that does not depend on the VM's SSH host key: the
@@ -375,7 +376,7 @@ stops with `INFO FAILED` and names the setting at its top to fill in.
 cloud-init sets none, on purpose: the file is meant to be the same for every
 VM and to carry no secret, user data can be read back on the platform and on
 the VM, and Azure advises against secrets in custom data. Do not add one to
-the file: `lock_passwd: true` locks the account's password field. Until you
+the file: the account is created with a locked password field. Until you
 set a password, `svc_ansible` can log in with its key but cannot use sudo, and
 every template except Ping fails.
 
@@ -387,7 +388,6 @@ simplest first.
 
 **a. As the VM's administrator, on its console or over SSH:**
 
-<!-- VERIFY-LIVE: on Ubuntu 24.04 and AlmaLinux 9 after this cloud-init file (lock_passwd: true), `sudo passwd svc_ansible` alone leaves a usable password (the shadow field starts with $, no leading !), and svc_ansible's sudo accepts it (Ping and Baseline preview in Stage 4); no `passwd -u` or `usermod -U` is needed -->
 ```bash
 sudo passwd svc_ansible
 sudo getent shadow svc_ansible | cut -d: -f2 | cut -c1
@@ -434,22 +434,26 @@ rather than lines.
 
 | Symptom | Likely cause | Next step |
 | --- | --- | --- |
-| `cloud-init status` says `error`, and the log has `onboard: ERROR: svc_ansible has no valid public key; was the placeholder replaced?` | The placeholder was not replaced, the file did not reach cloud-init as written, or another part of the user data replaced the file's `users:` list | Check the filled copy as in the first step. cloud-init does not run again: create the VM again, or prepare it with [Stage 2](stage-2-existing-machines.md). |
-| No `onboard:` line at all in the log | The VM never received the file: wrong snippet path or storage, no `cidata` label, or an installer ISO instead of a cloud image | Compare what the VM got, `sudo cat /var/lib/cloud/instance/user-data.txt` (and `vendor-data.txt`), with your file; on Proxmox, `qm cloudinit dump VMID user`. Then create the VM again, or use Stage 2. |
+| `cloud-init status` says `error`, and the log has `onboard: ERROR: svc_ansible has no valid public key; was the placeholder replaced?` | The placeholder was not replaced, or the file did not reach cloud-init as written | Check the filled copy as in the first step. cloud-init does not run again: create the VM again, or prepare it with [Stage 2](stage-2-existing-machines.md). |
+| No `onboard:` line at all in the log | The VM never received the file: wrong snippet path or storage, no `cidata` label, an installer ISO instead of a cloud image, or user data of your own with a `runcmd:` or `write_files:` that replaced the file's | Compare what the VM got, `sudo cat /var/lib/cloud/instance/vendor-data.txt` (and `user-data.txt`), with your file; on Proxmox, `qm config VMID` shows the `cicustom` line. Then create the VM again, or use Stage 2. |
 | `onboard: ERROR: ...` naming sudo, SSH, a key type or `AllowUsers` | The image's own configuration conflicts with the account's rules | Fix what it names, then run the Stage 2 script on the VM; it repeats every check. |
 | `Match rules depend on the client's address` | The image's SSH configuration has `Match Address` or similar rules | Run the Stage 2 script with `CONTROLLER_ADDRESS` set, so it checks the real address. |
 | `onboard: and add --name ...` or `--address ...` | A reserved or default hostname, no `fqdn` on Enterprise Linux, or several addresses | Give that option in Stage 4; nothing is wrong with the VM. |
-| You cannot log in as the administrator | The administrator and key never reached the VM, for example with the file as the whole user data but without the added block | Create the VM again with the administrator in the user data. |
-| Stage 4 says the paste has no `name=` line, though you copied it | The lines came from the journal, with a `cloud-init[PID]:` prefix | Copy them from `/var/log/cloud-init-output.log` or the console. |
+| You cannot log in as the administrator | The administrator and key never reached the VM: on Proxmox, the file was attached with `user=` in place of `vendor=`, or the VM has no `--ciuser` and `--sshkeys` | Create the VM again with the file as vendor data and the administrator in the VM's own settings. |
+| After a change to the VM's cloud-init settings, Stage 4 or Ping reports a changed host key | The change gave the VM a new instance ID, and cloud-init made new host keys at the next boot | Read the new `fingerprint=` line and follow Stage 4's [rebuild steps](stage-4-add-target-first-job.md#do-rebuild-or-retire-a-target). |
 | `systemctl --failed` lists `rngd.service` on Enterprise Linux | The VM has no hardware random number device | Add a VirtIO RNG and stop and start the VM from the hypervisor, as the [Proxmox page](platform-proxmox.md#do-give-enterprise-linux-guests-a-virtio-rng) shows. |
 | `onboard: apt-get update failed` or `python3-dnf installation failed` | The VM cannot reach its package repositories, or RHEL is not registered | Fix the VM's network or registration, then run the Stage 2 script. |
 | Stage 4's templates fail with `Missing sudo password` or `Incorrect sudo password` | No password set on the VM, or Semaphore holds another one | [Set the sudo password](#do-set-the-sudo-password) and check Semaphore's copy in Stage 4. |
 
 ## Concept
 
-cloud-init is the image's own first-boot agent. It reads user data from
+cloud-init is the image's own first-boot agent. It reads its data from
 whatever source the platform offers (Proxmox's cloud-init drive, a NoCloud ISO,
-Azure's custom data) and runs it once per instance. That is why one file can
+Azure's custom data) and runs it once per instance. User data is the
+operator's; vendor data is a second document that cloud-init merges under it,
+where user data wins any key both define. That is why the file works beside
+Proxmox's own user data, and why it creates the account in its script when
+its `users:` list loses. That is why one file can
 prepare a VM on any of them, and why it does nothing for a VM that has already
 booted. The VM then prints data, not a command: the controller does not trust
 the VM, so only `add-target.sh`, reviewed code on the controller, acts on those

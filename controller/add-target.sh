@@ -100,16 +100,18 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 if [[ $from_info == yes ]]; then
-  # A value counts only on a whole line of this form: an optional "onboard:" prefix,
-  # as cloud-init logs it, then one of the four keys and its value.
-  info_line='^[[:space:]]*(onboard:[[:space:]]+)?(name|address|group|fingerprint)=(.*[^[:space:]])[[:space:]]*$'
+  # A value counts only on a line that ends with one of the four keys and its value,
+  # either alone on the line or after the "onboard:" prefix cloud-init logs it with.
+  # A serial console and the journal put their own stamp before that prefix, such as
+  # "[   83.1] cloud-init[1026]: ", so anything may come before "onboard:".
+  info_line='^([[:space:]]*|(.*[^[:alnum:]_.-])?onboard:[[:space:]]+)(name|address|group|fingerprint)=(.*[^[:space:]])[[:space:]]*$'
   declare -A info=()
   while IFS= read -r line; do
     line=${line%$'\r'}
     [[ $line =~ $info_line ]] || continue
-    key=${BASH_REMATCH[2]}
+    key=${BASH_REMATCH[3]}
     [[ -z ${info[$key]+set} ]] || { echo "The paste has more than one $key= line; paste one VM's lines at a time."; exit 2; }
-    info[$key]=${BASH_REMATCH[3]}
+    info[$key]=${BASH_REMATCH[4]}
   done <<< "$pasted"
   for key in name address group fingerprint; do
     if [[ -n ${info[$key]+set} ]]; then
@@ -255,4 +257,4 @@ else
 fi
 echo "Next: run the Ping template, which covers every host in the lab group. If $name fails with Permission denied (publickey),"
 echo "svc_ansible on $name lacks the key 'sudo cat /etc/semaphore/svc_ansible.pub' shows; if sudo asks for a"
-echo "password, give Semaphore the targets' sudo password, as chapter 3b shows."
+echo "password, give Semaphore the targets' sudo password, as docs/stage-4-add-target-first-job.md shows."

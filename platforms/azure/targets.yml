@@ -1,7 +1,7 @@
 ---
 # Target VMs with private addresses only. At first boot, ../../onboard/new-vm/cloud-init.yaml
 # creates svc_ansible with the controller's automation public key, its sudoers
-# rule and SSH drop-in; its sudo password is set afterwards (chapter 13).
+# rule and SSH drop-in; its sudo password is set afterwards (docs/platform-azure.md).
 - name: Create Azure target VMs
   hosts: localhost
   connection: local
@@ -83,7 +83,7 @@
           - "nic-{{ item.name }}"
         image: "{{ item.image }}"
         # Marketplace images with a plan, such as Rocky Linux, need it here, and the
-        # plan's terms accepted once per subscription (chapter 13).
+        # plan's terms accepted once per subscription (docs/platform-azure.md).
         plan: "{{ item.plan | default(omit) }}"
         managed_disk_type: StandardSSD_LRS
         # Azure refuses an OS disk smaller than its image, and Red Hat's RHEL 9

@@ -1,6 +1,6 @@
 # Appendix: browser access
 
-[Back to the guide](../../README.md) · [Ubuntu controller](../03-controller.md) · [Enterprise Linux controller](../03-controller-el9.md)
+[Back to the guide](../../README.md) · [Stage 1: install the controller](../stage-1-controller.md)
 
 ## Goal
 
@@ -66,7 +66,7 @@ default route. On a cloud VM behind NAT, that is the private address. There,
 pass `--address` with the public IP address or DNS name you browse to, either
 to this script or to the installer together with `--expose`. On an Azure
 controller made by the guide's playbooks, open port 443 with
-`azure_controller.https_cidr`, as [chapter 13](../13-azure.md#optional-do-run-the-controller-in-azure)
+`azure_controller.https_cidr`, as [the Azure page](../platform-azure.md#optional-do-run-the-controller-in-azure)
 shows; the playbook removes a rule you add by hand. The certificate is created
 only once, so to give it a new address later, remove it first:
 

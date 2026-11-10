@@ -2,7 +2,7 @@
 """Bring a controller made by either installer up to this copy of the guide.
 
 Run it through controller/update-controller.sh, as root. The default is a read-only
-plan; --apply makes the changes. See docs/03-controller.md.
+plan; --apply makes the changes. See docs/controller-update.md.
 """
 
 import argparse

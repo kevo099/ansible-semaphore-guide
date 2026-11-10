@@ -224,7 +224,7 @@ publisher's Ubuntu 24.04 benchmark 2.0.0 listed above.
 
 **Where: controller, in `/opt/ansible-lab`, with the prepared inventory and
 connection credentials.** Select a host that exists in your inventory. The
-examples use your own key from [chapter 4](../04-access.md#step-1-generate-the-automation-key)
+examples use your own key from [the by-hand access page](../manual-access.md#step-1-generate-the-automation-key)
 and ask for the targets' sudo password, as [chapter 5](../05-cli-lessons.md)
 does; with the Vault option, use `--ask-vault-pass` instead of `-K`. They
 choose RHEL CIS Level 1, AlmaLinux CIS Level 2 and Ubuntu CIS Level 1.

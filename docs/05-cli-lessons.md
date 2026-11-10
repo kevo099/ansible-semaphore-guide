@@ -1,6 +1,6 @@
 # 5. Run, inspect and change the playbooks
 
-[Previous: access](04-access.md) · [Next: Semaphore](06-semaphore.md)
+[Previous: add the target and run the first job](stage-4-add-target-first-job.md) · [Next: Semaphore](06-semaphore.md)
 
 **Where: controller, as your normal administrator, from the repository root.**
 Use your local inventory and the automation key you created. The examples
@@ -22,12 +22,11 @@ ansible-inventory --graph
 ansible-playbook playbooks/ping.yml --limit lab-ubuntu --list-hosts
 ```
 
-On a controller made by either installer ([chapter 3](03-controller.md) or
-[3b](03-controller-el9.md)), run `cd /opt/ansible-lab` (or your `--lab-dir`)
+On a controller made by either installer ([Stage 1](stage-1-controller.md)), run `cd /opt/ansible-lab` (or your `--lab-dir`)
 instead of the first command. Its
 `ansible.cfg` reads the inventory Semaphore uses, with the host names you gave
 `add-target.sh`. If you chose
-[3b's Vault option](03-controller-el9.md#do-give-the-templates-the-targets-sudo-password)
+[Stage 4's Vault option](stage-4-add-target-first-job.md#do-give-semaphore-the-sudo-password)
 for sudo passwords, Ansible decrypts those files for every play there, Ping
 included: add `--ask-vault-pass` to each `ansible` and `ansible-playbook`
 command and leave out `-K`, because each host's file supplies its own sudo

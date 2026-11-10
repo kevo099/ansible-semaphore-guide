@@ -33,7 +33,7 @@ Semaphore, PostgreSQL, lab-folder or /opt/ansible-venv state. It installs
 software and starts services. It creates fresh secrets locally and never
 prints them. Semaphore and PostgreSQL listen on loopback. Target host keys
 and the automation public key must still be installed before a job can run;
-see controller/add-target.sh and docs/03-controller-el9.md.
+see stages 2 to 4 in README.md, and controller/add-target.sh.
 USAGE
 }
 

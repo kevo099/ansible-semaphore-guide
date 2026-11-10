@@ -1,5 +1,6 @@
 #!/bin/sh
-# Paste this WHOLE file into the TARGET VM's Azure Run Command > RunShellScript.
+# Run this WHOLE file on the TARGET VM as root: sudo sh inventory-info.sh, or
+# paste it into the VM's Azure Run Command > RunShellScript.
 # It reads local information only and prints data: the VM's status, then the
 # name=, address=, group= and fingerprint= lines to paste into
 # controller/add-target.sh --from-info in the guide's folder on the controller.

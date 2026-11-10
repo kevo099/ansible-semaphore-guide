@@ -1,7 +1,7 @@
 ---
 # One-shot preparation of a VM that already exists (made in a cloud portal, by
-# another tool, or before cloud-init was set up): the automated form of chapter
-# 4, steps 3 and 4. It creates or completes svc_ansible, authorizes the listed
+# another tool, or before cloud-init was set up): the automated form of
+# docs/manual-access.md, steps 3 and 4. It creates or completes svc_ansible, authorizes the listed
 # public keys, ensures the target prerequisites, sets the sudo password you type,
 # and adds the dedicated sudoers and SSH drop-ins. It is safe to run again, and
 # ends with the add-target.sh command that adds the host on the controller. Unlike
@@ -10,8 +10,8 @@
 # The VM must already accept SSH from the controller for an administrator whose
 # sudo works, and have Python 3; mainstream cloud images do.
 #
-# Run it from the controller's repository root, as the VM's own administrator
-# account, one host at a time (each target gets its own sudo password):
+# Run it from the guide's folder on the controller, as the VM's own administrator
+# account, one host at a time (it asks for that host's sudo password):
 #
 #   sudo cat /etc/semaphore/svc_ansible.pub > ~/svc_ansible.pub
 #   /opt/ansible-venv/bin/ansible-playbook -i inventories/bootstrap.ini \
@@ -28,7 +28,7 @@
   become: true
   vars_prompt:
     - name: svc_ansible_password
-      prompt: New sudo password for svc_ansible on this host (unique per target)
+      prompt: New sudo password for svc_ansible on this host (the lab's shared one, or this target's own)
       private: true
       confirm: true
   vars:
@@ -52,7 +52,7 @@
         that:
           - ansible_limit is defined
           - ansible_play_hosts_all | length == 1
-        fail_msg: Name one host with --limit; each target gets its own sudo password.
+        fail_msg: Name one host with --limit; the play asks for that host's sudo password.
         quiet: true
 
     - name: Accept only the systems the lessons support
@@ -262,7 +262,7 @@
           register: bootstrap_sshd_policy
           changed_when: false
 
-        - name: Check that the policy is the one chapter 4 expects
+        - name: Check that the policy is the one docs/manual-access.md expects
           ansible.builtin.assert:
             that:
               - "'authenticationmethods publickey' in bootstrap_sshd_policy.stdout_lines"
@@ -395,7 +395,7 @@
           svc_ansible can use sudo without its password (a NOPASSWD or !authenticate rule), or sudo
           asks for another account's password (rootpw, targetpw or runaspw). Review
           "sudo -l -U svc_ansible" on the host.
-        success_msg: svc_ansible is ready; continue with chapter 4, step 5.
+        success_msg: svc_ansible is ready; add this host on the controller with the command below.
 
     - name: Read the RSA host key's fingerprint for the controller
       ansible.builtin.command: ssh-keygen -lf /etc/ssh/ssh_host_rsa_key.pub

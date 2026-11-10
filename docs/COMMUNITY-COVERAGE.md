@@ -40,7 +40,7 @@ the campaign did not exercise it.
 | --- | --- | --- | --- |
 | Local users and the four project roles | Community | passed; Guest can read task output and download the project backup | [15](15-identity.md) |
 | Key Store (SSH keys, logins, passwords) | Community | passed; values never returned by the API | [6](06-semaphore.md), [15](15-identity.md) |
-| Ansible Vault passwords from Key Store | Community | passed in the core verification | [3b](03-controller-el9.md), [15](15-identity.md) |
+| Ansible Vault passwords from Key Store | Community | passed in the core verification | [Stage 4](stage-4-add-target-first-job.md#do-give-semaphore-the-sudo-password), [15](15-identity.md) |
 | TOTP two-factor | Community | caveats: seeds readable by project members; tokens bypass it | [15](15-identity.md) |
 | API tokens with expiry | Community | passed; act with the user's current role | [15](15-identity.md), [17](17-api-and-integrations.md) |
 | OpenID Connect | Community | passed; no automatic linking to local accounts | [OIDC and LDAP](appendices/identity-providers.md) |

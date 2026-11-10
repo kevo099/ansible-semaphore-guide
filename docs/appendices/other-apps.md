@@ -69,7 +69,7 @@ the API accepted a Python template while it was inactive.
 
 Create these files in your local repository. They print only an ordinary
 marker. Plain `mkdir` keeps the folder's `semaphore` group, as
-[3b explains](../03-controller-el9.md#do-give-the-templates-the-targets-sudo-password).
+[Stage 4 explains](../stage-4-add-target-first-job.md#do-give-semaphore-the-sudo-password).
 
 ```bash
 mkdir -p /opt/ansible-lab/app-practice/tofu

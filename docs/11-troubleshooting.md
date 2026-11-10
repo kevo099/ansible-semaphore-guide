@@ -11,7 +11,7 @@ or loosen security controls without understanding what failed.
 
 | Symptom | Check first | Appropriate next step |
 | --- | --- | --- |
-| `add-target.sh` refuses a newly onboarded target's lines, or the target fails Ping or its first sudo task | Which onboarding step did not finish | Follow [when a step fails](ONBOARDING.md#when-a-step-fails) on the onboarding page. |
+| `add-target.sh` refuses a newly onboarded target's lines, or the target fails Ping or its first sudo task | Which onboarding step did not finish | Follow [when a step fails](stage-4-add-target-first-job.md#when-a-step-fails) in Stage 4; a failed script or cloud-init run has its own table at the end of [Stage 2](stage-2-existing-machines.md#when-it-fails) and [Stage 3](stage-3-new-vms-cloud-init.md#when-it-fails). |
 | SSH times out | Correct guest/address, route, firewall and listening SSH service | Use the trusted console to verify networking and daemon state. |
 | Host-key mismatch | Was the guest rebuilt, rolled back, or replaced at the same address? | Verify the current fingerprint through a trusted independent path before updating only its matching pin. |
 | Permission denied (publickey) | Login name, selected key, authorized-key permissions and algorithm policy | Compare the intended public key to the target's authorized key; inspect the SSH debug output privately. |
@@ -178,7 +178,7 @@ and its message names the fix:
 | `Plan only. Resolve the N problem(s) above before you run it with --apply.` | Each problem line above says what to do; the plan exits with status 1 while any remains. |
 | An uncommitted change to a guide file | When `.guide-files.json` is among the files, an earlier update wrote them and stopped before its commit: commit them together. Otherwise commit your own edit, or discard what an interrupted update wrote. |
 | `Writing the guide's files stopped ...` | The update put back what it had written. Fix the cause, such as a full disk or an editor saving the file, and run it again. |
-| `The password was accepted, but Semaphore also wants a second factor` | Pass an administrator's API token as `SEMAPHORE_API_TOKEN`; see [update a controller](03-controller.md#update-a-controller-to-a-newer-guide-release). |
+| `The password was accepted, but Semaphore also wants a second factor` | Pass an administrator's API token as `SEMAPHORE_API_TOKEN`; see [update a controller](controller-update.md). |
 | `... may not change the templates of project ...` | Use an administrator's login or token, or the project owner's or a manager's. |
 | `Kept template ...: schedule ... runs it` | Move those schedules or integrations to the per-system templates, then run `--apply --remove-replaced` again. |
 | `... failed with HTTP NNN: REASON` | The text after the colon is Semaphore's own reason. |

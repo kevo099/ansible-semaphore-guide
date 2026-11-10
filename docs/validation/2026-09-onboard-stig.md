@@ -1,6 +1,6 @@
 # Validation record: onboarding and STIG on Azure, September 2026
 
-[Back to validation and limits](../VALIDATION.md) · [Azure chapter](../13-azure.md) · [Chapter 9](../09-security-benchmarks.md)
+[Back to validation and limits](../VALIDATION.md) · [Azure chapter](../platform-azure.md) · [Chapter 9](../09-security-benchmarks.md)
 
 On 28 September 2026 the onboarding files, the vendor STIG lessons, both seeded
 controllers and the local SCAP content audit were run on Azure in a disposable

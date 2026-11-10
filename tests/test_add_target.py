@@ -293,6 +293,12 @@ class AddTargetTests(unittest.TestCase):
             "plain": lines,
             "cloud-init's prefix": "".join("onboard: " + line for line in lines.splitlines(keepends=True)),
             "CRLF": lines.replace("\n", "\r\n"),
+            # What a serial console (qm terminal) and journalctl show of cloud-init's lines.
+            "the serial console's stamp": "".join(
+                f"[   83.{index:06d}] cloud-init[1026]: onboard: " + line
+                for index, line in enumerate(lines.splitlines(keepends=True))),
+            "the journal's stamp": "".join(
+                "Nov 10 10:13:21 lab-alma cloud-init[1026]: onboard: " + line for line in lines.splitlines(keepends=True)),
             "onboard-linux.sh with the text around it": "host: lab-alma (AlmaLinux 9.8)\n" + block + "RESULT: OK\n",
             "the cloud-init log with the text around it": "".join(
                 "onboard: " + line for line in ["svc_ansible is ready; set its sudo password next\n"]

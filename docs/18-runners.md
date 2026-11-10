@@ -70,7 +70,7 @@ Through an authenticated transfer, put the controller's public
 Also transfer the target's already verified entries from
 `/etc/semaphore/known_hosts` as `/tmp/runner-known-hosts`. Include the exact
 hostname used by the new inventory. Verify host fingerprints through the
-target's console as in [chapter 4](04-access.md); an unverified scan is not a pin.
+target's console as in [the by-hand access page](manual-access.md#step-2-authenticate-each-targets-host-key); an unverified scan is not a pin.
 
 ## Do: install the runtime
 

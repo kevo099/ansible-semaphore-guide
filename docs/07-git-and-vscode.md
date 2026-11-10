@@ -11,7 +11,7 @@ If you used either controller installer, your working copy is the local lab
 folder (default `/opt/ansible-lab`), owned by the editor account. Semaphore reads
 it in place, including uncommitted changes. Before adding a remote or pushing
 that folder, follow
-[the seeded project's Git migration](03-controller-el9.md#do-move-to-a-real-repository-later)
+[the seeded project's Git migration](appendices/git-migration.md)
 for the private-file and history checks and the Semaphore repository change.
 
 ## Do: create your own working copy
@@ -20,7 +20,7 @@ Fork this repository or copy it into a repository you own. Use a private
 repository for exercises that describe actual hosts, organizational settings
 or encrypted lab data. Configure Git's author identity with your own values.
 
-If this copy came from `git clone` of the public guide in chapter 3, its
+If this copy came from `git clone` of the public guide in Stage 1, its
 `origin` is the guide's repository, which you cannot push to. Point `origin` at
 your own repository first. If your copy has no `origin` yet, use
 `git remote add origin YOUR_REPOSITORY_URL` instead. If your repository is new
@@ -126,7 +126,7 @@ directory, so the files never reach a Git or bare-repository clone. Keep
 chapter 6's per-inventory sudo credentials for Semaphore on that path. With
 either seeded installer, whose lab folder Semaphore reads in place through a
 file inventory, follow
-[its per-target sudo option](03-controller-el9.md#do-give-the-templates-the-targets-sudo-password)
+[its per-target sudo option](stage-4-add-target-first-job.md#do-give-semaphore-the-sudo-password)
 instead; it adds the Vault key to each template and makes the files readable
 by the service.
 
@@ -148,7 +148,7 @@ Git can also refuse to let the service read a repository that another account
 owns unless `/etc/semaphore/gitconfig` lists it. Whether it refuses depends on
 the Git version and the distribution's patches: Ubuntu 24.04's Git 2.43 refuses
 with "detected dubious ownership", while RHEL 9.8's Git 2.52 allowed the read.
-Where Git allows it, the entry is harmless. Chapter 3's manual steps and Ubuntu
+Where Git allows it, the entry is harmless. The by-hand controller page's steps and Ubuntu
 installers before the seeded flow list `/opt/ansible-guide.git` there. Both
 current installers list only their lab folder, and a manual install from
 v1.1.0 of this guide or earlier has an empty file. Append the entry unless

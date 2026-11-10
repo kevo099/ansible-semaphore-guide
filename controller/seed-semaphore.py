@@ -639,7 +639,7 @@ def save_verified(client, path, before, desired, backup_dir):
 def seeded_vaults(client, base, found):
     """The vault passwords that every seeded template shares, for the templates an update adds.
 
-    Chapter 3b's per-target sudo option adds a vault password to every template.
+    Stage 4's per-target sudo option adds a vault password to every template.
     Returns (vaults, note): vaults is empty when the seeded templates use none or
     differ, and note says what a person should check then.
     """

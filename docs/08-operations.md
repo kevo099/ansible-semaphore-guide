@@ -116,7 +116,7 @@ valid. Test the task manually under the service account first.
 Start with an audit or connectivity check. On a controller updated from
 `v1.5.0` or `v1.6.x`, schedule the per-system STIG templates, such as
 **RHEL 9 · STIG audit**, rather than the old ones, which
-[`--remove-replaced`](03-controller.md#update-a-controller-to-a-newer-guide-release)
+[`--remove-replaced`](controller-update.md)
 removes once nothing runs them. Schedule patching only after its recovery and
 application checks work. A missed schedule should not silently
 reboot a target outside the intended maintenance window.

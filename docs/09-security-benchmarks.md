@@ -245,7 +245,7 @@ trusting the host again. In the verification run, one vendor STIG pass with a
 reboot left `sssd.service` failed on Ubuntu 24.04, because no SSSD domain was
 configured. The STIG enables `rngd.service`, which failed on a RHEL 9.8 VM with
 no hardware entropy source and ran normally on Rocky Linux with a VirtIO RNG
-device ([chapter 2](02-create-vms.md)). RHEL and AlmaLinux switched to the
+device ([the Proxmox page](platform-proxmox.md#do-give-enterprise-linux-guests-a-virtio-rng)). RHEL and AlmaLinux switched to the
 `FIPS:STIG` crypto policy and kept FIPS mode disabled, and AlmaLinux then
 offered only RSA and ECDSA host keys. Rocky Linux also switched to `FIPS:STIG`;
 its FIPS mode and host-key offer were not checked. Ubuntu's USG accepted the
@@ -269,8 +269,8 @@ less secure merely because the raw fail count increased.
 
 ## The seeded STIG templates
 
-Both seeded controllers, [Ubuntu](03-controller.md) and
-[Enterprise Linux](03-controller-el9.md), organize the STIG lessons per
+Both seeded controllers, Ubuntu and Enterprise Linux
+([Stage 1](stage-1-controller.md)), organize the STIG lessons per
 operating system and version. Each supported system has its own playbook
 folder, content folder and Semaphore tab:
 
@@ -443,7 +443,7 @@ cd /opt/ansible-lab
 ```
 
 On a seeded controller that key must be authorized on the targets beside the
-service key; [chapter 3b](03-controller-el9.md#do-add-a-target-without-leaving-the-terminal)
+service key; [Stage 4](stage-4-add-target-first-job.md#do-add-the-target-with-add-targetsh)
 shows how. With the Vault option for sudo passwords, use `--ask-vault-pass`
 instead of `-K`.
 

@@ -25,7 +25,7 @@ CLOUD_INIT_TEXT = (ROOT / "onboard" / "new-vm" / "cloud-init.yaml").read_text()
 CLOUD_INIT = yaml.safe_load(CLOUD_INIT_TEXT)
 PLAYBOOK_TEXT = (ROOT / "onboard" / "existing" / "bootstrap-existing-vm.yml").read_text()
 PLAYBOOK = yaml.safe_load(PLAYBOOK_TEXT)[0]
-CHAPTER_4 = (ROOT / "docs" / "04-access.md").read_text()
+CHAPTER_4 = (ROOT / "docs" / "manual-access.md").read_text()
 ADD_TARGET = (ROOT / "controller" / "add-target.sh").read_text()
 BASH = shutil.which("bash")
 # Documentation addresses (RFC 5737), built in parts so the publication check accepts them.
@@ -194,7 +194,7 @@ class AddTargetInfoMixin:
 
 
 class SharedSettingsTests(unittest.TestCase):
-    """cloud-init, onboard-linux.sh, the playbook and chapter 4 each carry the same settings."""
+    """cloud-init, onboard-linux.sh, the playbook and the by-hand access page (once chapter 4) each carry the same settings."""
 
     def cloud_init_file(self, path):
         return next(entry["content"] for entry in CLOUD_INIT["write_files"] if entry["path"] == path)
