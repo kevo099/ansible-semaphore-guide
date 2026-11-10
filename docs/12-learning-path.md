@@ -7,7 +7,7 @@
 Understand the setup well enough to write and troubleshoot your own playbooks,
 then repeat the work on clean targets.
 
-## Stage 1: a worked example
+## Exercise 1: a worked example
 
 Complete the manual controller and SSH walkthrough once. For each layer,
 explain its purpose before moving on:
@@ -21,7 +21,7 @@ explain its purpose before moving on:
 Run the baseline lesson and inspect the actual banner/service. Follow it with
 a repeat run and a deliberate drift repair.
 
-## Stage 2: complete small changes
+## Exercise 2: complete small changes
 
 Use the examples as scaffolding:
 
@@ -38,7 +38,7 @@ Use the examples as scaffolding:
 Before every apply, name the files or resources you expect to change. After
 the run, inspect the target independently rather than relying only on the recap.
 
-## Stage 3: write your own role
+## Exercise 3: write your own role
 
 In your private working repository, create a role for a small service. Separate
 defaults, tasks, handlers and templates. Use facts and variables to support
@@ -55,7 +55,7 @@ Your completion criteria:
 - A service configuration is validated before activation.
 - A clean second target reaches the same intended state.
 
-## Stage 4: an independent mini-project
+## Exercise 4: an independent mini-project
 
 Start from a clean target and a short requirement, without copying the starter
 playbook: create a team group and users, install a service, deploy a host-specific
@@ -67,7 +67,7 @@ Add a documented maintenance operation and a recovery drill. Explain exactly
 what your backup includes and demonstrate an authenticated task after recovery.
 Keep the exercise small enough that you can understand every change.
 
-## Stage 5, optional: operate it through Semaphore
+## Exercise 5, optional: operate it through Semaphore
 
 Run the mini-project the way a small team would, using the Community features
 in [chapters 14 to 18](14-inputs-and-templates.md). Give it a survey whose

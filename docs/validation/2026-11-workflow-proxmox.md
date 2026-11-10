@@ -14,8 +14,11 @@ second reader, and corrected from what the runs showed.
   publishers' cloud images, each checked against a SHA-256 from a manifest
   whose signature was verified first: Ubuntu 24.04 (release build of October
   2026), AlmaLinux 9.8 (`20261102`) and Rocky Linux 9.8 (`20260525.0`).
-- **Controller:** an Ubuntu 24.04.5 guest with 3 GiB of memory, installed with
-  `controller/install-controller.sh --apply` from this release's folders.
+- **Controllers:** an Ubuntu 24.04.5 guest with 3 GiB of memory, installed with
+  `controller/install-controller.sh --apply` from this release's folders; the
+  same guest again, rolled back and installed from tag `v1.8.0` as an existing
+  controller would have been, then updated; and a fresh AlmaLinux 9.8 guest
+  for `controller/install-controller-el9.sh`.
 - **Targets:** small guests on the hypervisor's bridge, rebuilt from each image
   in turn, a clone of one of them, and a registered RHEL 9.8 guest as a
   machine that already existed.
@@ -29,6 +32,7 @@ second reader, and corrected from what the runs showed.
 | Stage | What ran | Result |
 | --- | --- | --- |
 | 1 | `install-controller.sh --plan`, then `--apply`, on Ubuntu 24.04.5 | Finished in 9 minutes 24 seconds. Readiness `"passed": true`; six tabs and 22 templates; services active; ports 3000 and 5432 on loopback; `pong` through the tunnel. |
+| 1 | `install-controller-el9.sh --plan`, then `--apply`, on a fresh AlmaLinux 9.8 cloud-image guest (1.5 GiB of memory and a swap file, all the test node could spare) | Readiness `"passed": true`; six tabs and 22 templates; `semaphore` and `postgresql` active; ports on loopback; SELinux enforcing; no failed unit. No target was added to this controller. |
 | 1 | `expose-semaphore.sh --mode https` without `--address` | Named the guest's own LAN address in the URL and the certificate; HTTPS answered from another machine, ports 80 and 3000 did not; readiness passed with the nginx checks. |
 | 2 | `onboard-linux.sh` over SSH, the page's root-shell block typed as shown | `RESULT: OK` on Ubuntu 24.04.5, AlmaLinux 9.8 and Rocky Linux 9.8 cloud-image guests and on registered RHEL 9.8; `openssl passwd -6` prompted inside the block; `password: set from PASSWORD_HASH`; sudo then accepted the typed password. On RHEL the copy to the machine used the workstation's forwarded agent. |
 | 2 | `bootstrap-existing-vm.yml` from the controller, Rocky Linux 9.8 | Host key pinned by comparing with the console; `ssh-copy-id` to an administrator with password SSH; `inventories/bootstrap.ini` from the example, ignored by Git; the two password prompts; `failed=0`, and the whole `controller/add-target.sh` command printed. |
@@ -43,6 +47,8 @@ second reader, and corrected from what the runs showed.
 | 4 | Retiring a target | `ssh-keygen -R`, the `chown` and `chmod`, and the `sed` line; readiness still reported `service_can_read_known_hosts`. |
 | 4 | **Ping** before any sudo credential, then **Baseline preview** | Ping succeeded; Baseline preview stopped with `Missing sudo password`. |
 | 4 | **Lab sudo** with an empty Username, then the lessons | On AlmaLinux 9.8, Rocky Linux 9.8 and Ubuntu 24.04: Ping, Baseline preview, Baseline apply with changes, and a second apply with `changed=0`. On Ubuntu also Users, Webserver and Patch preview. |
+| Update | A controller installed from `v1.8.0` with `scripts/install-controller.sh`, one Ubuntu target onboarded with that release's own files and added with `scripts/add-target.sh`, then the update page followed with this release | `sudo bash scripts/update-controller.sh`, the old path, showed the plan through its wrapper: one guide file to update, nothing to add in Semaphore. `sudo bash controller/update-controller.sh --apply` committed it in the lab folder and passed readiness; a second plan had nothing to do. Ping and Baseline apply still succeeded, the project still had 22 templates, and `sudo bash scripts/add-target.sh --from-info` with the lines the old script had printed said `Already present`. |
+| Stage 2 | `onboard-linux.sh` fetched by commit hash | `raw.githubusercontent.com` served the file for the full commit hash, with the same SHA-256 as the controller's copy. |
 | Proxmox page | The `qm set`, `qm resize` and `qm cloudinit dump` commands as printed; `qm terminal` | Disk imported from an absolute path, cloud-init drive, serial console, `--ciuser` with `--sshkeys FILE`, `--rng0`, and `qm resize VMID scsi0 20G` to an absolute size; the root file system filled the disk. `qm terminal` gave a login prompt after Enter, pasted a 742-byte key intact and left with Ctrl-O. The Ubuntu image had no guest agent; the AlmaLinux and Rocky Linux images ran it and refused `guest-exec`. |
 
 ## What the runs changed
@@ -63,16 +69,16 @@ second reader, and corrected from what the runs showed.
 
 ## Not established by this run
 
-- **The Enterprise Linux installer on a fresh VM** did not run in this
-  campaign: the registered RHEL guest's Red Hat registration had been removed
-  on the vendor's side, so it could not install packages, and the hypervisor
-  had no room for another controller. `install-controller-el9.sh` shares
-  `controller-common.sh` with the Ubuntu installer that ran, its offline tests
-  pass, and its last live runs are in
+- **A RHEL controller, and Baseline on RHEL.** The registered RHEL 9.8 guest's
+  registration had been removed on the vendor's side, so its repositories
+  refused it. As a machine that already existed it was onboarded, added and
+  answered Ping, and sudo worked; Baseline's package step failed on the
+  repository error. The Enterprise Linux installer ran on AlmaLinux instead;
+  RHEL was last green as a controller and a target in
   [the October record](2026-10-onboarding.md).
-- **Baseline on RHEL.** On that RHEL guest Ping and sudo worked, and the
-  package step failed because its repositories refused it; RHEL targets were
-  last green in the October record.
+- **Targets on the Enterprise Linux controller** of this run: it was installed
+  and checked, and no target was added to it. `add-target.sh` and the seeded
+  project are the same files as on the Ubuntu controller.
 - **Azure** was not rerun. The Azure playbooks moved to `platforms/azure/`,
   and `targets.yml` reads the cloud-init file from its new place; offline
   tests cover both, and the file's behaviour as user data is unchanged where
