@@ -119,12 +119,13 @@ The folders follow where a file runs.
 | [`controller/`](controller/) | What runs on the controller: the two installers, `add-target.sh`, the updater, the exposure script, the readiness check and the service unit templates. | 1 and 4 |
 | [`onboard/existing/`](onboard/README.md) | What prepares a machine that already exists: `onboard-linux.sh` for the machine itself, and `bootstrap-existing-vm.yml` for the controller to run against it. | 2 |
 | [`onboard/new-vm/`](onboard/README.md) | What prepares a new VM at first boot: `cloud-init.yaml`, and `fill-cloud-init.sh` to put the service key into it. | 3 |
+| [`onboard/`](onboard/README.md) | `inventory-info.sh`, which prints a prepared machine's values again and changes nothing, and the folder's README. | 2 and 3 |
 | [`playbooks/`](playbooks/) | The lessons and the STIG playbooks, which the installers copy into the controller's lab folder; [`playbooks/stig/`](playbooks/stig/) has one folder per operating system and version. | After 4 |
 | [`platforms/azure/`](platforms/azure/README.md) | Playbooks that create, stop and remove an Azure lab, in run order. | Optional |
 | [`examples/semaphore/`](examples/semaphore/) | Small playbooks for the Semaphore feature chapters. | Optional |
 | [`inventories/`](inventories/) | Example inventories; your own stay private. | 2, by-hand path |
 | [`docs/`](docs/README.md) | The stage pages, chapters, appendices and validation records. | |
-| [`scripts/`](scripts/) | `summarize_xccdf.py`, which the lab folder copies for the STIG lessons, and `validate.py` for this repository's own checks. | |
+| [`scripts/`](scripts/) | `summarize_xccdf.py`, which the lab folder copies for the STIG lessons, `validate.py` for this repository's own checks, and the wrappers `add-target.sh` and `update-controller.sh`, which call the files in `controller/` for copies that still name the old path. | |
 | [`tests/`](tests/) | Offline tests of the scripts, playbooks and documents. | |
 
 The files you run yourself, one by one:
@@ -164,16 +165,20 @@ accounts. Read each playbook before running it.
 ### Coming from an earlier copy
 
 Up to v1.8.0 the controller's tools were in `scripts/`, the onboarding files
-in `examples/onboard/` and the Azure playbooks in `examples/azure/`. The files
-are the same; only their folders changed:
+in `examples/onboard/` and the Azure playbooks in `examples/azure/`. Most
+files only moved, and the paths they print now name the new folders. Three
+things changed with them: `cloud-init.yaml` now also
+works as vendor data, `add-target.sh --from-info` also reads lines with a
+console or journal stamp before `onboard:`, and `fill-cloud-init.sh` is new.
+Use this copy's files, not copies you filled from an earlier one:
 
 | Earlier path | Now |
 | --- | --- |
-| `scripts/install-controller*.sh`, `add-target.sh`, `update-controller.sh`, `expose-semaphore.sh`, `check-controller.py` | `controller/` |
+| `scripts/install-controller.sh`, `install-controller-el9.sh`, `add-target.sh`, `update-controller.sh`, `update-controller.py`, `expose-semaphore.sh`, `check-controller.py`, `seed-semaphore.py`, `controller-common.sh`, `controller_config.py`, `create-admin.py`, `create-database.py` | `controller/`, with the same names; `scripts/add-target.sh` and `scripts/update-controller.sh` remain as wrappers that call the new files |
 | `templates/` | `controller/templates/` |
 | `examples/onboard/onboard-linux.sh`, `examples/bootstrap-existing-vm.yml` | `onboard/existing/` |
 | `examples/onboard/cloud-init.yaml` | `onboard/new-vm/` |
-| `examples/onboard/inventory-info.sh` | `onboard/` |
+| `examples/onboard/inventory-info.sh`, `examples/onboard/README.md` | `onboard/` |
 | `examples/azure/` | `platforms/azure/` |
 | Chapters 1 to 4 and 13 | The stage pages, the by-hand pages and the platform pages above |
 

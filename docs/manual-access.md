@@ -119,8 +119,12 @@ sudo install -o svc_ansible -g svc_ansible -m 0600 ~/ansible_lab.pub \
 
 Choose the account's password and store it in your password manager. One
 password shared by the lab targets keeps Semaphore's setup to one credential;
-a unique password per target is stronger and needs a credential per target, as
-[chapter 6](06-semaphore.md#step-2-add-credentials-in-key-store) shows. It is
+a unique password per target is stronger and needs a credential per target:
+one inventory per target, as
+[chapter 6](06-semaphore.md#step-2-add-credentials-in-key-store) builds by
+hand, or Vault host variables on an installer's controller, as
+[Stage 4](stage-4-add-target-first-job.md#do-give-semaphore-the-sudo-password)
+shows. It is
 used for sudo and console recovery; the SSH configuration below requires
 a key for this account. Enter the password interactively, not in a shell
 command, inventory or playbook.

@@ -98,17 +98,21 @@ already installed; cloud-init sets it up at the first boot from the VM's
 VM for Stage 0, a plain VM to onboard in Stage 2, or, with the guide's file
 attached, a Stage 3 VM.
 
-1. **Download and check the image** on the node, for example into `/root`.
-   Do not infer the disk format from the filename: a `.img` download can
-   contain qcow2 bytes.
+1. **Download and check the image** on the node, for example into `/root`,
+   with the URL from the publisher's download page in place of `IMAGE_URL`,
+   and verify it as [Stage 0](stage-0-plan.md) describes. Do not infer the
+   disk format from the filename: a `.img` download can contain qcow2 bytes.
 
    ```bash
+   wget -P /root IMAGE_URL
    qemu-img info /root/IMAGE_FILE
    ```
 
 2. **Create the VM and import the disk.** The example sizes follow
    [Stage 0](stage-0-plan.md): 4 GiB of memory and a 32 GiB disk for the
-   controller, 3 GiB and 40 GiB for a target. `--cpu host` gives the guest the
+   controller, 3 GiB and 40 GiB for a target. The commands show the
+   controller's; for a target, use `--memory 3072` here and `40G` in step 6.
+   `--cpu host` gives the guest the
    node's CPU features; in a cluster with different CPUs, choose a common
    model instead.
 
@@ -133,16 +137,23 @@ attached, a Stage 3 VM.
 
 4. **Set the administrator, its key and the network** (the VM's
    **Cloud-Init** tab in the web UI). `--sshkeys` takes a file on the node
-   that holds your public key. Proxmox names the guest after the VM's
-   `--name`; `--searchdomain` gives it a full name, which Enterprise Linux
-   images need, or their hostname stays `localhost`.
+   that holds your public key; copy it there from your workstation first, for
+   example with
+   `scp ~/.ssh/id_ed25519.pub root@PROXMOX_NODE:/root/ADMIN_KEY.pub`.
 
-   <!-- VERIFY-LIVE: on Proxmox VE 8 and 9, qm cloudinit dump VMID user shows hostname NAME, fqdn NAME.lab.example, user ADMIN and the key after this qm set; an AlmaLinux 9 guest then reports NAME in hostnamectl -->
    ```bash
-   qm set VMID --ciuser ADMIN --sshkeys /root/ADMIN_KEY.pub \
-     --ipconfig0 ip=dhcp --searchdomain lab.example
+   qm set VMID --ciuser ADMIN --sshkeys /root/ADMIN_KEY.pub --ipconfig0 ip=dhcp
    qm cloudinit dump VMID user
    ```
+
+   The dump shows `hostname: NAME` and `fqdn: NAME`: Proxmox names the guest
+   after the VM's `--name` and also sends that name as its full name, so
+   Ubuntu and Enterprise Linux guests alike take it as their hostname.
+   `--searchdomain lab.example` is optional; with it, the full name becomes
+   `NAME.lab.example`. Set it, like every cloud-init setting, before the first
+   boot: changing one later gives the VM new SSH host keys, as
+   [Stage 3](stage-3-new-vms-cloud-init.md#do-on-proxmox-attach-the-file-to-a-new-vm)
+   explains.
 
    For a fixed address, use `--ipconfig0 ip=VM_ADDRESS/PREFIX,gw=GATEWAY_ADDRESS` and
    `--nameserver DNS_SERVER_ADDRESS`. The administrator has no password unless you
@@ -183,9 +194,10 @@ attached, a Stage 3 VM.
    The guide's cloud-init file does not install it; the agent is a Proxmox
    convenience, not something the guide depends on.
 
-For a Stage 3 VM, stop before step 6 and attach the cloud-init file first, as
+For a Stage 3 VM, run the `qm resize` of step 6, with the target's 40 GiB,
+but not `qm start`: attach the cloud-init file first, as
 [Stage 3](stage-3-new-vms-cloud-init.md#do-on-proxmox-attach-the-file-to-a-new-vm)
-shows.
+shows, then start it.
 
 To make many VMs from one image, convert a VM that has never booted into a
 template (`qm template VMID`) and clone it; each clone gets its own

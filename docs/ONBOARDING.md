@@ -46,7 +46,7 @@ flowchart TD
     how -- "SSH as its<br/>administrator" --> sh["Copy onboard-linux.sh<br/>and the key to it, then<br/>in a root shell: the<br/>key and a password hash<br/>as ONBOARD_ variables,<br/>bash onboard-linux.sh"]
     how -- "only its console" --> con["Fetch the script on the<br/>machine and compare its<br/>checksum, then run it<br/>the same way"]
     how -- "Azure Run Command" --> rc["Edit onboard-linux.sh:<br/>the key, PASSWORD_HASH,<br/>CONTROLLER_ADDRESS.<br/>Run it as RunShellScript"]
-    how -- "the controller SSHes<br/>in as its admin,<br/>host key pinned" --> pb["On the controller, in the<br/>guide's folder: onboard/<br/>existing/bootstrap-<br/>existing-vm.yml<br/>--limit HOST -u ADMIN"]
+    how -- "the controller SSHes<br/>in as its admin,<br/>host key pinned" --> pb["On the controller, in the<br/>guide's folder: onboard/<br/>existing/bootstrap-<br/>existing-vm.yml<br/>--limit HOST -u ADMIN<br/>and the -e option with<br/>~/svc_ansible.pub,<br/>as Stage 2 shows"]
     sh --> lines
     con --> lines
     rc --> lines[/"Data, not a command:<br/>name=, address=,<br/>group=, fingerprint=.<br/>Lost? inventory-info.sh<br/>prints them again"/]

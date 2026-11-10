@@ -32,6 +32,11 @@ run; this page only summarizes them.
 | STIG lessons per system | A controller installed from `v1.6.1` was updated to one STIG tab per system and version: per-system audits scanned only their own hosts and skipped the others, an audit with no host of its system and an apply on the wrong system stopped with explanations, both DISA SCAP file templates scanned from their system folders, and an AlmaLinux apply with reboot matched the earlier record. `--remove-replaced` deleted the old templates and tab after a backup, kept a variable group holding the operator's values, and took the old templates' task history with them. A fresh install seeded the same tabs. | [Per-system STIG record](validation/2026-10-stig-per-system.md) |
 | Reorganized chapters | Chapter 3b's exposure, STIG and repository-migration sections moved to [browser access](appendices/browser-access.md), [chapter 9](09-security-benchmarks.md#the-seeded-stig-templates) and [the Git migration appendix](appendices/git-migration.md) with their commands unchanged. The moves passed the offline checks. | This page |
 
+Records from before the stage reorganization name pages by their former
+chapter numbers: chapters 1 and 2 are now Stage 0 and the Proxmox page, 3 and
+3b Stage 1 and the by-hand controller page, 4 the by-hand access page, and 13
+the Azure page.
+
 ## Not established
 
 - FIPS mode. On RHEL, AlmaLinux and Rocky Linux the vendor STIG sets the
@@ -61,9 +66,10 @@ run; this page only summarizes them.
 - Clicking every UI form. The feature campaign drove Semaphore through its API
   and command line, with the same request bodies the UI sends; the chapters name
   the UI labels of 2.19.12.
-- Chapter 2's manual ISO installation, editing through VS Code Remote SSH in
-  chapter 7, and the troubleshooting chapter's diagnostics as a separate
-  exercise. The Azure chapter's own limits are in
+- The manual ISO installation of
+  [the Proxmox page](platform-proxmox.md#do-build-a-vm-from-an-iso), editing
+  through VS Code Remote SSH in chapter 7, and the troubleshooting chapter's
+  diagnostics as a separate exercise. The Azure page's own limits are in
   [its record](validation/2026-09-azure.md#not-established) and the
   [onboarding and STIG record](validation/2026-09-onboard-stig.md#not-established).
 
@@ -78,11 +84,11 @@ python3.12 -m venv .venv
 .venv/bin/python scripts/validate.py
 .venv/bin/python -m unittest discover -s tests -v
 .venv/bin/ansible-galaxy collection install -r platforms/azure/requirements.yml
-for playbook in playbooks/*.yml examples/*.yml examples/semaphore/*.yml \
+for playbook in playbooks/*.yml playbooks/stig/*/*/*.yml onboard/existing/*.yml examples/semaphore/*.yml \
     platforms/azure/{network,controller,targets,power,remove}.yml; do
   .venv/bin/ansible-playbook -i inventories/lab.ini.example --syntax-check "$playbook"
 done
-.venv/bin/ansible-lint --offline playbooks/ examples/
+.venv/bin/ansible-lint --offline playbooks/ examples/ onboard/ platforms/
 for installer in controller/install-controller.sh controller/install-controller-el9.sh; do
   bash "$installer" | grep '^Plan:'
   bash "$installer" --plan >/dev/null

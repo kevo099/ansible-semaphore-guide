@@ -51,8 +51,12 @@ VM's cloud-init data or give a target the cloud administrator's private key.
 ## Do: prepare the Azure tooling
 
 **Where: the machine that holds your Azure login, as your own account.** That can
-be your workstation or the controller. The Azure SDK is large, so keep it in its
-own virtual environment rather than the controller's `/opt/ansible-venv`:
+be your workstation or the controller. The commands run in the repository
+root: on the controller, the guide's folder; on a workstation, clone the guide
+there first, with the `git clone` line of
+[Stage 1](stage-1-controller.md#do-get-the-guide-onto-the-controller), and
+work in that clone. The Azure SDK is large, so keep it in its own virtual
+environment rather than the controller's `/opt/ansible-venv`:
 
 ```bash
 python3.12 -m venv ~/azure-venv
@@ -119,8 +123,11 @@ when either file is missing or is not a public key:
   copied into `platforms/azure/files/`, which Git ignores. On a controller
   made by either installer, that is the service key, which
   [Stage 1](stage-1-controller.md#do-save-the-service-key) saves as
-  `~/svc_ansible.pub`; copy it into `platforms/azure/files/svc_ansible.pub`
-  and point the variable at it. Without a seeded controller, use
+  `~/svc_ansible.pub` on the controller. Create the folder with
+  `mkdir -p platforms/azure/files`, copy the key there as
+  `platforms/azure/files/svc_ansible.pub` (from a workstation:
+  `scp ADMIN@CONTROLLER_ADDRESS:svc_ansible.pub platforms/azure/files/`), and
+  point the variable at it. Without a seeded controller, use
   `~/.ssh/ansible_lab.pub` from
   [the manual access page, step 1](manual-access.md#step-1-generate-the-automation-key).
   cloud-init takes one key; the password step can add more.
@@ -303,7 +310,13 @@ Three things are specific to Azure:
 - Pin each target's host key through Run Command first, as
   [above](#do-pin-the-targets-host-keys).
 
+**Where: the controller, as your administrator account, in the guide's
+folder,** not in `platforms/azure` and not on a workstation: the playbook's
+paths are relative to the guide's folder, and `/opt/ansible-venv` and the
+service key exist only on the controller.
+
 ```bash
+cd ~/ansible-semaphore-guide
 sudo cat /etc/semaphore/svc_ansible.pub > ~/svc_ansible.pub
 /opt/ansible-venv/bin/ansible-playbook -i inventories/bootstrap.ini \
   onboard/existing/bootstrap-existing-vm.yml --limit lab-ubuntu -u YOUR_ADMIN \
@@ -343,7 +356,7 @@ before any change when no given key can log in under the VM's SSH crypto
 policy, for example an Ed25519 key on a host hardened to `FIPS:STIG`, or an
 RSA key shorter than 2048 bits or than the server's `RequiredRSASize`. The
 rest of what it checks and changes is in
-[Stage 2](stage-2-existing-machines.md#do-run-the-onboarding-script-over-ssh).
+[Stage 2](stage-2-existing-machines.md#what-the-script-and-the-playbook-check).
 
 Edit the copy you run: replace `REPLACE_WITH_AUTOMATION_PUBLIC_KEY` with the
 controller's public key, one key per line, between the two `END_OF_KEYS`
@@ -405,7 +418,8 @@ Then either:
   protected hash. `ONBOARD_PUBLIC_KEYS` replaces the whole key list, so pass
   every key the account needs, one per line; on a seeded controller that
   includes the service key, saved as `~/svc_ansible.pub` on the machine that
-  runs `az`:
+  runs `az`. Run it from the guide's folder (the repository root), not from
+  `platforms/azure`, because the `@` path is relative to it:
 
 ```bash
 az vm run-command create -g RESOURCE_GROUP --vm-name VM_NAME --name onboard \

@@ -16,6 +16,12 @@ the four lines the controller needs, `name=`, `address=`, `group=` and
 
 ## Before you start
 
+- **A disposable lab machine.** The lessons change what they manage: they
+  replace the login banner (`/etc/motd`), install and configure the time
+  service, take over nginx's whole configuration, install packages, apply
+  updates and STIG remediation, and can reboot it. Use a machine you can lose or rebuild, never one that runs
+  something you need, and never the controller itself. Keep its console, and a
+  snapshot or backup, as a way back that does not depend on SSH.
 - **The service key copy.** Stage 1 ends with a copy of the service key in your
   home folder on the controller, `~/svc_ansible.pub`. If it is missing, make it
   again on the controller with
@@ -163,8 +169,8 @@ export ONBOARD_CONTROLLER_ADDRESS=CONTROLLER_IP
 bash onboard-linux.sh
 ```
 
-If `openssl` prints `Verify failure`, the two entries differed: run the first
-line again. To use the hash you made on the controller instead, replace the
+If `openssl` prints `Verify failure`, the two entries differed and the script
+ran without a hash: run the whole block again. To use the hash you made on the controller instead, replace the
 first line with `read -r ONBOARD_PASSWORD_HASH && export ONBOARD_PASSWORD_HASH`
 and paste the hash at the empty prompt.
 
@@ -404,12 +410,12 @@ The playbook then asks for the new sudo password for `svc_ansible`, twice:
 
 ```text
 BECOME password:
-New sudo password for svc_ansible on this host (unique per target):
-confirm New sudo password for svc_ansible on this host (unique per target):
+New sudo password for svc_ansible on this host (the lab's shared one, or this target's own):
+confirm New sudo password for svc_ansible on this host (the lab's shared one, or this target's own):
 ```
 
-Type the password you chose and saved; with one shared lab password, that is
-the same password for every machine, whatever the prompt says. It refuses a
+Type the password you chose and saved: with one shared lab password, the same
+one for every machine. It refuses a
 password shorter than 12 characters, a run without `--limit` or with several
 hosts, and an unsupported system. It checks the SSH configuration before it
 reloads SSH and puts the previous state back when a check fails. Near the end
@@ -417,10 +423,10 @@ it prints:
 
 ```text
 TASK [Show the controller command that adds this host] *************************
-ok: [NAME] => {
+ok: [lab-alma] => {
     "msg": [
         "Add this VM on the controller: in the guide's folder, run this command (replace NAME, ADDRESS or FINGERPRINT if shown, and add --lab-dir DIR for a lab folder other than /opt/ansible-lab):",
-        "sudo bash controller/add-target.sh --name NAME --address VM_ADDRESS --group enterprise_linux --fingerprint SHA256:..."
+        "sudo bash controller/add-target.sh --name lab-alma --address alma.example.test --group enterprise_linux --fingerprint SHA256:..."
     ]
 }
 ```
@@ -485,6 +491,71 @@ enough:
 sudo ssh-keygen -lf /etc/ssh/ssh_host_rsa_key.pub
 ```
 
+## What the script and the playbook check
+
+Both stop with a reason rather than leave the account half-working or lock it
+out. Before it changes anything, the onboarding script refuses:
+
+- a run without root rights;
+- a missing key, the unreplaced placeholder, or a line that is not a single
+  OpenSSH public key of type `ssh-rsa`, `ssh-ed25519` or `ecdsa-sha2-nistp*`;
+- a hash that is not a SHA-512 crypt hash, and a controller address that is
+  not an IP address;
+- a system other than Ubuntu 24.04 or AlmaLinux, Rocky Linux or RHEL 9.
+
+It then installs any missing package, and still before it touches the
+account it refuses:
+
+- an SSH configuration whose `Match` rules depend on the client's address
+  when no controller address is given;
+- a key list in which no key can log in under the machine's SSH policy: a key
+  type that `PubkeyAcceptedAlgorithms` leaves out, such as Ed25519 under a FIPS
+  or STIG crypto policy, or an RSA key shorter than 2048 bits or than the
+  server's `RequiredRSASize`.
+
+While it makes its changes, it:
+
+- refuses an existing `svc_ansible` with a system UID (below 1000);
+- writes the key file as `svc_ansible` itself, so a link planted in its home
+  cannot redirect root, and refuses an `authorized_keys` that is a directory;
+- enforces, on every run, a home without group or world write permission,
+  `.ssh` at mode 0700 and `authorized_keys` at 0600, both owned by the
+  account, because SSH's `StrictModes` ignores keys in a writable place; and
+  restores their SELinux labels where SELinux is enabled;
+- refuses a sudoers file or SSH drop-in that is a link or not a regular file;
+- checks the sudo rule with `visudo`, then the whole sudo configuration, and
+  takes its rule back if that fails to parse;
+- reads `sudo -l -U svc_ansible` and requires `(ALL : ALL) ALL` with no
+  `NOPASSWD` or `!authenticate`, and no `rootpw`, `targetpw` or `runaspw`
+  default, which would make sudo ask for another account's password;
+- runs `sudo -k -n /usr/bin/true` as `svc_ansible`, which must fail: it
+  catches a passwordless rule anywhere in the configuration;
+- requires `/etc/ssh/sshd_config` to include `sshd_config.d/*.conf`, then
+  checks `sshd -t` and the effective policy for `svc_ansible` arriving from the
+  controller's address at each of the machine's addresses and SSH ports:
+  public key only, no password or keyboard-interactive login, an
+  `AuthorizedKeysFile` that includes `~/.ssh/authorized_keys`, and no
+  `AllowUsers`, `AllowGroups`, `DenyUsers` or `DenyGroups` rule that keeps the
+  account out (an entry it cannot judge, such as a pattern, is printed as a
+  `warning:`);
+- puts the previous drop-in back and leaves SSH alone when any SSH check
+  fails, and also when SSH does not accept the reload.
+
+The last line is `RESULT: OK` or `RESULT: FAILED: REASON`, also after an
+unexpected error. The account, its keys and its password may already be
+updated when a later check stops the run; running it again is safe.
+
+The bootstrap playbook makes the same checks in its own way. It requires a
+`--limit` that selects exactly one host, a supported system, single-line
+public keys and a password of at least 12 characters, and at least one key
+the machine's SSH policy accepts, all before it changes anything. It refuses a
+link in place of `.ssh` or `authorized_keys`, writes the key file as
+`svc_ansible`, and validates the sudoers rule with `visudo`. It reads the SSH
+policy for the very connection the controller uses, checks the same settings
+and the `Allow`/`Deny` rules, and on a failure puts the previous drop-in back
+and does not reload SSH. After SSH is reloaded, it checks the sudo rights as
+the script does, `sudo -k -n` included, and stops if they are wrong.
+
 ## Check
 
 On the machine, the script's first run shows:
@@ -495,10 +566,17 @@ sudo: /etc/sudoers.d/90-ansible-lab written; svc_ansible's own password is requi
 RESULT: OK
 ```
 
-Running it again with the same inputs is a good check: it reports
-`authorized keys unchanged`, `password: unchanged`, and `unchanged` for the
-sudo rule and the SSH drop-in, then the same four lines. `password: kept` means it
-kept a password set earlier; `NOT SET` means there is none yet. After the
+Running it again with the same inputs is a good check; do it before you leave
+the root shell and delete the files. There, `bash onboard-linux.sh` alone
+reuses the exported values and reports `authorized keys unchanged`,
+`password: unchanged`, and `unchanged` for the sudo rule and the SSH drop-in,
+then the same four lines. Running the whole block again instead makes a new
+hash of the same password, because `openssl passwd -6` picks a new random salt
+each time, so it reports `password: set from PASSWORD_HASH` again; that is
+fine too. To rerun without touching the password, run
+`export ONBOARD_PASSWORD_HASH=` first: the script then reports
+`password: kept`, which means it kept a password set earlier. `NOT SET` means
+there is none yet. After the
 bootstrap playbook, its recap shows `failed=0`, and a repeat run `changed=0`.
 At the machine's console, `sudo -l -U svc_ansible` lists `(ALL : ALL) ALL`
 without `NOPASSWD`. Whether the controller can log in and use sudo is
@@ -517,8 +595,8 @@ checked in Stage 4, by Ping and Baseline preview.
 
 | Symptom | Likely cause | Next step |
 | --- | --- | --- |
-| The last line is `RESULT: FAILED: ...` | The message names it: a key this SSH server refuses, a `NOPASSWD` rule, an SSH setting that overrides the account's, an unsupported system | Fix what it names and run the script again. It restored the previous SSH and sudo state before stopping. |
-| `RESULT: FAILED: run as root; Azure Run Command already does` | The script ran without root rights | Run it from the `sudo -s` root shell, or with `sudo bash onboard-linux.sh`. |
+| The last line is `RESULT: FAILED: ...` | The message names it: a key this SSH server refuses, a `NOPASSWD` rule, an SSH setting that overrides the account's, an unsupported system | Fix what it names and run the script again. It changed nothing that could lock you out: an SSH or sudo change that failed its check was taken back. The account, its keys and its password may already be updated; running it again is safe. |
+| `RESULT: FAILED: run as root, for example with: sudo bash onboard-linux.sh` | The script ran without root rights | Run it from the `sudo -s` root shell, or with `sudo bash onboard-linux.sh`. |
 | `RESULT: FAILED: replace REPLACE_WITH_AUTOMATION_PUBLIC_KEY with the controller's public key` | `ONBOARD_PUBLIC_KEYS` was empty, for example because `svc_ansible.pub` was not in the current folder, so the script fell back to its unedited constant | Check with `ls` that the key file is there, export the variable again and rerun. |
 | `RESULT: FAILED: PASSWORD_HASH must be a SHA-512 crypt hash ...` | The hash was cut or changed on its way, for example by double quotes that expanded its `$` signs | Make it again with the `openssl` line in the root shell. |
 | `RESULT: FAILED: the SSH configuration has Match rules that depend on the client's address ...` | `ONBOARD_CONTROLLER_ADDRESS` was empty | Export it with the controller's IP address and rerun. |

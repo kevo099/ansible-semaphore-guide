@@ -2,7 +2,7 @@
 
 Create, stop and remove a small Azure lab: a network, an optional controller
 with the only public address, and target VMs that
-[`../onboard/cloud-init.yaml`](../../onboard/new-vm/cloud-init.yaml) prepares at first
+[`onboard/new-vm/cloud-init.yaml`](../../onboard/new-vm/cloud-init.yaml) prepares at first
 boot. [The Azure page](../../docs/platform-azure.md) explains each step, and
 [the onboarding page](../../docs/ONBOARDING.md) shows where they fit between
 a new VM and a target Semaphore can run.

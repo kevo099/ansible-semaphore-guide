@@ -272,10 +272,10 @@ Local lab folder (edit as ADMIN): /opt/ansible-lab
 The initial admin password is in /etc/semaphore/initial-admin-password (root only).
 ```
 
-With `--expose https` or `--expose http`, the readiness report names that mode
-and adds its own checks, and the exposure lines described
-[below](#optional-publish-the-ui-on-the-controllers-address) come before the
-closing lines.
+With `--expose https` or `--expose http`, the exposure lines described
+[below](#optional-publish-the-ui-on-the-controllers-address) follow the
+seeding summary, and a second readiness report follows them; that report names
+the mode and adds its own checks. Both come before the closing lines.
 
 Run the readiness check again at any time; it reads state and changes nothing:
 
@@ -425,7 +425,7 @@ behind NAT the default address is the private one; on Azure, see
 
 | Value | Where it came from | Needed in |
 | --- | --- | --- |
-| The guide's folder, `~/ansible-semaphore-guide` | Your clone | Stage 4 (`add-target.sh`), updates |
+| The guide's folder, `~/ansible-semaphore-guide` | Your clone | Stages 2 to 4, updates |
 | The lab folder, `/opt/ansible-lab` unless you chose `--lab-dir` | The installer's closing lines | Stage 4, updates |
 | The initial admin password's location, `/etc/semaphore/initial-admin-password` | The installer's closing lines | First login only |
 | Your changed Semaphore `admin` password | You, in the UI; keep it only in your password manager | Every login, updates |

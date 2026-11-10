@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Print cloud-init.yaml with the controller's public key in place of its one
-# placeholder, ready to give to a new VM as cloud-init user data.
+# placeholder, ready to give to a new VM as cloud-init data: vendor data on
+# Proxmox or in a NoCloud seed, custom data on Azure.
 #
 # Usage, on the controller, in the guide's folder:
 #   bash onboard/new-vm/fill-cloud-init.sh ~/svc_ansible.pub > ~/onboard-new-vm.yaml

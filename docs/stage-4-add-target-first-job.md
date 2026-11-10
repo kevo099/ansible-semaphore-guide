@@ -46,7 +46,9 @@ Paste the name=, address=, group= and fingerprint= lines the VM printed, then pr
 ```
 
 Paste the four lines, or the VM's whole output: every other line is ignored.
-Lines that start with `onboard:`, as cloud-init logs them, are accepted. Then
+Lines from cloud-init are accepted as they are: with `onboard:` in front, and
+with a console or journal stamp such as `[   83.117215] cloud-init[1026]: `
+before that. Then
 press Enter, so the cursor is on a new line, and press Ctrl-D. Ctrl-C and then
 Ctrl-D cancels without changing anything. Success looks like this:
 
@@ -264,13 +266,20 @@ cp /opt/ansible-lab/inventories/lab.ini ~/lab.ini.before-retire
 sed -i '/^lab-alma /d' /opt/ansible-lab/inventories/lab.ini
 ```
 
-**A rebuilt or reinstalled controller** has a new service key pair. Every
-target still authorizes the old public key, so Ping fails with
-`Permission denied (publickey)`. Save the new key as `~/svc_ansible.pub`, as
-[Stage 1](stage-1-controller.md#do-save-the-service-key) shows, and run the onboarding of
-[Stage 2](stage-2-existing-machines.md) again on each target: the script and
-the playbook replace the account's authorized keys with exactly the ones you
-give them, and leave the password as it is when you give no new one.
+**A rebuilt or reinstalled controller** has a new service key pair, unless
+you restored `/etc/semaphore` from [chapter 10](10-recovery.md). Every target
+still authorizes the old public key, so the new key cannot log in. Save the
+new key as `~/svc_ansible.pub`, as
+[Stage 1](stage-1-controller.md#do-save-the-service-key) shows, and run the
+onboarding of [Stage 2](stage-2-existing-machines.md) again on each target
+with the new key: both the script and the playbook replace the account's
+authorized keys with exactly the ones you give them. The script keeps the
+password when you give it no hash; the playbook asks for one, so type the same
+password. Unless you restored the lab folder and Semaphore from chapter 10,
+the new controller's inventory, its known-hosts file and Semaphore's Key Store
+are empty as well: add each target again with `add-target.sh`, as above, and
+[give Semaphore the sudo password](#do-give-semaphore-the-sudo-password)
+again.
 
 ## Check
 

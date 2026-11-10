@@ -143,7 +143,7 @@ the worksheet to Git. Rows marked secret belong only in your password manager.
 | Your administrator account on the controller | Stage 0 | Every later stage | Its password is |
 | Controller operating system, and so its installer | Stage 0 | Stage 1 | No |
 | Clean snapshot or backup of the fresh controller | Stage 0 | Stage 1, if the installer fails | No |
-| The guide's folder on the controller | Stage 1 | Stages 1 and 4, updates | No |
+| The guide's folder on the controller | Stage 1 | Stages 2 to 4, updates | No |
 | The lab folder | Stage 1 | Stage 4, updates | No |
 | Where the initial Semaphore admin password is | Stage 1 | First login | The file path is not; its content is |
 | Your changed Semaphore admin password | Stage 1 | Every login, updates | Yes |
@@ -301,6 +301,17 @@ ssh ADMIN@CONTROLLER_ADDRESS
 The first connection shows a fingerprint and its key type. Accept it only if it
 matches the line of the same type you read on the console. Then reboot the VM
 once and confirm that it boots from disk and that its network and SSH return.
+
+Before you go on, confirm the plan as well:
+
+- You can identify each guest in the hypervisor and open its console.
+- The controller will not be a managed target: you never add its own address
+  in Stage 4 or onboard it in Stage 2.
+- The targets you plan are disposable and have no existing application to
+  preserve; the lessons change their configuration.
+- You have a way to recover each VM that does not depend on working SSH inside
+  it: its console, and a snapshot or backup.
+- The hypervisor has enough free memory and storage for the VMs in your plan.
 
 Before Stage 1, take a snapshot or backup of the stopped, clean controller VM.
 The installer runs only once on a fresh VM; if it fails part way, returning to

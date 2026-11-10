@@ -93,7 +93,7 @@ still parses as YAML with the key where cloud-init reads it. The controller's
 Ansible environment has the YAML library:
 
 ```bash
-grep -c REPLACE_WITH ~/onboard-new-vm.yaml
+grep -c '"REPLACE_WITH' ~/onboard-new-vm.yaml
 /opt/ansible-venv/bin/python -c 'import sys, yaml; d = yaml.safe_load(open(sys.argv[1])); print(d["users"][1]["name"], d["users"][1]["ssh_authorized_keys"][0][:20])' ~/onboard-new-vm.yaml
 ```
 
@@ -101,6 +101,9 @@ grep -c REPLACE_WITH ~/onboard-new-vm.yaml
 0
 svc_ansible ssh-rsa AAAAB3NzaC1y
 ```
+
+The `0` counts the quoted placeholder. The file's opening comment still names
+`REPLACE_WITH_AUTOMATION_PUBLIC_KEY` once, without quotes; that is only text.
 
 Where cloud-init is installed, for example on an Ubuntu 24.04 controller,
 also validate it as cloud-config:
@@ -140,27 +143,39 @@ the panel keeps working, and one copy of the file serves every VM.
    scp ~/onboard-new-vm.yaml root@PROXMOX_NODE:/var/lib/vz/snippets/onboard-new-vm.yaml
    ```
 
-   A snippet on a storage that is not shared exists on that node only. A VM
-   started on another node of a cluster needs the file there too.
+   This needs root SSH from the controller to the node, with the node's host
+   key checked when `scp` asks. Without it, open the node's **Shell** in the
+   web UI, run `cat > /var/lib/vz/snippets/onboard-new-vm.yaml`, paste the
+   file's content, then press Enter and Ctrl-D. A snippet on a storage that is
+   not shared exists on that node only. A VM started on another node of a
+   cluster needs the file there too.
 
 3. **Create the VM from the cloud image**, as
    [the cloud-image example](platform-proxmox.md#do-build-a-vm-from-a-cloud-image)
    explains, but do not start it yet:
 
    ```bash
-   qm create VMID --name NAME --ostype l26 --cpu host --cores 2 --memory 2048 \
+   qm create VMID --name NAME --ostype l26 --cpu host --cores 2 --memory 3072 \
      --scsihw virtio-scsi-single --net0 virtio,bridge=vmbr0 \
      --serial0 socket --vga serial0 --agent enabled=1
    qm set VMID --scsi0 STORAGE:0,import-from=/root/IMAGE_FILE
    qm set VMID --ide2 STORAGE:cloudinit --boot order=scsi0
    qm set VMID --ciuser ADMIN --sshkeys /root/ADMIN_KEY.pub --ipconfig0 ip=dhcp
-   qm resize VMID scsi0 20G
+   qm resize VMID scsi0 40G
    ```
+
+   The sizes are the target's from [Stage 0](stage-0-plan.md): 3 GiB of
+   memory and a 40 GiB disk. `/root/IMAGE_FILE` is the cloud image, downloaded
+   and checked on the node as
+   [step 1 of the cloud-image example](platform-proxmox.md#do-build-a-vm-from-a-cloud-image)
+   shows. `/root/ADMIN_KEY.pub` is your workstation's public key, copied to the
+   node from your workstation, for example with
+   `scp ~/.ssh/id_ed25519.pub root@PROXMOX_NODE:/root/ADMIN_KEY.pub`.
 
    For a fixed address use `--ipconfig0 ip=VM_ADDRESS/PREFIX,gw=GATEWAY_ADDRESS` and
    `--nameserver`. Proxmox names the guest after the VM's `--name`, on Ubuntu
    and on Enterprise Linux alike, so choose a name the inventory can use: not
-   `localhost`, `lab`, `ubuntu` or `enterprise_linux`.
+   `localhost`, `all`, `ungrouped`, `lab`, `ubuntu` or `enterprise_linux`.
 
 4. **Enterprise Linux only: add the VirtIO RNG.** Without it, Rocky Linux's
    `rngd` fails at boot, as
@@ -326,6 +341,7 @@ sudo grep 'onboard:' /var/log/cloud-init-output.log
 ```
 
 ```text
+onboard: created svc_ansible here, because the users: list of this file was not applied
 onboard: svc_ansible is ready; set its sudo password next
 onboard: Add this VM on the controller: in the guide's folder, run
 onboard:   sudo bash controller/add-target.sh --from-info
@@ -335,6 +351,10 @@ onboard: address=VM_ADDRESS
 onboard: group=ubuntu
 onboard: fingerprint=SHA256:...
 ```
+
+The first line appears on Proxmox, and wherever the platform's user data
+replaces the file's `users:` list; where that list applied, the log starts
+with `onboard: svc_ansible is ready`.
 
 Copy the `onboard: name=`, `address=`, `group=` and `fingerprint=` lines, or
 the whole output: `add-target.sh --from-info` reads a line that ends with
@@ -358,7 +378,8 @@ Two values can be missing on purpose:
   short hostname is one the inventory reserves (`localhost`, `all`,
   `ungrouped`, `lab`, `ubuntu`, `enterprise_linux`) or is not a plain name.
   This happens with a cloud image's default name, or on Enterprise Linux
-  without `fqdn`. Stage 4 then asks for `--name`.
+  when the user data gives no `fqdn` (Proxmox always sends one). Stage 4 then
+  asks for `--name`.
 - **No `address=` line**, and it says
   `onboard: and add --address with the address the controller reaches`: the
   VM has no global IPv4 address, or more than one, and the file does not know
@@ -437,7 +458,7 @@ rather than lines.
 | `cloud-init status` says `error`, and the log has `onboard: ERROR: svc_ansible has no valid public key; was the placeholder replaced?` | The placeholder was not replaced, or the file did not reach cloud-init as written | Check the filled copy as in the first step. cloud-init does not run again: create the VM again, or prepare it with [Stage 2](stage-2-existing-machines.md). |
 | No `onboard:` line at all in the log | The VM never received the file: wrong snippet path or storage, no `cidata` label, an installer ISO instead of a cloud image, or user data of your own with a `runcmd:` or `write_files:` that replaced the file's | Compare what the VM got, `sudo cat /var/lib/cloud/instance/vendor-data.txt` (and `user-data.txt`), with your file; on Proxmox, `qm config VMID` shows the `cicustom` line. Then create the VM again, or use Stage 2. |
 | `onboard: ERROR: ...` naming sudo, SSH, a key type or `AllowUsers` | The image's own configuration conflicts with the account's rules | Fix what it names, then run the Stage 2 script on the VM; it repeats every check. |
-| `Match rules depend on the client's address` | The image's SSH configuration has `Match Address` or similar rules | Run the Stage 2 script with `CONTROLLER_ADDRESS` set, so it checks the real address. |
+| `Match rules depend on the client's address` | The image's SSH configuration has `Match Address` or similar rules | Run the Stage 2 script with `ONBOARD_CONTROLLER_ADDRESS` exported, as Stage 2 shows, so it checks the real address. |
 | `onboard: and add --name ...` or `--address ...` | A reserved or default hostname, no `fqdn` on Enterprise Linux, or several addresses | Give that option in Stage 4; nothing is wrong with the VM. |
 | You cannot log in as the administrator | The administrator and key never reached the VM: on Proxmox, the file was attached with `user=` in place of `vendor=`, or the VM has no `--ciuser` and `--sshkeys` | Create the VM again with the file as vendor data and the administrator in the VM's own settings. |
 | After a change to the VM's cloud-init settings, Stage 4 or Ping reports a changed host key | The change gave the VM a new instance ID, and cloud-init made new host keys at the next boot | Read the new `fingerprint=` line and follow Stage 4's [rebuild steps](stage-4-add-target-first-job.md#do-rebuild-or-retire-a-target). |
@@ -453,9 +474,9 @@ Azure's custom data) and runs it once per instance. User data is the
 operator's; vendor data is a second document that cloud-init merges under it,
 where user data wins any key both define. That is why the file works beside
 Proxmox's own user data, and why it creates the account in its script when
-its `users:` list loses. That is why one file can
-prepare a VM on any of them, and why it does nothing for a VM that has already
-booted. The VM then prints data, not a command: the controller does not trust
+its `users:` list loses. Because cloud-init runs it once per instance, one
+file can prepare a VM on any of these platforms, and it does nothing for a VM
+that has already booted. The VM then prints data, not a command: the controller does not trust
 the VM, so only `add-target.sh`, reviewed code on the controller, acts on those
 values, as
 [Stage 4](stage-4-add-target-first-job.md#why-the-vm-prints-lines-not-a-command)

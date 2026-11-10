@@ -15,7 +15,7 @@ these files.
 | --- | --- | --- | --- |
 | [`existing/onboard-linux.sh`](existing/onboard-linux.sh) | 2 | The machine exists and you can get a root shell on it: over SSH, at its console, or through Azure Run Command | On the machine, as root |
 | [`existing/bootstrap-existing-vm.yml`](existing/bootstrap-existing-vm.yml) | 2 | The machine exists, the controller can log in as its administrator with a key, and its host key is pinned | On the controller, in the guide's folder, one machine per run |
-| [`new-vm/cloud-init.yaml`](new-vm/cloud-init.yaml) | 3 | You are creating the VM and can give it cloud-init user data | On the VM, at first boot |
+| [`new-vm/cloud-init.yaml`](new-vm/cloud-init.yaml) | 3 | You are creating the VM and can give it cloud-init data: vendor data on Proxmox or in a NoCloud seed, custom data on Azure | On the VM, at first boot |
 | [`inventory-info.sh`](inventory-info.sh) | 2 or 3 | The machine is prepared and you need its values for the controller again, for example after cloud-init | On the machine, `sudo sh inventory-info.sh`; read-only |
 
 ## Inputs
@@ -74,7 +74,7 @@ prompt paste the four lines, or the whole output.
 and checks them, scans the machine, keeps only the host key that matches the
 fingerprint, and adds the machine to the lab inventory; it ignores every other
 line and runs none of it. cloud-init's copy starts each line with `onboard:`,
-which it accepts. `onboard-linux.sh` and `cloud-init.yaml` leave out a value the
+and a console or the journal adds a stamp before that; it accepts both. `onboard-linux.sh` and `cloud-init.yaml` leave out a value the
 machine cannot read, and a hostname the inventory reserves, such as `localhost`
 or `ubuntu`. `add-target.sh` then says which value is missing and the option
 that gives it, `--name`, `--address` or `--fingerprint`; add only that option,

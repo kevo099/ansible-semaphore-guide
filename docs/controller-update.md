@@ -42,7 +42,7 @@ releases page names it; `git tag --list` shows the tags you have after the
 fetch:
 
 ```bash
-cd ~/ansible-semaphore-guide
+cd ~/ansible-semaphore-guide   # or your guide's folder, such as ~/guide-v1.8.0
 git status --short
 git fetch --tags origin
 git checkout RELEASE_TAG
