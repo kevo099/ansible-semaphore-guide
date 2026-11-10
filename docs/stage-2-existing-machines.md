@@ -278,7 +278,6 @@ sha256sum ~/ansible-semaphore-guide/onboard/existing/onboard-linux.sh
 At the machine's console, with `COMMIT` replaced by the 40 characters
 `git` printed:
 
-<!-- VERIFY-LIVE: raw.githubusercontent.com serves the file by full commit hash once the release is pushed; curl is present on minimal Ubuntu 24.04 and EL9 installs -->
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/kevo099/ansible-semaphore-guide/COMMIT/onboard/existing/onboard-linux.sh
 sha256sum onboard-linux.sh
