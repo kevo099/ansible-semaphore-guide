@@ -21,13 +21,18 @@ ships no fixed VM IDs, storage names or deletion script.
 
 1. [Stage 0](stage-0-plan.md): plan the lab, then build the **controller**
    VM, from a cloud image (below) or an ISO.
-2. [Stage 1](stage-1-controller.md): install the controller and save the
-   service key as `~/svc_ansible.pub`.
+2. [Stage 1](stage-1-controller.md): install the controller; it leaves the
+   service key's copy in `~/svc_ansible.pub`.
 3. For each **new** target: [Stage 3](stage-3-new-vms-cloud-init.md#do-on-proxmox-attach-the-file-to-a-new-vm),
-   a cloud-image VM with the guide's cloud-init file as a snippet. For a
-   target that **already exists**: [Stage 2](stage-2-existing-machines.md).
-4. [Stage 4](stage-4-add-target-first-job.md): add each target on the
-   controller and run Ping and Baseline preview.
+   a cloud-image VM with the guide's cloud-init file as a snippet, with the
+   sudo password's hash if you opt in; for many,
+   [a template and clones](runbooks.md#pre-deploy-a-batch-of-vms-on-proxmox-from-a-template).
+   For a target that **already exists**:
+   [Stage 2's one command](stage-2-existing-machines.md#do-onboard-it-in-one-command-from-the-controller)
+   from the controller, which also adds it to the inventory.
+4. [Stage 4](stage-4-add-target-first-job.md): add each new VM on the
+   controller with `add-target.sh`, give Semaphore the sudo password with
+   `lab-sudo.py`, and run Ping and Baseline preview.
 
 ## Before you start
 

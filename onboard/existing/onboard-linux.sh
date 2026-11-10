@@ -137,7 +137,8 @@ if [ -n "$ask_password" ]; then
   IFS= read -rs -p "The same password again: " second || fail "no password was entered"
   printf '\n' >&2
   [ "$first" = "$second" ] || fail "the two entries differ; nothing was changed, run it again"
-  [ "${#first}" -ge 12 ] || fail "the password has fewer than 12 characters; nothing was changed"
+  # Characters, not bytes, as the bootstrap playbook counts them.
+  [ "$(printf '%s' "$first" | LC_ALL=C.UTF-8 wc -m)" -ge 12 ] || fail "the password has fewer than 12 characters; nothing was changed"
   # On standard input, so that it never appears in a command line.
   PASSWORD_HASH=$(printf '%s' "$first" | openssl passwd -6 -stdin) || fail "openssl could not hash the password"
   first='' second=''

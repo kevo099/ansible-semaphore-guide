@@ -6,10 +6,11 @@
 
 Turn the fresh controller VM from Stage 0 into a working controller in one
 reviewed run: Ansible, PostgreSQL and Semaphore installed and pinned, and a
-Semaphore project with 22 ready task templates that run the guide's playbooks
+Semaphore project with 24 ready task templates that run the guide's playbooks
 from a local folder on the controller. When this stage is done, you have
 logged in to Semaphore through an SSH tunnel, changed the admin password, and
-saved a copy of the service key that every target will trust.
+checked the copy of the service key, which every target will trust, that the
+installer leaves in your home folder.
 
 ## Before you start
 
@@ -92,7 +93,8 @@ cd ~/ansible-semaphore-guide
 ```
 
 `~/ansible-semaphore-guide` is **the guide's folder**. Every command in this
-guide that starts with `controller/` runs from it: the installer, `add-target.sh`,
+guide that starts with `controller/` runs from it: the installer,
+`onboard-target.sh`, `add-target.sh`, `lab-sudo.py`, `remove-target.sh`,
 `expose-semaphore.sh`, `check-controller.py` and the update tool. It is not the
 lab folder the installer creates; Semaphore never reads the guide's folder.
 
@@ -166,17 +168,20 @@ use `DIR` wherever that path appears, and pass the same `--lab-dir DIR` to
 | Database | PostgreSQL 16, loopback only, SCRAM login, with a dedicated `semaphore` role and database |
 | Application | Semaphore Community 2.19.12, checksum-verified, `127.0.0.1:3000`, hardened `semaphore.service` run by the unprivileged `semaphore` account |
 | Secrets | In `/etc/semaphore` (0750, root and the `semaphore` group): `config.json` (0640, readable by the service), the initial admin password and the `svc_ansible` RSA 4096 private key (both root-only), the service key `svc_ansible.pub` (0644), an empty `known_hosts` that `add-target.sh` fills, and `gitconfig`, which lets the service read the lab folder's Git history. No value is printed. |
-| Lab folder | `/opt/ansible-lab`, owned by the editor and readable by the service: `ansible.cfg`, the seven playbooks and their supporting files, one STIG audit and apply playbook per system and version under `playbooks/stig/` (`rhel/9`, `almalinux/9`, `rocky/9`, `ubuntu/24.04`), the report summarizer `scripts/summarize_xccdf.py`, an empty `inventories/lab.ini`, a `content/` folder with the same per-system subfolders for SCAP files you supply, and a local Git history whose `.gitignore` keeps `inventories/`, `host_vars/` and `group_vars/` untracked |
-| Semaphore objects | Project **Ansible Practice**; keys **None** and **Practice target SSH**; repository **Local lab folder**; inventory **Lab inventory file**; variable groups **Practice defaults**, **Allow required reboot**, **DISA SCAP file · RHEL 9** and **DISA SCAP file · Ubuntu 24.04**; template tabs **Lessons**, **Patching**, **STIG · RHEL 9**, **STIG · AlmaLinux 9**, **STIG · Rocky Linux 9** and **STIG · Ubuntu 24.04** |
-| 22 task templates | **Lessons:** Ping; Baseline preview; Baseline apply; Users; Webserver. **Patching:** Patch preview; Patch, no reboot; Patch, allow required reboot. **Each STIG tab**, with names that start with the system, such as **RHEL 9 · STIG audit**: STIG audit; STIG apply (approval required); STIG apply, allow required reboot; and on the RHEL 9 and Ubuntu 24.04 tabs, STIG audit, DISA SCAP file |
+| Lab folder | `/opt/ansible-lab`, owned by the editor and readable by the service: `ansible.cfg`, the nine playbooks and their supporting files, one STIG audit and apply playbook per system and version under `playbooks/stig/` (`rhel/9`, `almalinux/9`, `rocky/9`, `ubuntu/24.04`), the report summarizer `scripts/summarize_xccdf.py`, an empty `inventories/lab.ini`, a `content/` folder with the same per-system subfolders for SCAP files you supply, and a local Git history whose `.gitignore` keeps `inventories/`, `host_vars/` and `group_vars/` untracked |
+| Semaphore objects | Project **Ansible Practice**; keys **None** and **Practice target SSH**; repository **Local lab folder**; inventory **Lab inventory file**; variable groups **Practice defaults**, **Allow required reboot**, **DISA SCAP file · RHEL 9** and **DISA SCAP file · Ubuntu 24.04**; seven template tabs, **Lessons**, **Patching**, **STIG · RHEL 9**, **STIG · AlmaLinux 9**, **STIG · Rocky Linux 9**, **STIG · Ubuntu 24.04** and **Operations** |
+| 24 task templates | **Lessons:** Ping; Baseline preview; Baseline apply; Users; Webserver. **Patching:** Patch preview; Patch, no reboot; Patch, allow required reboot. **Each STIG tab**, with names that start with the system, such as **RHEL 9 · STIG audit**: STIG audit; STIG apply (approval required); STIG apply, allow required reboot; and on the RHEL 9 and Ubuntu 24.04 tabs, STIG audit, DISA SCAP file. **Operations:** Health report; Reboot one target |
+| Key copy | `~/svc_ansible.pub` in the editor's home folder: a copy of the service key, owned by the editor, for the onboarding steps |
 
-Every lesson template sets its **Ansible options → Limit** to `lab`, the
-explicit limit the playbooks' preflight requires. Each STIG audit template sets
+Every lesson template, and **Health report**, sets its **Ansible options →
+Limit** to `lab`, the explicit limit the playbooks' preflight requires. Each STIG audit template sets
 it to its system's inventory group, `enterprise_linux` or `ubuntu`, and skips
 the hosts there that run another system, so **RHEL 9 · STIG audit** reports
 only on RHEL 9 hosts. The STIG apply templates have no default limit: their
 Run dialog asks for exactly one host and a recovery-point approval, and they
-refuse a host that runs another system. The two preview templates add
+refuse a host that runs another system. **Reboot one target** has no default
+limit either: its Run dialog asks for exactly one host and the choice
+`REBOOT NOW - restart this one target`. The two preview templates add
 `--check --diff` as CLI arguments. Only the templates whose names end in
 “allow required reboot” receive `allow_reboot: true`. The patch template then
 reboots only when the operating system reports that it needs one. Each **STIG
@@ -234,8 +239,8 @@ with three parts. First, the readiness report from `check-controller.py`:
 ```
 
 Second, the seeding summary: the project **Ansible Practice** and its ID, the
-repository path, the inventory file, the six template tabs and 22 template
-names with their IDs:
+repository path, the inventory file, the seven template tabs and 24
+template names with their IDs:
 
 ```text
 {
@@ -265,12 +270,19 @@ names with their IDs:
 Third, the installer's closing lines, with your own account and lab folder:
 
 ```text
-Controller installed and seeded. Next: authorize the automation key on each target
-and add each target with its verified host key (controller/add-target.sh --lab-dir /opt/ansible-lab).
-Automation public key: /etc/semaphore/svc_ansible.pub
+Controller installed and seeded. Next: prepare each target and add it with its verified
+host key. For a machine that already exists, as your administrator in this folder:
+  bash controller/onboard-target.sh ADMIN@ADDRESS
+README.md lists the other ways, and cloud-init for new VMs.
+Automation public key: /etc/semaphore/svc_ansible.pub (a copy is in HOME_FOLDER/svc_ansible.pub)
 Local lab folder (edit as ADMIN): /opt/ansible-lab
 The initial admin password is in /etc/semaphore/initial-admin-password (root only).
 ```
+
+`HOME_FOLDER` is your account's home folder, such as the one `echo ~` prints.
+With `--lab-dir DIR`, the `onboard-target.sh` line ends with `--lab-dir DIR`.
+The text in parentheses is missing only when the installer could not write
+the copy.
 
 With `--expose https` or `--expose http`, the exposure lines described
 [below](#optional-publish-the-ui-on-the-controllers-address) follow the
@@ -346,8 +358,9 @@ tool will ask for the new password later, as
 
 **Check:** the **Ansible Practice** project is present with the objects listed
 in [what the installer creates](#what-the-installer-creates), the **Task
-Templates** page shows the **Lessons**, **Patching** and four **STIG ·** tabs,
-and the Key Store shows the SSH key **Practice target SSH** by name only. Log
+Templates** page shows the **Lessons**, **Patching**, four **STIG ·** and
+**Operations** tabs, the **Operations** tab holds **Health report** and
+**Reboot one target**, and the Key Store shows the SSH key **Practice target SSH** by name only. Log
 out and back in with the new password.
 
 ## Do: save the service key
@@ -356,17 +369,30 @@ out and back in with the new password.
 key pair Semaphore logs in to targets with: the private key stays in
 `/etc/semaphore/svc_ansible` and in the Key Store as **Practice target SSH**,
 and the public key, the service key, is `/etc/semaphore/svc_ansible.pub`. Every
-target must trust that public key for the account `svc_ansible`. Copy it into
-your home folder, where Stages 2 and 3 expect it:
+target must trust that public key for the account `svc_ansible`. The installer
+also left a copy in your home folder, where Stage 3 and the by-hand ways of
+Stage 2 expect it; Stage 2's one command reads the original itself. Check that
+the copy is there and matches:
+
+```bash
+cat ~/svc_ansible.pub
+ssh-keygen -lf ~/svc_ansible.pub
+sudo ssh-keygen -lf /etc/semaphore/svc_ansible.pub
+```
+
+The first prints one line that starts with `ssh-rsa` and ends with
+`ansible-practice`; the other two print the same `SHA256:` value. If you
+installed with `--editor USER`, the copy is in that account's home folder.
+
+On a controller installed with an earlier release, or when the copy is
+missing, make it:
 
 ```bash
 sudo cat /etc/semaphore/svc_ansible.pub > ~/svc_ansible.pub
-cat ~/svc_ansible.pub
 ```
 
 `/etc/semaphore` is readable only by root and the `semaphore` group, which your
-account is deliberately not in, so the copy needs `sudo`. The copy prints one
-line that starts with `ssh-rsa` and ends with `ansible-practice`.
+account is deliberately not in, so reading it needs `sudo`.
 
 It is a public key: copying it is safe, and you may also keep it in your
 worksheet or on your workstation if you create targets from there in Stage 3.
@@ -428,7 +454,7 @@ behind NAT the default address is the private one; on Azure, see
 | The lab folder, `/opt/ansible-lab` unless you chose `--lab-dir` | The installer's closing lines | Stage 4, updates |
 | The initial admin password's location, `/etc/semaphore/initial-admin-password` | The installer's closing lines | First login only |
 | Your changed Semaphore `admin` password | You, in the UI; keep it only in your password manager | Every login, updates |
-| `~/svc_ansible.pub`, the copy of the service key | `sudo cat /etc/semaphore/svc_ansible.pub` | Stage 2 and Stage 3 |
+| `~/svc_ansible.pub`, the copy of the service key | The installer, or `sudo cat /etc/semaphore/svc_ansible.pub` | Stage 3, and Stage 2's by-hand ways |
 | The address you browse to, and the certificate fingerprint if you published the UI | `http://127.0.0.1:8088/` through the tunnel, or the exposure output | Every login |
 
 ## When it fails
@@ -467,7 +493,8 @@ and [validation and limitations](VALIDATION.md).
 
 ## Next
 
-Prepare each target, one machine at a time:
+Prepare each target:
 
-- A machine that already exists: [Stage 2, onboard existing machines](stage-2-existing-machines.md).
+- A machine that already exists: [Stage 2, onboard existing machines](stage-2-existing-machines.md),
+  with the one command the closing lines name.
 - A VM you are about to create: [Stage 3, new VMs with cloud-init](stage-3-new-vms-cloud-init.md).

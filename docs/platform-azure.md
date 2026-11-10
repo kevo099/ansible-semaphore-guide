@@ -121,9 +121,9 @@ when either file is missing or is not a public key:
 
 - `azure_automation_public_key_file` is the key Semaphore logs in with,
   copied into `platforms/azure/files/`, which Git ignores. On a controller
-  made by either installer, that is the service key, which
-  [Stage 1](stage-1-controller.md#do-save-the-service-key) saves as
-  `~/svc_ansible.pub` on the controller. Create the folder with
+  made by either installer, that is the service key, whose copy the
+  installer leaves as `~/svc_ansible.pub` on the controller, as
+  [Stage 1](stage-1-controller.md#do-save-the-service-key) shows. Create the folder with
   `mkdir -p platforms/azure/files`, copy the key there as
   `platforms/azure/files/svc_ansible.pub` (from a workstation:
   `scp ADMIN@CONTROLLER_ADDRESS:svc_ansible.pub platforms/azure/files/`), and
@@ -492,7 +492,8 @@ the seeded **local file inventory**; a Static inventory saved in Semaphore or
 an inventory fetched from Git is a separate source. The collector prints
 warnings if the automation account, password, authorized keys or sudo
 validation is incomplete; resolve them, then
-[give Semaphore the sudo password](stage-4-add-target-first-job.md#do-give-semaphore-the-sudo-password)
+[give Semaphore the sudo password](stage-4-add-target-first-job.md#do-give-semaphore-the-sudo-password),
+with `sudo python3.12 controller/lab-sudo.py` on the controller,
 and [run Ping and Baseline preview](stage-4-add-target-first-job.md#do-run-ping-and-baseline-preview).
 The script prints no password, password hash or private key.
 

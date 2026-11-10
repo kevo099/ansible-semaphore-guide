@@ -2,7 +2,7 @@
 # Prepare machines that already exist for the guide's automation account and add
 # them to the lab inventory, in one command on the controller.
 # Usage: bash controller/onboard-target.sh ADMIN@ADDRESS [ADMIN@ADDRESS ...]
-#            [--name NAME] [--keep-password] [--lab-dir /opt/ansible-lab]
+#            [--name NAME] [--keep-password] [--extra-key FILE] [--lab-dir /opt/ansible-lab]
 #
 # Run it as your administrator account, without sudo, in the guide's folder. For
 # each machine it copies onboard/existing/onboard-linux.sh and the service key
@@ -22,6 +22,10 @@
 # --name NAME        the inventory name, for one machine: needed when its hostname
 #                    is one the inventory reserves, such as localhost or ubuntu
 # --keep-password    do not ask for a sudo password; keep each account's own
+# --extra-key FILE   also authorize the public key in FILE for svc_ansible, such as
+#                    your own key for the command-line lessons; repeat it for more.
+#                    The account's authorized keys become exactly the service key
+#                    and these, so give them on every run for that machine.
 # --lab-dir DIR      a lab folder other than /opt/ansible-lab
 # Running it again for a machine is safe: the script reports what is unchanged,
 # and add-target.sh says "Already present".
@@ -37,12 +41,16 @@ here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 onboard_script=$here/../onboard/existing/onboard-linux.sh
 service_key=/etc/semaphore/svc_ansible.pub
 
-targets=() name='' lab_dir='' keep_password=no
+targets=() extra_keys=() name='' lab_dir='' keep_password=no
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --name|--lab-dir)
+    --name|--lab-dir|--extra-key)
       [[ $# -ge 2 && -n $2 && $2 != -* ]] || { echo "$1 needs a value."; exit 2; }
-      if [[ $1 == --name ]]; then name=$2; else lab_dir=$2; fi
+      case "$1" in
+        --name) name=$2 ;;
+        --lab-dir) lab_dir=$2 ;;
+        --extra-key) extra_keys+=("$2") ;;
+      esac
       shift ;;
     --keep-password) keep_password=yes ;;
     -h|--help) usage; exit 0 ;;
@@ -84,6 +92,13 @@ echo "Reading the service key $service_key, which needs sudo on this controller.
 # shellcheck disable=SC2024  # the copy is this account's own file; only the read needs root
 sudo cat "$service_key" > "$work/svc_ansible.pub" || stop "Could not read $service_key. Was this controller made by the guide's installer?"
 ssh-keygen -l -f "$work/svc_ansible.pub" >/dev/null 2>&1 || stop "$service_key is not a public key ssh-keygen can read."
+# The script on the machine replaces the account's keys with exactly this list.
+for extra_key in "${extra_keys[@]}"; do
+  [[ -f $extra_key && -r $extra_key ]] || stop "Cannot read the key file $extra_key."
+  ssh-keygen -l -f "$extra_key" >/dev/null 2>&1 || stop "$extra_key is not a public key ssh-keygen can read."
+  grep -q 'PRIVATE KEY' -- "$extra_key" && stop "$extra_key is a private key; give its .pub file."
+  sed -e 's/\r$//' -e '/^[[:space:]]*$/d' -- "$extra_key" >> "$work/svc_ansible.pub"
+done
 
 script_options=(--keys svc_ansible.pub)
 files=("$onboard_script" "$work/svc_ansible.pub")
@@ -97,7 +112,8 @@ if [[ $keep_password == no ]]; then
   IFS= read -rs -p 'The same password again: ' second || stop 'No password was entered.'
   echo
   [[ $first == "$second" ]] || stop 'The two entries differ; nothing was changed. Run it again.'
-  [[ ${#first} -ge 12 ]] || stop 'The password has fewer than 12 characters; nothing was changed.'
+  # Characters, not bytes, as the bootstrap playbook counts them.
+  [[ $(printf '%s' "$first" | LC_ALL=C.UTF-8 wc -m) -ge 12 ]] || stop 'The password has fewer than 12 characters; nothing was changed.'
   # On standard input, so that the password never appears in a command line.
   printf '%s' "$first" | openssl passwd -6 -stdin > "$work/sudo-password.hash" || stop 'openssl could not hash the password.'
   first='' second=''

@@ -184,6 +184,30 @@ class OnboardTargetTests(unittest.TestCase):
         for run in runs:
             self.assertIn("--keys svc_ansible.pub --password-hash-file sudo-password.hash --controller-address", run)
 
+    def test_extra_keys_are_authorized_beside_the_service_key(self):
+        work = Path(self.directory.name)
+        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "my own key", "-f", str(work / "mine")], check=True)
+        status, output = self.run_wrapper(f"labadmin@{FIRST}", "--keep-password", "--extra-key", str(work / "mine.pub"))
+        self.assertEqual(status, 0, output)
+        copied = (self.log / "remote" / "svc_ansible.pub").read_text().splitlines()
+        self.assertEqual(copied, [(self.log / "service-key.pub").read_text().strip(), (work / "mine.pub").read_text().strip()])
+        for arguments, message in ((("--extra-key", str(work / "missing.pub")), "Cannot read the key file"),
+                                   (("--extra-key", str(work / "mine")), "is a private key; give its .pub file."),
+                                   (("--extra-key", str(self.log / "ssh")), "is not a public key ssh-keygen can read.")):
+            with self.subTest(arguments=arguments):
+                (self.log / "ssh").write_text("not a key\n")
+                status, output = self.run_wrapper(f"labadmin@{FIRST}", "--keep-password", *arguments)
+                self.assertEqual(status, 1, output)
+                self.assertIn(message, output)
+                self.assertEqual(self.logged("ssh"), "not a key\n")
+
+    def test_the_password_length_counts_characters(self):
+        # Eleven two-byte characters are 22 bytes and still too short.
+        status, output = self.run_wrapper(f"labadmin@{FIRST}", typed=["é" * 11, "é" * 11])
+        self.assertEqual(status, 1, output)
+        self.assertIn("fewer than 12 characters", output)
+        self.assertEqual(self.logged("ssh"), "")
+
     def test_passwords_that_differ_or_are_short_change_nothing(self):
         for typed, reason in (([PASSWORD, PASSWORD + "x"], "The two entries differ"),
                               (["short", "short"], "fewer than 12 characters")):

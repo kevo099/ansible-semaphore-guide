@@ -9,7 +9,8 @@ You create a new VM from a cloud image and hand it
 creation. At its first boot the VM prepares the automation account,
 `svc_ansible`, by itself. When this stage is done, the VM has printed its
 `name=`, `address=`, `group=` and `fingerprint=` lines, `svc_ansible` has a
-sudo password, and you have saved both for Stage 4.
+sudo password, set at first boot or afterwards, and you have saved both for
+Stage 4.
 
 Use this stage for VMs you are about to create. For a machine that already
 runs, cloud-init has had its first boot: use
@@ -18,8 +19,8 @@ place.
 
 ## Before you start
 
-- **A controller from Stage 1**, and on it the service key saved as
-  `~/svc_ansible.pub`, as
+- **A controller from Stage 1**, and on it the copy of the service key,
+  `~/svc_ansible.pub`, which the installer leaves there, as
   [Stage 1](stage-1-controller.md#do-save-the-service-key) shows, and the
   guide's folder, `~/ansible-semaphore-guide`.
 - **A cloud image of a supported system**: Ubuntu 24.04, or AlmaLinux, Rocky
@@ -37,8 +38,8 @@ place.
 
 What the file does at the first boot, as its own text shows:
 
-- creates `svc_ansible` with the service key, a login shell and **no
-  password**, and keeps the image's default user. Its `users:` list does that
+- creates `svc_ansible` with the service key, a login shell and, by default,
+  **no password**, and keeps the image's default user. Its `users:` list does that
   where cloud-init applies it. Where the platform's own user data replaces
   that list, as Proxmox's does, the file's script creates the account itself
   and says so: `onboard: created svc_ansible here, ...`;
@@ -52,15 +53,19 @@ What the file does at the first boot, as its own text shows:
 - checks the sudo rule, the effective SSH policy for `svc_ansible`, its key
   type and size, `AuthorizedKeysFile`, and any `AllowUsers`, `AllowGroups`,
   `DenyUsers` or `DenyGroups` rule; it reloads or starts SSH;
-- prints `onboard: svc_ansible is ready; set its sudo password next` and the
-  lines for `add-target.sh --from-info`, or `onboard: ERROR: ...` lines and
+- sets the sudo password only when you opted in, as
+  [below](#optional-let-the-file-set-the-sudo-password), from the password's
+  hash, and then removes that hash's file from the VM;
+- prints `onboard: svc_ansible is ready; set its sudo password next`, or with
+  the opt-in `onboard: svc_ansible is ready, with its sudo password set`, and
+  the lines for `add-target.sh --from-info`; or `onboard: ERROR: ...` lines and
   `onboard: FAILED; see the errors above`, which make cloud-init report an
   error.
 
-What it does not do: it sets no sudo password, creates no administrator, sets
-no hostname and configures no network; your platform does those. cloud-init
-reads the file at the **first boot only**. It contains no secret: only the
-service's public key.
+What it does not do: it creates no administrator, sets no hostname and
+configures no network; your platform does those. cloud-init reads the file at
+the **first boot only**. By default it contains no secret, only the service's
+public key; with the opt-in it also holds the hash of the sudo password.
 
 ## Do: put the service key into cloud-init.yaml
 
@@ -118,6 +123,63 @@ that this controller manages; keep it with the guide's folder, not in a
 public repository of your own (it holds only a public key, but it is your
 lab's).
 
+### Optional: let the file set the sudo password
+
+By default the filled file carries no secret, and every VM made from it needs
+its sudo password set afterwards, as
+[the last step](#do-set-the-sudo-password) shows. As an opt-in,
+`fill-cloud-init.sh --with-password` adds the password's SHA-512 hash, never
+the password itself, so the VM arrives with the sudo password set and needs no
+step after its first boot.
+
+The trade-off: every copy of that file then holds a hash that can be attacked
+offline, on the controller, on the hypervisor and inside each VM. Prefer the
+default when other people can read the hypervisor's storage or the VMs'
+cloud-init data, or on Azure; prefer the opt-in for a private lab where you
+create many VMs and want each one ready at first boot.
+
+Choose the shared lab password first, at least 12 characters, and **save it in
+your password manager**: Stage 4 needs it. Then make the filled copy with the
+option, before the key file:
+
+```bash
+cd ~/ansible-semaphore-guide
+(umask 077 && bash onboard/new-vm/fill-cloud-init.sh --with-password ~/svc_ansible.pub > ~/onboard-new-vm.yaml)
+```
+
+`umask 077` in the parentheses makes the new file readable by you alone. It
+asks twice, without echo, and prints a warning on standard error; the filled
+file goes to standard output only:
+
+```text
+Sudo password for svc_ansible on the new VMs:
+The same password again:
+fill-cloud-init: warning: the filled file holds a hash of the sudo password, which can be attacked offline.
+fill-cloud-init: Keep it readable only by people who may have the password (chmod 600): the hypervisor's
+fill-cloud-init: snippet folder, the VM's seed ISO and /var/lib/cloud/instance/ inside the VM all keep a copy.
+fill-cloud-init: Use a long random password, and never commit the file.
+```
+
+It refuses to print the file to a terminal, a password shorter than 12
+characters, and two entries that differ; then nothing is printed. With a hash
+you already made with `openssl passwd -6`, in a file of one line, use
+`--password-hash-file HASH_FILE` in place of `--with-password`. The hash goes
+in as one more `write_files` entry, `/run/ansible-lab-onboard.hash`, readable
+by root alone; the first boot sets it as `svc_ansible`'s password and removes
+the file. Check that it is there and the file is private:
+
+```bash
+grep -c '^  - path: /run/ansible-lab-onboard.hash$' ~/onboard-new-vm.yaml
+ls -l ~/onboard-new-vm.yaml
+```
+
+The first prints `1`, and the second shows `-rw-------`. The YAML check above
+works the same. Keep every copy of this file private: give it mode 0600
+wherever you copy it, such as the hypervisor's snippet folder, delete a seed
+ISO made from it once the VM has booted, and never commit it.
+[`platforms/azure/targets.yml`](../platforms/azure/targets.yml) has no
+password option: Azure VMs keep the default.
+
 ## Do: on Proxmox, attach the file to a new VM
 
 **Where: the Proxmox node's shell, as root, unless a step says otherwise.**
@@ -148,7 +210,10 @@ the panel keeps working, and one copy of the file serves every VM.
    web UI, run `cat > /var/lib/vz/snippets/onboard-new-vm.yaml`, paste the
    file's content, then press Enter and Ctrl-D. A snippet on a storage that is
    not shared exists on that node only. A VM started on another node of a
-   cluster needs the file there too.
+   cluster needs the file there too. A file made with `--with-password` holds
+   the password's hash: on the node, make it private with
+   `chmod 600 /var/lib/vz/snippets/onboard-new-vm.yaml`.
+
 
 3. **Create the VM from the cloud image**, as
    [the cloud-image example](platform-proxmox.md#do-build-a-vm-from-a-cloud-image)
@@ -239,6 +304,9 @@ the panel keeps working, and one copy of the file serves every VM.
    [   83.117498] cloud-init[1026]: onboard: fingerprint=SHA256:...
    ```
 
+   With a file made by `--with-password`, the ready line is
+   `onboard: svc_ansible is ready, with its sudo password set`, after
+   `onboard: set svc_ansible's sudo password from the hash fill-cloud-init.sh added`.
    The console also shows the VM's address and, between
    `-----BEGIN SSH HOST KEY FINGERPRINTS-----` lines, its host-key
    fingerprints; the `(RSA)` one equals the `fingerprint=` value. The console
@@ -249,7 +317,8 @@ the panel keeps working, and one copy of the file serves every VM.
 it, and convert it to a template with `qm template VMID`. Every clone keeps
 the `--cicustom` setting and prepares itself at its own first boot. Give each
 clone its own name, and its own address if you use fixed ones, before you
-start it.
+start it. [The runbooks](runbooks.md#pre-deploy-a-batch-of-vms-on-proxmox-from-a-template)
+show the whole sequence for a batch.
 
 **After the first boot, leave the VM's cloud-init settings alone.** A change
 to the administrator, key, name, search domain or network gives the VM a new
@@ -304,8 +373,10 @@ cloud-localds --vendor-data vendor-data ~/seed-NAME.iso user-data meta-data
 Attach `seed-NAME.iso` to the new VM as a CD/DVD drive before its first
 boot, with your platform's own tools, and boot it. The `instance-id` must be
 new for each VM: cloud-init runs the file again only for an instance ID it
-has not seen. Detach the ISO once the VM has booted; it holds no secret, but
-it is not needed again.
+has not seen. Detach the ISO once the VM has booted; it is not needed again.
+By default it holds no secret. Made from a file with `--with-password`, it
+holds the password's hash: keep it private while it exists, and delete it and
+the `~/seed-NAME` folder after the first boot.
 
 If your `user-data` has its own `write_files:` or `runcmd:`, it replaces the
 file's, and the VM is not prepared; the log then has no `onboard:` line. Put
@@ -318,6 +389,9 @@ On Azure the same file is the VM's **custom data**:
 [`platforms/azure/targets.yml`](../platforms/azure/targets.yml) fills in the key
 and creates the VMs, or you paste the filled copy into the portal, as
 [the Azure page](platform-azure.md#paste-it-into-the-portal-instead) shows.
+Azure keeps the default, without the password's hash: `targets.yml` has no
+password option, and Azure advises against secrets in custom data. Set the
+password afterwards, as the last step shows.
 
 ## Check: read what cloud-init printed
 
@@ -354,7 +428,13 @@ onboard: fingerprint=SHA256:...
 
 The first line appears on Proxmox, and wherever the platform's user data
 replaces the file's `users:` list; where that list applied, the log starts
-with `onboard: svc_ansible is ready`.
+with `onboard: svc_ansible is ready`. With a file made by `--with-password`,
+the log has two other lines in place of the ready line above:
+
+```text
+onboard: set svc_ansible's sudo password from the hash fill-cloud-init.sh added
+onboard: svc_ansible is ready, with its sudo password set
+```
 
 Copy the `onboard: name=`, `address=`, `group=` and `fingerprint=` lines, or
 the whole output: `add-target.sh --from-info` reads a line that ends with
@@ -394,12 +474,18 @@ stops with `INFO FAILED` and names the setting at its top to fill in.
 
 ## Do: set the sudo password
 
-cloud-init sets none, on purpose: the file is meant to be the same for every
-VM and to carry no secret, user data can be read back on the platform and on
-the VM, and Azure advises against secrets in custom data. Do not add one to
-the file: the account is created with a locked password field. Until you
-set a password, `svc_ansible` can log in with its key but cannot use sudo, and
-every template except Ping fails.
+**Skip this step if the file carried the hash:** the log then says
+`onboard: svc_ansible is ready, with its sudo password set`, and the password
+is the one you typed for `fill-cloud-init.sh --with-password`.
+
+By default cloud-init sets none, on purpose: the default file is the same for
+every VM and carries no secret, user data can be read back on the platform and
+on the VM, and Azure advises against secrets in custom data. Never add a
+password or a hash to `cloud-init.yaml` itself, which is committed; only
+`fill-cloud-init.sh` adds a hash, to your filled copy. The account is created
+with a locked password field. Until you set a password, `svc_ansible` can log
+in with its key but cannot use sudo, and every template except Ping and
+Health report fails.
 
 Choose the password now; the guide's default is **one shared sudo password
 for all lab targets**, at least 12 characters, which Stage 4 stores once in
@@ -422,23 +508,30 @@ none. The same test is what `inventory-info.sh` reports as `password set`.
 The password works for sudo only: the SSH drop-in still admits `svc_ansible`
 by key alone.
 
-**b. With the Stage 2 onboarding script and a hash.** Make a hash as
-[Stage 2](stage-2-existing-machines.md#do-choose-a-sudo-password-and-make-its-hash)
-shows and run `onboard-linux.sh` with it, as
-[running it over SSH](stage-2-existing-machines.md#do-run-the-onboarding-script-over-ssh)
-shows. The script is safe to run on a VM that cloud-init prepared: it finds
-the account, key, sudo rule and drop-in in place, reports them `unchanged`,
-and sets the password. Give it the same service key, because it replaces the
-account's authorized keys with exactly the keys you give it.
+**b. With Stage 2's one command from the controller**, when the controller
+can log in to the VM as its administrator, for example with a key of the
+controller's in the VM's cloud-init settings:
+[onboard it in one command](stage-2-existing-machines.md#do-onboard-it-in-one-command-from-the-controller).
+On a VM that cloud-init prepared it finds the account, key, sudo rule and
+drop-in in place, reports them `unchanged`, sets the password you type, and
+also adds the VM to the inventory, so that Stage 4 then starts at
+[giving Semaphore the sudo password](stage-4-add-target-first-job.md#do-give-semaphore-the-sudo-password).
 
-**c. With the bootstrap playbook from the controller**, when the controller
-can log in as the VM's administrator:
+**c. With the Stage 2 onboarding script by hand**, over SSH or at the console:
+`sudo bash onboard-linux.sh --keys svc_ansible.pub --ask-password --controller-address CONTROLLER_IP`,
+as
+[running it over SSH](stage-2-existing-machines.md#do-run-the-onboarding-script-over-ssh)
+shows. Give it the same service key, because it replaces the account's
+authorized keys with exactly the keys you give it.
+
+**d. With the bootstrap playbook from the controller**, when the controller
+can log in as the VM's administrator with a key:
 [Stage 2](stage-2-existing-machines.md#do-let-the-controller-do-it-with-the-bootstrap-playbook).
 On a VM that cloud-init prepared, it sets the password you type at its prompt
 and checks what cloud-init wrote. It prints a whole `add-target.sh` command
 rather than lines.
 
-**d. On Azure, with Run Command**, without any SSH path:
+**e. On Azure, with Run Command**, without any SSH path:
 [set the sudo password without SSH](platform-azure.md#set-the-sudo-password-without-ssh).
 
 ## Save these values
@@ -447,8 +540,8 @@ rather than lines.
 | --- | --- | --- |
 | The `name=`, `address=`, `group=` and `fingerprint=` lines | The console or `/var/log/cloud-init-output.log` on the VM | [Stage 4](stage-4-add-target-first-job.md#do-add-the-target-with-add-targetsh) |
 | A `--name` or `--address` value, if a line was left out | You choose the name; the address is the one the controller reaches | Stage 4, as the option it asks for |
-| The plain sudo password | You chose it in the last step | [Stage 4](stage-4-add-target-first-job.md#do-give-semaphore-the-sudo-password), and recovery |
-| `~/onboard-new-vm.yaml` | The first step, on the controller | Every new VM this controller manages |
+| The plain sudo password | You chose it for `--with-password` or in the last step | [Stage 4](stage-4-add-target-first-job.md#do-give-semaphore-the-sudo-password), and recovery |
+| `~/onboard-new-vm.yaml` | The first step, on the controller; private when it holds the hash | Every new VM this controller manages |
 | The VM's ID, administrator name and administrator key | Your platform and the VM's settings | Console access and recovery |
 
 ## When it fails
@@ -464,7 +557,12 @@ rather than lines.
 | After a change to the VM's cloud-init settings, Stage 4 or Ping reports a changed host key | The change gave the VM a new instance ID, and cloud-init made new host keys at the next boot | Read the new `fingerprint=` line and follow Stage 4's [rebuild steps](stage-4-add-target-first-job.md#do-rebuild-or-retire-a-target). |
 | `systemctl --failed` lists `rngd.service` on Enterprise Linux | The VM has no hardware random number device | Add a VirtIO RNG and stop and start the VM from the hypervisor, as the [Proxmox page](platform-proxmox.md#do-give-enterprise-linux-guests-a-virtio-rng) shows. |
 | `onboard: apt-get update failed` or `python3-dnf installation failed` | The VM cannot reach its package repositories, or RHEL is not registered | Fix the VM's network or registration, then run the Stage 2 script. |
-| Stage 4's templates fail with `Missing sudo password` or `Incorrect sudo password` | No password set on the VM, or Semaphore holds another one | [Set the sudo password](#do-set-the-sudo-password) and check Semaphore's copy in Stage 4. |
+| Stage 4's templates fail with `Missing sudo password` or `Incorrect sudo password` | No password set on the VM, or Semaphore holds another one | Check the log for the ready line: `set its sudo password next` means none is set; then [set the sudo password](#do-set-the-sudo-password). Otherwise make Semaphore's copy the one you typed, as Stage 4 shows. |
+| `fill-cloud-init: with a password hash, send the output to a file: ...` | `--with-password` or `--password-hash-file` without `> FILE` | Run it again with the output sent to a file, as shown. |
+| `fill-cloud-init: --with-password asks on a terminal, and there is none; use --password-hash-file` | It ran from a script or without a terminal | Run it in an interactive session, or make the hash with `openssl passwd -6` and use `--password-hash-file`. |
+| `fill-cloud-init: the two passwords differ; nothing was printed`, or `... fewer than 12 characters ...` | A typing slip, or a short password | Run it again. The output file is then empty until it succeeds. |
+| A usage line `Usage: bash ... [--with-password \| --password-hash-file HASH_FILE] PUBLIC_KEY_FILE > FILLED_FILE` | An option after the key file, or both options at once | Put the one option before the key file. |
+| `onboard: ERROR: /run/ansible-lab-onboard.hash did not hold a SHA-512 crypt hash; no password was set` | The filled file was edited by hand | Make the filled copy again with `fill-cloud-init.sh`, and set this VM's password as the last step shows. |
 
 ## Concept
 

@@ -12,9 +12,10 @@ passes it to Ansible as --become-user, the account to become: any name there mak
 privileged tasks run as that account instead of root.
 
 Running it again changes nothing. --replace stores a new password in the existing
-key. An inventory that uses another sudo credential, a "Lab sudo" of another type,
-or one with a Username, is refused with what to do instead; only --replace clears a
-Username, by storing the password anew. It asks for the password twice, without
+key, with an empty Username. An inventory that uses another sudo credential, and a
+"Lab sudo" of another type, are refused with what to do instead. Semaphore never
+returns a key's Username, so one typed in the UI cannot be seen here: --replace
+clears it by storing the password anew. It asks for the password twice, without
 echo, and only when it stores one; --password-stdin reads one line from standard
 input instead, for scripts. The password goes only to Semaphore on loopback and is
 never printed.
