@@ -250,7 +250,9 @@ class AddTargetTests(unittest.TestCase):
                     self.known_hosts.write_text(key)
                     result = self.add(group="ubuntu")
                     self.assertEqual((result.returncode, result.stdout), (1, (
-                        f"Inventory lists lab-alma under [{other}], not under [ubuntu]; edit it by hand instead.\n")))
+                        f"Inventory lists lab-alma under [{other}], not under [ubuntu]; edit it by hand instead.\n"
+                        "If that line is an earlier machine's, retire it first: "
+                        "sudo bash controller/remove-target.sh --name lab-alma\n")))
                     self.assertEqual(self.state(), (inventory, key))
 
     @unittest.skipUnless(shutil.which("flock"), "needs flock")

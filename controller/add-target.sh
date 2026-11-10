@@ -171,7 +171,9 @@ fi
 key_only=no
 if [[ -n "$existing" ]]; then
   if [[ "$existing" != "$name ansible_host=$address" ]]; then
-    echo "Inventory already contains $name with other settings ($existing); edit it by hand instead."; exit 1
+    echo "Inventory already contains $name with other settings ($existing); edit it by hand instead."
+    echo "If that line is an earlier machine's, retire it first: sudo bash controller/remove-target.sh --name $name"
+    exit 1
   fi
   # The section the line is under; a line above every section is in Ansible's ungrouped.
   listed_group=$(awk -v n="$name" '
@@ -181,7 +183,9 @@ if [[ -n "$existing" ]]; then
       }
       $1 == (n "") {print section; exit}' "$inventory")
   if [[ "$listed_group" != "$group" ]]; then
-    echo "Inventory lists $name under [$listed_group], not under [$group]; edit it by hand instead."; exit 1
+    echo "Inventory lists $name under [$listed_group], not under [$group]; edit it by hand instead."
+    echo "If that line is an earlier machine's, retire it first: sudo bash controller/remove-target.sh --name $name"
+    exit 1
   fi
   if [[ $trusted_matches == yes ]]; then
     echo "Already present: $name ($address) is in $inventory and its verified key is trusted; nothing changed."
@@ -199,7 +203,9 @@ if [[ -n "$existing" ]]; then
   key_only=yes
 fi
 if [[ -n "$owner" ]]; then
-  echo "Inventory already lists $address as $owner; edit it by hand instead."; exit 1
+  echo "Inventory already lists $address as $owner; edit it by hand instead."
+  echo "If $owner is an earlier machine at that address, retire it first: sudo bash controller/remove-target.sh --name $owner"
+  exit 1
 fi
 if [[ -n "$trusted" && $trusted_matches == no ]]; then
   echo "Known-hosts already contains a different key for $address. After verifying why its key changed,"
