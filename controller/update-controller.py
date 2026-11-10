@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Bring a controller made by either installer up to this copy of the guide.
 
-Run it through scripts/update-controller.sh, as root. The default is a read-only
+Run it through controller/update-controller.sh, as root. The default is a read-only
 plan; --apply makes the changes. See docs/03-controller.md.
 """
 
@@ -455,7 +455,7 @@ READINESS_HINTS = {
     "nginx_listens_only_where_expected": (
         "nginx also listens on a port other than 443, usually the package's default site on port 80, "
         "which the exposure script left in place before 24 September 2026. Fix it with: "
-        "sudo bash scripts/expose-semaphore.sh --mode https (it keeps your certificate)"),
+        "sudo bash controller/expose-semaphore.sh --mode https (it keeps your certificate)"),
     "service_can_read_known_hosts": (
         "the semaphore account cannot read /etc/semaphore/known_hosts. Fix it with: "
         "sudo chown root:semaphore /etc/semaphore/known_hosts; sudo chmod 0640 /etc/semaphore/known_hosts"),
@@ -475,7 +475,7 @@ READINESS_HINTS = {
         "or sudo journalctl -u postgresql -n 100 --no-pager on Enterprise Linux"),
 }
 EXPOSURE_HINT = ("Semaphore's address or proxy does not match /etc/semaphore/exposure. Run "
-                 "sudo bash scripts/expose-semaphore.sh --mode MODE with the mode you use: https, http or loopback")
+                 "sudo bash controller/expose-semaphore.sh --mode MODE with the mode you use: https, http or loopback")
 
 
 def readiness_hint(name):
@@ -483,7 +483,7 @@ def readiness_hint(name):
         return READINESS_HINTS[name]
     if name.startswith(("semaphore_bind_matches_exposure_", "port_3000_", "port_443_", "nginx_tls_")):
         return EXPOSURE_HINT
-    return "see the full report: sudo python3.12 scripts/check-controller.py"
+    return "see the full report: sudo python3.12 controller/check-controller.py"
 
 
 def failing_readiness():
@@ -692,7 +692,7 @@ def main():
     if outcome == "new":
         print(f"The update to {version} finished, but these readiness checks fail now and did not before:")
         show_readiness(names)
-        raise SystemExit("To see the full report, run this command: sudo python3.12 scripts/check-controller.py")
+        raise SystemExit("To see the full report, run this command: sudo python3.12 controller/check-controller.py")
     if outcome == "unchanged":
         print(f"Updated to {version}. These readiness checks failed before the update too; the update did "
               "not cause them:")

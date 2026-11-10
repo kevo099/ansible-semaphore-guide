@@ -2,7 +2,7 @@
 # Paste this WHOLE file into the TARGET VM's Azure Run Command > RunShellScript.
 # It reads local information only and prints data: the VM's status, then the
 # name=, address=, group= and fingerprint= lines to paste into
-# scripts/add-target.sh --from-info in the guide's folder on the controller.
+# controller/add-target.sh --from-info in the guide's folder on the controller.
 # It no longer takes the controller's lab folder (LAB_DIR): for a folder other
 # than /opt/ansible-lab, add --lab-dir DIR to that command on the controller.
 CONTROLLER_ADDRESS=''              # Set the controller IP to select the route's source address.
@@ -88,7 +88,7 @@ def build_info(name, address, group, fingerprint):
     require(group in ("ubuntu", "enterprise_linux"), "Unsupported inventory group.")
     require(bool(re.fullmatch(r"SHA256:[A-Za-z0-9+/]{43}", fingerprint)), "Invalid RSA fingerprint.")
     return ("Add this VM on the controller: in the guide's folder, run\n"
-            "  sudo bash scripts/add-target.sh --from-info\n"
+            "  sudo bash controller/add-target.sh --from-info\n"
             "then paste these lines and press Ctrl-D:\n"
             "name=" + name + "\naddress=" + address + "\ngroup=" + group + "\nfingerprint=" + fingerprint + "\n")
 

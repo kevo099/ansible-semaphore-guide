@@ -48,13 +48,13 @@ policy take full effect only after a restart.
 sudo dnf install -y git
 git clone https://github.com/kevo099/ansible-semaphore-guide.git
 cd ansible-semaphore-guide
-bash scripts/install-controller-el9.sh --plan
+bash controller/install-controller-el9.sh --plan
 ```
 
 Read the script and its helpers. When you agree with the plan:
 
 ```bash
-sudo bash scripts/install-controller-el9.sh --apply
+sudo bash controller/install-controller-el9.sh --apply
 ```
 
 The lab folder is owned by the account that ran `sudo`; pass `--editor USER`
@@ -109,7 +109,7 @@ above. The Key Store shows the SSH key by name only.
 ## Do: reach the UI on the VM's address instead of a tunnel
 
 Pass `--expose https` to the installer, or run
-`sudo bash scripts/expose-semaphore.sh --mode https` later, to publish the UI
+`sudo bash controller/expose-semaphore.sh --mode https` later, to publish the UI
 behind nginx on port 443 with a self-signed certificate. On a cloud VM behind
 NAT, also pass `--address` with the public IP address or DNS name you browse
 to, so the certificate and the printed URL name it.
@@ -136,13 +136,13 @@ refuses to connect.
 Then on the controller:
 
 ```bash
-sudo bash scripts/add-target.sh --name lab-alma --address alma.example.test \
+sudo bash controller/add-target.sh --name lab-alma --address alma.example.test \
   --group enterprise_linux --fingerprint 'SHA256:REPLACE_WITH_CONSOLE_VALUE'
 ```
 
 With a custom `--lab-dir DIR`, add the same `--lab-dir DIR` here; the helper
 otherwise looks in `/opt/ansible-lab`. If one of the onboarding scripts
-prepared the target, run `sudo bash scripts/add-target.sh --from-info` instead
+prepared the target, run `sudo bash controller/add-target.sh --from-info` instead
 and paste the lines it printed, as
 [the onboarding page](ONBOARDING.md#step-by-step) shows.
 
@@ -287,7 +287,7 @@ after the recovery preparation they depend on.
 
 ## Do: update to a newer guide release
 
-Use [`scripts/update-controller.sh`](../scripts/update-controller.sh), as
+Use [`controller/update-controller.sh`](../controller/update-controller.sh), as
 [chapter 3 shows](03-controller.md#update-a-controller-to-a-newer-guide-release).
 It works the same on this controller, including the SELinux labels of the files
 it writes.
@@ -313,7 +313,7 @@ and why **Lab inventory file** stays bound to the local folder.
   the lab folder; do not set permissive mode to hide a labeling problem.
 - Without `--expose`, the installer leaves `firewalld` untouched, and
   Semaphore and PostgreSQL listen only on loopback. `--expose https` (or
-  `scripts/expose-semaphore.sh --mode https`) adds the `https` service to an
+  `controller/expose-semaphore.sh --mode https`) adds the `https` service to an
   active `firewalld`, runs nginx on port 443 and sets the persistent SELinux
   boolean `httpd_can_network_connect` so nginx can reach Semaphore.
   `--expose http` instead opens `3000/tcp` and binds Semaphore to every

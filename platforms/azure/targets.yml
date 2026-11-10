@@ -1,5 +1,5 @@
 ---
-# Target VMs with private addresses only. At first boot, ../onboard/cloud-init.yaml
+# Target VMs with private addresses only. At first boot, ../../onboard/new-vm/cloud-init.yaml
 # creates svc_ansible with the controller's automation public key, its sudoers
 # rule and SSH drop-in; its sudo password is set afterwards (chapter 13).
 - name: Create Azure target VMs
@@ -16,7 +16,7 @@
     automation_public_key: "{{ lookup('ansible.builtin.file', azure_automation_public_key_file) }}"
     # The same file you would paste into the portal, with its quoted placeholder
     # replaced by the key as a JSON string, which is valid YAML whatever the key's comment holds.
-    cloud_init_template: "{{ lookup('ansible.builtin.file', '../onboard/cloud-init.yaml') }}"
+    cloud_init_template: "{{ lookup('ansible.builtin.file', '../../onboard/new-vm/cloud-init.yaml') }}"
     cloud_init_data: >-
       {{ cloud_init_template | replace('"REPLACE_WITH_AUTOMATION_PUBLIC_KEY"', automation_public_key | to_json) }}
   module_defaults:
@@ -42,7 +42,7 @@
           - cloud_init_template.count('"REPLACE_WITH_AUTOMATION_PUBLIC_KEY"') == 1
           - "'\"REPLACE_WITH_AUTOMATION_PUBLIC_KEY\"' not in cloud_init_data"
           - (cloud_init_data | from_yaml)['users'][1]['ssh_authorized_keys'] == [automation_public_key]
-        fail_msg: ../onboard/cloud-init.yaml must contain the quoted key placeholder exactly once.
+        fail_msg: ../../onboard/new-vm/cloud-init.yaml must contain the quoted key placeholder exactly once.
         quiet: true
 
     - name: Target network interfaces (no public address)

@@ -12,7 +12,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 INSTALLERS = ("install-controller.sh", "install-controller-el9.sh")
-COMMON = ROOT / "scripts" / "controller-common.sh"
+COMMON = ROOT / "controller" / "controller-common.sh"
 
 
 class InstallerPlanTests(unittest.TestCase):
@@ -39,7 +39,7 @@ class InstallerPlanTests(unittest.TestCase):
         }
 
     def run_installer(self, installer, *arguments):
-        result = subprocess.run(["/bin/bash", str(ROOT / "scripts" / installer), *arguments],
+        result = subprocess.run(["/bin/bash", str(ROOT / "controller" / installer), *arguments],
                                 cwd=self.work, env=self.environment,
                                 capture_output=True, text=True, timeout=10)
         self.assertFalse(self.log.exists(), self.log.read_text() if self.log.exists() else "")
@@ -125,7 +125,7 @@ class InlinePythonTests(unittest.TestCase):
         # -I leaves the working directory and the PYTHON* variables out, so a module file
         # there cannot stand in for one the snippet imports.
         scripts = set()
-        for script in sorted((ROOT / "scripts").glob("*.sh")):
+        for script in sorted((ROOT / "controller").glob("*.sh")):
             for match in re.finditer(r"\bpython3(?:\.\d+)?((?: -\w+)*) (?:-c|-)(?=\s)", script.read_text()):
                 scripts.add(script.name)
                 with self.subTest(script=script.name, command=match.group(0)):
@@ -325,7 +325,7 @@ printf 'CONTINUED\\n'
         # and apt-get update takes another lock, so only the retrying helper runs it.
         invocations = []
         for script in ("install-controller.sh", "controller-common.sh"):
-            for line in (ROOT / "scripts" / script).read_text().splitlines():
+            for line in (ROOT / "controller" / script).read_text().splitlines():
                 command = line.strip().removeprefix("if ")
                 if command.startswith("apt-get "):
                     invocations.append(command)

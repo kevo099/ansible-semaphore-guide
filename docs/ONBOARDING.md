@@ -61,11 +61,11 @@ flowchart TD
 
 | Step | Where | Do | Check |
 | --- | --- | --- | --- |
-| 1. Controller | The controller VM, as its administrator | Install once with [`install-controller.sh`](../scripts/install-controller.sh) on Ubuntu 24.04 ([chapter 3](03-controller.md)) or [`install-controller-el9.sh`](../scripts/install-controller-el9.sh) on RHEL, AlmaLinux or Rocky Linux 9.4 or later ([chapter 3b](03-controller-el9.md)). Run it with `--plan`, read the plan, then run it with `--apply`. | The readiness report says `"passed": true`, and Semaphore lists 22 templates. |
+| 1. Controller | The controller VM, as its administrator | Install once with [`install-controller.sh`](../controller/install-controller.sh) on Ubuntu 24.04 ([chapter 3](03-controller.md)) or [`install-controller-el9.sh`](../controller/install-controller-el9.sh) on RHEL, AlmaLinux or Rocky Linux 9.4 or later ([chapter 3b](03-controller-el9.md)). Run it with `--plan`, read the plan, then run it with `--apply`. | The readiness report says `"passed": true`, and Semaphore lists 22 templates. |
 | 2. Service key | The controller | `sudo cat /etc/semaphore/svc_ansible.pub` prints the key Semaphore logs in with. Insert it wherever the next step asks for the controller's key. Save a copy for the bootstrap playbook and a managed Run Command: `sudo cat /etc/semaphore/svc_ansible.pub > ~/svc_ansible.pub`. | One line starting with `ssh-rsa`. |
 | 3. Prepare `svc_ansible` | The VM, or the controller for the playbook | One of the four ways in [prepare the account](#prepare-the-account). | `RESULT: OK` or `svc_ansible is ready`, with the `name=`, `address=`, `group=` and `fingerprint=` lines for step 5; from the playbook, the whole `add-target.sh` command and a play recap without failures. |
 | 4. Sudo password | The VM, through the same channel | A SHA-512 hash from `openssl passwd -6` given to `onboard-linux.sh`, or the bootstrap playbook's prompt. cloud-init sets none. | `onboard-linux.sh` says `password: set from PASSWORD_HASH`, or `unchanged` on a repeat; the playbook's recap shows no failure. |
-| 5. Add the target | The controller, in the guide's folder: your copy of the guide from v1.8.0 or later, the clone you installed from or the newer one you updated with, not the lab folder `/opt/ansible-lab` | Type `sudo bash scripts/add-target.sh --from-info` or copy it from this page, adding `--lab-dir DIR` for a lab folder other than `/opt/ansible-lab`. After its prompt, paste the lines the VM printed, or its whole output, and press Ctrl-D on a new line; Ctrl-C and then Ctrl-D cancels. When its message says a value is missing, or asks for `--name` in place of a pasted name, run it again with only the option that message names, `--name`, `--address` or `--fingerprint`, and a value you read through Run Command or the console. Take no option from the VM's output. After the bootstrap playbook, run the command it printed instead, as its message says. | With `--from-info`, the values it uses; then `Added NAME ... and trusted its verified host key`, or `Already present` on a repeat. |
+| 5. Add the target | The controller, in the guide's folder: your copy of the guide from v1.8.0 or later, the clone you installed from or the newer one you updated with, not the lab folder `/opt/ansible-lab` | Type `sudo bash controller/add-target.sh --from-info` or copy it from this page, adding `--lab-dir DIR` for a lab folder other than `/opt/ansible-lab`. After its prompt, paste the lines the VM printed, or its whole output, and press Ctrl-D on a new line; Ctrl-C and then Ctrl-D cancels. When its message says a value is missing, or asks for `--name` in place of a pasted name, run it again with only the option that message names, `--name`, `--address` or `--fingerprint`, and a value you read through Run Command or the console. Take no option from the VM's output. After the bootstrap playbook, run the command it printed instead, as its message says. | With `--from-info`, the values it uses; then `Added NAME ... and trusted its verified host key`, or `Already present` on a repeat. |
 | 6. Semaphore's sudo password | Semaphore, once per password | [Give the templates the targets' sudo password](03-controller-el9.md#do-give-the-templates-the-targets-sudo-password): one shared password, or one per target with Vault. | With one shared password, the **Lab inventory file** shows **Lab sudo** as its **Sudo Credentials**; with Vault, every template lists **Lab vault password** under **Vaults**. |
 | 7. Verify | Semaphore, the **Lessons** tab | Run **Ping**, then **Baseline preview**. Both cover every host in the `lab` group, the new one included. | Both succeed for the new host; Ping names its distribution. |
 
@@ -78,7 +78,7 @@ VM therefore print data, and only reviewed code on the controller acts on it:
 `add-target.sh --from-info` reads the whole paste before it does anything,
 discards whatever still arrives after it, takes the four values, checks each as
 it checks its options, and ignores every other line. The command in the VM's
-output is only a reminder: type `sudo bash scripts/add-target.sh --from-info`
+output is only a reminder: type `sudo bash controller/add-target.sh --from-info`
 yourself or copy it from this guide, and paste only after its prompt. Never
 paste the VM's output, that line included, into a shell, and take no option
 from it: when `add-target.sh` says a value is missing, give it with the option
@@ -90,9 +90,9 @@ from the controller's inventory and a fingerprint it checks.
 
 | Your VM | Use | How |
 | --- | --- | --- |
-| You are creating it and can give it custom data | [`examples/onboard/cloud-init.yaml`](../examples/onboard/cloud-init.yaml) | Replace the quoted key placeholder with the service key and pass the file as custom data, or let [`examples/azure/targets.yml`](../examples/azure/targets.yml) do it. Set the password afterwards with one of the next three ways; each ends with what step 5 needs. [`inventory-info.sh`](../examples/onboard/inventory-info.sh) through Run Command, or the end of `/var/log/cloud-init-output.log`, prints the lines for `add-target.sh --from-info` again. |
-| It exists, and Azure Run Command can reach it | [`examples/onboard/onboard-linux.sh`](../examples/onboard/onboard-linux.sh) | Paste the edited script into **Run command → RunShellScript**, or run it with `az vm run-command`, as [chapter 13](13-azure.md#do-onboard-an-existing-vm-with-run-command) shows. No SSH is needed. |
-| It exists, and the controller can log in as its administrator, with the host key pinned | [`examples/bootstrap-existing-vm.yml`](../examples/bootstrap-existing-vm.yml) | Pin the VM's host key for your account first, as [chapter 13](13-azure.md#do-pin-the-targets-host-keys) shows. Then run it from the controller, in the guide's folder, one host at a time, with `-e '{"automation_public_key_files": ["~/svc_ansible.pub"]}'`, adding `"~/.ssh/ansible_lab.pub"` to the list only if you use that CLI key, as [chapter 13](13-azure.md#do-finish-access-with-one-playbook) shows. Without that option it authorizes only `~/.ssh/ansible_lab.pub`, in place of the service key. It asks for the sudo password. |
+| You are creating it and can give it custom data | [`onboard/new-vm/cloud-init.yaml`](../onboard/new-vm/cloud-init.yaml) | Replace the quoted key placeholder with the service key and pass the file as custom data, or let [`platforms/azure/targets.yml`](../platforms/azure/targets.yml) do it. Set the password afterwards with one of the next three ways; each ends with what step 5 needs. [`inventory-info.sh`](../onboard/inventory-info.sh) through Run Command, or the end of `/var/log/cloud-init-output.log`, prints the lines for `add-target.sh --from-info` again. |
+| It exists, and Azure Run Command can reach it | [`onboard/existing/onboard-linux.sh`](../onboard/existing/onboard-linux.sh) | Paste the edited script into **Run command → RunShellScript**, or run it with `az vm run-command`, as [chapter 13](13-azure.md#do-onboard-an-existing-vm-with-run-command) shows. No SSH is needed. |
+| It exists, and the controller can log in as its administrator, with the host key pinned | [`onboard/existing/bootstrap-existing-vm.yml`](../onboard/existing/bootstrap-existing-vm.yml) | Pin the VM's host key for your account first, as [chapter 13](13-azure.md#do-pin-the-targets-host-keys) shows. Then run it from the controller, in the guide's folder, one host at a time, with `-e '{"automation_public_key_files": ["~/svc_ansible.pub"]}'`, adding `"~/.ssh/ansible_lab.pub"` to the list only if you use that CLI key, as [chapter 13](13-azure.md#do-finish-access-with-one-playbook) shows. Without that option it authorizes only `~/.ssh/ansible_lab.pub`, in place of the service key. It asks for the sudo password. |
 | It exists, and you have a console or SSH with sudo | `onboard-linux.sh` | Copy the edited script to the VM and run `sudo bash onboard-linux.sh`. Delete the copy afterwards with `rm onboard-linux.sh` when it holds a password hash; only Run Command's copy deletes itself. |
 
 Doing the same by hand is [chapter 4, steps 3 and 4](04-access.md).
@@ -104,13 +104,13 @@ Every way gives the same result and is safe to run again.
 controller from either installer and VMs created in the portal:
 
 1. For each VM, open **Operations → Run command → RunShellScript**, paste
-   [`onboard-linux.sh`](../examples/onboard/onboard-linux.sh) with the
+   [`onboard-linux.sh`](../onboard/existing/onboard-linux.sh) with the
    service key between the `END_OF_KEYS` lines and a hash from
    `openssl passwd -6` in `PASSWORD_HASH`, and run it. Set
    `CONTROLLER_ADDRESS` to the controller's private address, so the printed
    `address=` line is the address the controller reaches.
 2. On the controller, in the guide's folder that step 5 describes, run
-   `sudo bash scripts/add-target.sh --from-info` as this page shows it. After
+   `sudo bash controller/add-target.sh --from-info` as this page shows it. After
    its prompt, paste the `name=`, `address=`, `group=` and `fingerprint=`
    lines from the end of the output, and press Ctrl-D. Pasting the whole
    output works too: every other line is ignored.
@@ -119,7 +119,7 @@ controller from either installer and VMs created in the portal:
    which cover every host in the `lab` group.
 
 To create the VMs with Ansible as well, follow
-[`examples/azure/`](../examples/azure/README.md): `network.yml`,
+[`platforms/azure/`](../platforms/azure/README.md): `network.yml`,
 `controller.yml`, the installer, then `targets.yml`, whose cloud-init does
 step 1 except the password. Rocky Linux needs its Marketplace terms accepted
 once per subscription, and every VM needs a size your subscription has quota
@@ -147,13 +147,13 @@ as the layers: network, SSH, sudo, then Semaphore.
 
 | File | Runs on | Step |
 | --- | --- | --- |
-| [`scripts/install-controller.sh`](../scripts/install-controller.sh), [`scripts/install-controller-el9.sh`](../scripts/install-controller-el9.sh) | The controller | 1 |
-| [`examples/onboard/cloud-init.yaml`](../examples/onboard/cloud-init.yaml) | The VM, at first boot | 3 |
-| [`examples/onboard/onboard-linux.sh`](../examples/onboard/onboard-linux.sh) | The VM, as root | 3, 4 |
-| [`examples/bootstrap-existing-vm.yml`](../examples/bootstrap-existing-vm.yml) | The controller | 3, 4 |
-| [`examples/onboard/inventory-info.sh`](../examples/onboard/inventory-info.sh) | The VM, read-only | 5 |
-| [`scripts/add-target.sh`](../scripts/add-target.sh) | The controller | 5 |
-| [`examples/azure/`](../examples/azure/README.md) | Your workstation | Azure VMs |
+| [`controller/install-controller.sh`](../controller/install-controller.sh), [`controller/install-controller-el9.sh`](../controller/install-controller-el9.sh) | The controller | 1 |
+| [`onboard/new-vm/cloud-init.yaml`](../onboard/new-vm/cloud-init.yaml) | The VM, at first boot | 3 |
+| [`onboard/existing/onboard-linux.sh`](../onboard/existing/onboard-linux.sh) | The VM, as root | 3, 4 |
+| [`onboard/existing/bootstrap-existing-vm.yml`](../onboard/existing/bootstrap-existing-vm.yml) | The controller | 3, 4 |
+| [`onboard/inventory-info.sh`](../onboard/inventory-info.sh) | The VM, read-only | 5 |
+| [`controller/add-target.sh`](../controller/add-target.sh) | The controller | 5 |
+| [`platforms/azure/`](../platforms/azure/README.md) | Your workstation | Azure VMs |
 
 The [validation record](validation/2026-10-onboarding.md) lists what each
 path did in a live run on Azure, with RHEL, AlmaLinux, Rocky Linux and Ubuntu

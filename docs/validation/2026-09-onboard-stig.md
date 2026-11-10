@@ -14,7 +14,7 @@ resource group, which was then deleted.
   so they keep working under the Enterprise Linux `FIPS:STIG` crypto policy.
 - **Targets:**
   - `lab-ubuntu`: Ubuntu 24.04, **Ubuntu Pro** image, made by `targets.yml` with
-    [`examples/onboard/cloud-init.yaml`](../../examples/onboard/cloud-init.yaml).
+    [`examples/onboard/cloud-init.yaml`](../../onboard/new-vm/cloud-init.yaml).
   - `lab-alma`: AlmaLinux 9.8, made by `targets.yml` with the same file.
   - `lab-rhel`: RHEL 9.8 pay-as-you-go and `lab-ubuntu2`: plain Ubuntu 24.04,
     both made with `az vm create` and no custom data, to stand in for existing VMs.

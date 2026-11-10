@@ -44,7 +44,7 @@ write_files:
 # Package names differ by family, so install them here rather than in packages:.
 # Every check reports to the console log (/var/log/cloud-init-output.log), and
 # any failure makes cloud-init report an error. A successful run ends with the
-# lines to paste into scripts/add-target.sh --from-info on the controller.
+# lines to paste into controller/add-target.sh --from-info on the controller.
 runcmd:
   - - /bin/bash
     - -c
@@ -266,7 +266,7 @@ runcmd:
         options+=("--fingerprint with the RSA host key's fingerprint, read from the console")
       fi
       echo "onboard: Add this VM on the controller: in the guide's folder, run"
-      echo "onboard:   sudo bash scripts/add-target.sh --from-info"
+      echo "onboard:   sudo bash controller/add-target.sh --from-info"
       for option in "${options[@]}"; do
         echo "onboard: and add $option,"
       done

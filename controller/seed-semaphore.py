@@ -6,7 +6,7 @@ logs in with the locally generated admin password, creates one project and its
 dependent objects through the HTTP API on loopback, including the vendor STIG
 lessons, and prints only names and numeric identifiers. It refuses to run twice.
 
-With --update, scripts/update-controller.sh runs it on a controller that is
+With --update, controller/update-controller.sh runs it on a controller that is
 already seeded: it adds the variable groups, template tabs and templates this
 release seeds that the project lacks, and puts untabbed seeded templates on
 their tab. Seeded objects that this release replaces are reported and kept;

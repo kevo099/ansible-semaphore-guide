@@ -77,13 +77,13 @@ python3.12 -m venv .venv
 .venv/bin/python -m pip install -r requirements-dev.txt
 .venv/bin/python scripts/validate.py
 .venv/bin/python -m unittest discover -s tests -v
-.venv/bin/ansible-galaxy collection install -r examples/azure/requirements.yml
+.venv/bin/ansible-galaxy collection install -r platforms/azure/requirements.yml
 for playbook in playbooks/*.yml examples/*.yml examples/semaphore/*.yml \
-    examples/azure/{network,controller,targets,power,remove}.yml; do
+    platforms/azure/{network,controller,targets,power,remove}.yml; do
   .venv/bin/ansible-playbook -i inventories/lab.ini.example --syntax-check "$playbook"
 done
 .venv/bin/ansible-lint --offline playbooks/ examples/
-for installer in scripts/install-controller.sh scripts/install-controller-el9.sh; do
+for installer in controller/install-controller.sh controller/install-controller-el9.sh; do
   bash "$installer" | grep '^Plan:'
   bash "$installer" --plan >/dev/null
 done
@@ -105,7 +105,7 @@ The unit tests cover unique locally generated secrets, refusing file
 overwrite/symlinks, the Semaphore seeding plan (local repository, file
 inventory, scoped templates, preview-only arguments, no key material), the
 publication-boundary rules of `scripts/validate.py`, the readiness parsers in
-`scripts/check-controller.py`, and the contracts between the lesson playbooks
+`controller/check-controller.py`, and the contracts between the lesson playbooks
 and the seeder: the accepted distributions and their STIG data streams, the
 approval phrase, and the helper scripts the playbooks call. They also cover
 XCCDF assessments containing repeated rules, multiple results, missing results

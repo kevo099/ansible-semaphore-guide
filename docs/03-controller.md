@@ -33,13 +33,13 @@ sudo apt-get update
 sudo apt-get install -y git
 git clone https://github.com/kevo099/ansible-semaphore-guide.git
 cd ansible-semaphore-guide
-bash scripts/install-controller.sh --plan
+bash controller/install-controller.sh --plan
 ```
 
 For the installer path, read the script and its Python helpers first, then:
 
 ```bash
-sudo bash scripts/install-controller.sh --apply
+sudo bash controller/install-controller.sh --apply
 ```
 
 It changes this controller VM only. It does not create VMs, discover your
@@ -82,7 +82,7 @@ service. The installer checks access to the inventory before seeding.
 For example, after reviewing the plan:
 
 ```bash
-sudo bash scripts/install-controller.sh --apply --editor "$USER" \
+sudo bash controller/install-controller.sh --apply --editor "$USER" \
   --lab-dir /srv/ansible-lab --expose https --address CONTROLLER_PUBLIC_ADDRESS
 ```
 
@@ -101,7 +101,7 @@ installer again. See
 firewall checks and how to return to loopback.
 
 This chapter uses `/opt/ansible-lab` below. If you choose another folder, use
-that path and pass the same `--lab-dir DIR` to `scripts/add-target.sh`.
+that path and pass the same `--lab-dir DIR` to `controller/add-target.sh`.
 
 The seeded Ubuntu installer, its target addition, template runs and all three
 exposure modes were tested live on Azure; see the
@@ -170,7 +170,7 @@ sudo useradd --system --create-home --home-dir /var/lib/semaphore \
 sudo install -d -o root -g semaphore -m 0750 /etc/semaphore
 sudo install -d -o semaphore -g semaphore -m 0700 \
   /var/lib/semaphore /var/lib/semaphore/tmp
-sudo python3 scripts/controller_config.py --directory /etc/semaphore
+sudo python3 controller/controller_config.py --directory /etc/semaphore
 sudo chown root:semaphore /etc/semaphore/config.json
 sudo chmod 0640 /etc/semaphore/config.json
 sudo install -o root -g semaphore -m 0640 /dev/null /etc/semaphore/known_hosts
@@ -229,7 +229,7 @@ p.write_text(
 PY
 sudo systemctl enable --now postgresql postgresql@16-main
 sudo systemctl restart postgresql@16-main
-sudo python3 scripts/create-database.py
+sudo python3 controller/create-database.py
 ```
 
 **Check:** the helper reports creation of the dedicated database and role.
@@ -272,8 +272,8 @@ From the repository root:
 
 ```bash
 sudo -u semaphore /usr/local/bin/semaphore migrate --config /etc/semaphore/config.json
-sudo python3 scripts/create-admin.py
-sudo install -o root -g root -m 0644 templates/semaphore.service \
+sudo python3 controller/create-admin.py
+sudo install -o root -g root -m 0644 controller/templates/semaphore.service \
   /etc/systemd/system/semaphore.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now semaphore
@@ -294,7 +294,7 @@ Remote target privilege escalation is configured separately.
 For either installation path:
 
 ```bash
-sudo python3 scripts/check-controller.py
+sudo python3 controller/check-controller.py
 sudo systemctl status semaphore postgresql@16-main --no-pager
 curl --fail http://127.0.0.1:3000/api/ping
 ```
@@ -327,7 +327,7 @@ your password manager. The initial password file does not update automatically.
 
 To reach the UI on the controller's own address instead of through a tunnel,
 see [browser access](appendices/browser-access.md#https-on-the-vms-address):
-`scripts/expose-semaphore.sh --mode https` works after either installation
+`controller/expose-semaphore.sh --mode https` works after either installation
 path, the installer also accepts `--expose https` with `--address` for the
 address you browse to, and `--mode loopback` takes the UI off the network
 again.
@@ -364,13 +364,13 @@ Then run the helper from the guide checkout on the controller, substituting
 that target's address and fingerprint:
 
 ```bash
-sudo bash scripts/add-target.sh --name lab-ubuntu --address ubuntu.example.test \
+sudo bash controller/add-target.sh --name lab-ubuntu --address ubuntu.example.test \
   --group ubuntu --fingerprint 'SHA256:REPLACE_WITH_CONSOLE_VALUE'
 ```
 
 Use `--group enterprise_linux` for an EL9 target and include `--lab-dir DIR`
 if you chose a custom folder. If one of the onboarding scripts prepared the
-target, run `sudo bash scripts/add-target.sh --from-info` instead and paste
+target, run `sudo bash controller/add-target.sh --from-info` instead and paste
 the lines it printed, as [the onboarding page](ONBOARDING.md#step-by-step)
 shows. The helper adds the inventory entry and its
 verified key to `/etc/semaphore/known_hosts`. A fingerprint mismatch, or a name
@@ -407,14 +407,14 @@ reinstalled: any Enterprise Linux controller, and an Ubuntu controller installed
 from release `v1.5.0` on. An Ubuntu controller from an earlier release has no
 seeded project, so the script refuses it; build its project by hand as
 [chapter 6](06-semaphore.md) describes. The installers refuse to run a second
-time, so use [`scripts/update-controller.sh`](../scripts/update-controller.sh)
+time, so use [`controller/update-controller.sh`](../controller/update-controller.sh)
 instead of installing again. Get the newer copy of the guide first, in a new
 folder for each release; replace `v1.8.0` with the release you want:
 
 ```bash
 git clone --branch v1.8.0 https://github.com/kevo099/ansible-semaphore-guide.git ~/guide-v1.8.0
 cd ~/guide-v1.8.0
-sudo bash scripts/update-controller.sh
+sudo bash controller/update-controller.sh
 ```
 
 Run `add-target.sh` from this newer copy too; `--from-info` is new in
@@ -441,7 +441,7 @@ add, the seeded templates it would put on a tab, and the seeded objects that
 this release replaces. When the plan is what you expect, apply it:
 
 ```bash
-sudo bash scripts/update-controller.sh --apply
+sudo bash controller/update-controller.sh --apply
 ```
 
 It changes nothing when the lab folder has staged changes, uncommitted changes
@@ -508,7 +508,7 @@ expects DISA's RHEL 9 V2R9 benchmark, or edit that group's path. Once you have
 checked the new tabs, delete the old objects with:
 
 ```bash
-sudo bash scripts/update-controller.sh --apply --remove-replaced
+sudo bash controller/update-controller.sh --apply --remove-replaced
 ```
 
 It deletes them only after the lab folder holds the new playbooks, and saves
@@ -534,7 +534,7 @@ default site on port 80. Run it again from the new copy, which removes that site
 and keeps your certificate, so the browser's fingerprint does not change:
 
 ```bash
-sudo bash scripts/expose-semaphore.sh --mode https
+sudo bash controller/expose-semaphore.sh --mode https
 ```
 
 On a controller already exposed over HTTPS, or on loopback, this does not
@@ -549,7 +549,7 @@ that file. To add the reuse, while no task runs:
 ```bash
 sudo sed -i 's|"ANSIBLE_SSH_ARGS": "-o UserKnownHostsFile=|"ANSIBLE_SSH_ARGS": "-o ControlMaster=auto -o ControlPersist=60s -o UserKnownHostsFile=|' /etc/semaphore/config.json
 sudo systemctl restart semaphore
-sudo python3.12 scripts/check-controller.py
+sudo python3.12 controller/check-controller.py
 ```
 
 The readiness check should still report `"passed": true`. In the test,

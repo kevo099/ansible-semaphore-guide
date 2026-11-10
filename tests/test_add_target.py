@@ -1,4 +1,4 @@
-"""Offline runs of scripts/add-target.sh with a stub key scan; nothing here contacts a host."""
+"""Offline runs of controller/add-target.sh with a stub key scan; nothing here contacts a host."""
 
 import fcntl
 import os
@@ -75,14 +75,14 @@ class AddTargetTests(unittest.TestCase):
 
     def add(self, name="lab-alma", address=f"{TEST_NET}.12", group="enterprise_linux", fingerprint=None, served=None):
         return subprocess.run(
-            ["bash", str(ROOT / "scripts" / "add-target.sh"), "--name", name, "--address", address,
+            ["bash", str(ROOT / "controller" / "add-target.sh"), "--name", name, "--address", address,
              "--group", group, "--fingerprint", fingerprint or self.key["fingerprint"],
              "--lab-dir", str(self.lab), "--known-hosts", str(self.known_hosts)],
             capture_output=True, text=True, env=self.environment(served), timeout=60)
 
     def from_info(self, *options):
         """The --from-info command, with this test's lab folder and known-hosts file."""
-        return ["bash", str(ROOT / "scripts" / "add-target.sh"), "--from-info", *options,
+        return ["bash", str(ROOT / "controller" / "add-target.sh"), "--from-info", *options,
                 "--lab-dir", str(self.lab), "--known-hosts", str(self.known_hosts)]
 
     def paste(self, text, *options, served=None):
@@ -137,7 +137,7 @@ class AddTargetTests(unittest.TestCase):
         for module in ("re", "pathlib", "termios", "json"):
             (planted / f"{module}.py").write_text(f"open({str(marker)!r}, 'a').write({module!r})\n")
         result = subprocess.run(
-            ["bash", str(ROOT / "scripts" / "add-target.sh"), "--name", "lab-alma", "--address", f"{TEST_NET}.12",
+            ["bash", str(ROOT / "controller" / "add-target.sh"), "--name", "lab-alma", "--address", f"{TEST_NET}.12",
              "--group", "enterprise_linux", "--fingerprint", self.key["fingerprint"], "--lab-dir", str(self.lab),
              "--known-hosts", str(self.known_hosts)],
             capture_output=True, text=True, cwd=planted, env=dict(self.environment(), PYTHONPATH=str(planted)),
@@ -288,7 +288,7 @@ class AddTargetTests(unittest.TestCase):
     def test_each_vm_format_is_read(self):
         lines = self.info()
         block = ("Add this VM on the controller: in the guide's folder, run\n"
-                 "  sudo bash scripts/add-target.sh --from-info\nthen paste these lines and press Ctrl-D:\n" + lines)
+                 "  sudo bash controller/add-target.sh --from-info\nthen paste these lines and press Ctrl-D:\n" + lines)
         formats = {
             "plain": lines,
             "cloud-init's prefix": "".join("onboard: " + line for line in lines.splitlines(keepends=True)),
@@ -366,7 +366,7 @@ class AddTargetTests(unittest.TestCase):
         elsewhere = self.work / "elsewhere"
         noise = (f"echo $(touch {marker}); touch {marker}\n`touch {marker}`\nlab_dir={elsewhere}\n"
                  f"known_hosts={elsewhere}\nName=lab-other\nonboard:name=lab-other\nname = lab-other\n"
-                 "  sudo bash scripts/add-target.sh --name lab-other --from-info\n\n")
+                 "  sudo bash controller/add-target.sh --name lab-other --from-info\n\n")
         self.assertAdded(self.paste(noise + self.info() + noise))
         self.assertFalse(marker.exists())
         self.assertFalse(elsewhere.exists())

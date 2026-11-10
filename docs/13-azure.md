@@ -14,7 +14,7 @@ compute deliberately.
 | Edition and evidence | Scope |
 | --- | --- |
 | Tested with | `azure.azcollection` 4.0.0, ansible-core 2.21.4, `Standard_D2als_v6` and, in October in a new pay-as-you-go subscription, `Standard_D2als_v7`, in `eastus2`; targets Ubuntu 24.04 (plain and Ubuntu Pro images), AlmaLinux 9.8, Rocky Linux 9.8 (Marketplace image with a plan) and RHEL 9.8 (pay-as-you-go image); controllers Ubuntu 24.04 and AlmaLinux 9.8 in the same VNet |
-| Files | [`examples/azure/`](../examples/azure/README.md), [`examples/onboard/`](../examples/onboard/README.md) and [`examples/bootstrap-existing-vm.yml`](../examples/bootstrap-existing-vm.yml); [the onboarding page](ONBOARDING.md) maps them |
+| Files | [`platforms/azure/`](../platforms/azure/README.md), [`onboard/`](../onboard/README.md) and [`onboard/existing/bootstrap-existing-vm.yml`](../onboard/existing/bootstrap-existing-vm.yml); [the onboarding page](ONBOARDING.md) maps them |
 | Evidence | [Azure validation record](validation/2026-09-azure.md), [onboarding and STIG record](validation/2026-09-onboard-stig.md) and [the October onboarding record](validation/2026-10-onboarding.md) |
 | Known limits | One region and VM size; no Trusted Launch; targets reached inside one VNet, not across a VPN |
 
@@ -56,7 +56,7 @@ own virtual environment rather than the controller's `/opt/ansible-venv`:
 ```bash
 python3.12 -m venv ~/azure-venv
 ~/azure-venv/bin/pip install ansible-core==2.21.4
-~/azure-venv/bin/ansible-galaxy collection install -r examples/azure/requirements.yml
+~/azure-venv/bin/ansible-galaxy collection install -r platforms/azure/requirements.yml
 ~/azure-venv/bin/pip install \
   -r ~/.ansible/collections/ansible_collections/azure/azcollection/requirements.txt
 ```
@@ -93,8 +93,8 @@ Python library (azure)`.
 **Where: the same machine, in the repository root.**
 
 ```bash
-cp examples/azure/vars.example.yml examples/azure/vars.yml
-$EDITOR examples/azure/vars.yml
+cp platforms/azure/vars.example.yml platforms/azure/vars.yml
+$EDITOR platforms/azure/vars.yml
 ```
 
 Replace every `REPLACE_` value: subscription, owner and expiry tags, a private
@@ -115,10 +115,10 @@ when either file is missing or is not a public key:
   ```
 
 - `azure_automation_public_key_file` is the key Semaphore logs in with,
-  copied into `examples/azure/files/`, which Git ignores. On a controller
+  copied into `platforms/azure/files/`, which Git ignores. On a controller
   made by either installer, that is the service key; copy the output of
   `sudo cat /etc/semaphore/svc_ansible.pub` on the controller into
-  `examples/azure/files/svc_ansible.pub` and point the variable at it. Without
+  `platforms/azure/files/svc_ansible.pub` and point the variable at it. Without
   a seeded controller, use `~/.ssh/ansible_lab.pub` from
   [chapter 4, step 1](04-access.md#step-1-generate-the-automation-key).
   cloud-init takes one key; the password step can add more.
@@ -126,11 +126,11 @@ when either file is missing or is not a public key:
 ## Do: create the network
 
 ```bash
-cd examples/azure
+cd platforms/azure
 ~/azure-venv/bin/ansible-playbook -i localhost, network.yml
 ```
 
-Run every Azure playbook from this `examples/azure` directory on this machine.
+Run every Azure playbook from this `platforms/azure` directory on this machine.
 This one creates the resource group with its tags, the targets' network
 security group, the VNet and the subnet. The security group allows SSH from
 `azure_target_ssh_source` and denies other traffic from inside the VNet.
@@ -167,7 +167,7 @@ the current release. To publish the UI over HTTPS in the same run, give the
 installer the public address the certificate must name:
 
 ```bash
-sudo bash scripts/install-controller.sh --apply --expose https --address CONTROLLER_PUBLIC_ADDRESS
+sudo bash controller/install-controller.sh --apply --expose https --address CONTROLLER_PUBLIC_ADDRESS
 ```
 
 Without `--address`, the certificate names the VM's private address, which
@@ -181,7 +181,7 @@ your browser does not use.
 
 Each target gets a network interface with a private static address and the
 targets' security group, then a VM whose custom data is
-[`examples/onboard/cloud-init.yaml`](../examples/onboard/cloud-init.yaml), with
+[`onboard/new-vm/cloud-init.yaml`](../onboard/new-vm/cloud-init.yaml), with
 the placeholder replaced by the automation public key. The same file works on
 Ubuntu 24.04 and on AlmaLinux, Rocky Linux or RHEL 9, and you can paste it
 into the portal yourself, as the next section shows. Each target's OS disk is
@@ -287,7 +287,7 @@ see [chapter 4, step 6](04-access.md#step-6-install-target-trust-for-semaphore).
 
 ## Do: finish access with one playbook
 
-[`examples/bootstrap-existing-vm.yml`](../examples/bootstrap-existing-vm.yml)
+[`onboard/existing/bootstrap-existing-vm.yml`](../onboard/existing/bootstrap-existing-vm.yml)
 is the automated form of chapter 4, steps 3 and 4. On a VM that cloud-init
 prepared, it sets the sudo password and checks what cloud-init wrote; on any
 other VM, it does the whole job.
@@ -324,7 +324,7 @@ folder and list it instead, or the run replaces the key Semaphore logs in with:
 ```bash
 sudo cat /etc/semaphore/svc_ansible.pub > ~/svc_ansible.pub
 /opt/ansible-venv/bin/ansible-playbook -i inventories/bootstrap.ini \
-  examples/bootstrap-existing-vm.yml --limit lab-alma -u YOUR_ADMIN \
+  onboard/existing/bootstrap-existing-vm.yml --limit lab-alma -u YOUR_ADMIN \
   -e '{"automation_public_key_files": ["~/svc_ansible.pub"]}'
 ```
 
@@ -350,7 +350,7 @@ its own sudo password:
 
 ```bash
 /opt/ansible-venv/bin/ansible-playbook -i inventories/bootstrap.ini \
-  examples/bootstrap-existing-vm.yml --limit lab-ubuntu -u YOUR_ADMIN \
+  onboard/existing/bootstrap-existing-vm.yml --limit lab-ubuntu -u YOUR_ADMIN \
   -e '{"automation_public_key_files": ["~/svc_ansible.pub"]}'
 ```
 
@@ -368,7 +368,7 @@ before you used cloud-init. You do not need `network.yml` or `targets.yml`.
 Choose one of two ways:
 
 - **No SSH needed:** run
-  [`examples/onboard/onboard-linux.sh`](../examples/onboard/onboard-linux.sh)
+  [`onboard/existing/onboard-linux.sh`](../onboard/existing/onboard-linux.sh)
   through Azure Run Command, as the [next section](#do-onboard-an-existing-vm-with-run-command)
   shows. It needs only the Azure role that may run commands on the VM.
 - **Over SSH:** make sure the controller can reach the VM's SSH port as its
@@ -387,7 +387,7 @@ Command alone.
 
 **Where: the Azure portal, or any machine with the Azure CLI.** Run Command
 runs a script as root through the VM agent, so it works before any SSH path
-exists. [`examples/onboard/onboard-linux.sh`](../examples/onboard/onboard-linux.sh)
+exists. [`onboard/existing/onboard-linux.sh`](../onboard/existing/onboard-linux.sh)
 does what `bootstrap-existing-vm.yml` does, and is safe to run again:
 
 - creates or completes `svc_ansible` and authorizes exactly the keys you give
@@ -471,7 +471,7 @@ Then either:
 
 ```bash
 az vm run-command create -g RESOURCE_GROUP --vm-name VM_NAME --name onboard \
-  --script @examples/onboard/onboard-linux.sh \
+  --script @onboard/existing/onboard-linux.sh \
   --parameters ONBOARD_PUBLIC_KEYS="$(cat ~/svc_ansible.pub ~/.ssh/ansible_lab.pub)" \
     ONBOARD_CONTROLLER_ADDRESS=CONTROLLER_PRIVATE_ADDRESS \
   --protected-parameters ONBOARD_PASSWORD_HASH="$(openssl passwd -6)" \
@@ -499,7 +499,7 @@ one this way or with the bootstrap playbook.
 **Where: the target VM's Azure Run Command → RunShellScript.** Every way of
 preparing a VM above already ends with the values the controller needs. For a
 VM that cloud-init prepared, or whose output you no longer have, paste the whole
-[`examples/onboard/inventory-info.sh`](../examples/onboard/inventory-info.sh)
+[`onboard/inventory-info.sh`](../onboard/inventory-info.sh)
 file into Run Command instead. It changes nothing: it only reads the VM's
 hostname, OS, local IPv4 addresses, RSA host public key, account status and
 sudo validation result.
@@ -518,7 +518,7 @@ The output ends with data for the **controller**, not a command:
 
 ```text
 Add this VM on the controller: in the guide's folder, run
-  sudo bash scripts/add-target.sh --from-info
+  sudo bash controller/add-target.sh --from-info
 then paste these lines and press Ctrl-D:
 name=NAME
 address=ADDRESS
@@ -528,12 +528,12 @@ fingerprint=SHA256:...
 
 On the controller, in the guide's folder, your copy of the guide rather than
 the lab folder `/opt/ansible-lab`, run
-`sudo bash scripts/add-target.sh --from-info` as this page shows it, not copied
+`sudo bash controller/add-target.sh --from-info` as this page shows it, not copied
 from the VM's output. After its prompt, paste the four lines or the whole
 output, and press Ctrl-D. A VM's output is untrusted, so only reviewed code on
 the controller acts on it, as
 [the onboarding page](ONBOARDING.md#why-the-vm-prints-lines-not-a-command)
-explains. [`scripts/add-target.sh`](../scripts/add-target.sh) reads the whole
+explains. [`controller/add-target.sh`](../controller/add-target.sh) reads the whole
 paste first, takes only the `name=`, `address=`, `group=` and `fingerprint=`
 values, refuses one that is not a plain name, address or fingerprint, and
 ignores every other line. It then scans the VM, keeps only the host key that
@@ -676,7 +676,7 @@ than converging with repetition.
 
 ## Do: stop compute, and remove the lab
 
-**Where: back on the machine with your Azure login, in `examples/azure`.**
+**Where: back on the machine with your Azure login, in `platforms/azure`.**
 Shutting Linux down from inside the guest can leave Azure compute allocated and
 billed. `power.yml` deallocates through Azure and then checks the power state
 Azure reports:

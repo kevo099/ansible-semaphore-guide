@@ -27,7 +27,7 @@ ADDRESS_RULE = "literal non-loopback address; use documentation hostnames"
 HOME = "/home/"
 OWNER = "kevo099"
 AT = "@"
-CLOUD_INIT = ROOT / "examples" / "onboard" / "cloud-init.yaml"
+CLOUD_INIT = ROOT / "onboard" / "new-vm" / "cloud-init.yaml"
 
 
 class PublicationBoundaryTests(unittest.TestCase):

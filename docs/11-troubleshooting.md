@@ -109,7 +109,7 @@ and [the command module](https://docs.ansible.com/projects/ansible/latest/collec
 ## Controller checks
 
 ```bash
-sudo python3 scripts/check-controller.py
+sudo python3 controller/check-controller.py
 sudo systemctl status semaphore postgresql@16-main --no-pager  # Ubuntu
 sudo systemctl status semaphore postgresql --no-pager          # Enterprise Linux
 sudo journalctl -u semaphore -n 100 --no-pager
@@ -169,7 +169,7 @@ release, architecture and authenticated source first.
 
 ## Controller update stopped
 
-`scripts/update-controller.sh` stops before changing anything it should not,
+`controller/update-controller.sh` stops before changing anything it should not,
 and its message names the fix:
 
 | Message | Next step |

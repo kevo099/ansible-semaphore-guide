@@ -15,7 +15,7 @@
 #
 #   sudo cat /etc/semaphore/svc_ansible.pub > ~/svc_ansible.pub
 #   /opt/ansible-venv/bin/ansible-playbook -i inventories/bootstrap.ini \
-#     examples/bootstrap-existing-vm.yml --limit new-vm -u YOUR_ADMIN [-K] \
+#     onboard/existing/bootstrap-existing-vm.yml --limit new-vm -u YOUR_ADMIN [-K] \
 #     -e '{"automation_public_key_files": ["~/svc_ansible.pub"]}'
 #
 # -K is needed only when that administrator's own sudo asks for a password. The
@@ -419,7 +419,7 @@
         bootstrap_add_group: "{{ 'ubuntu' if ansible_facts['os_family'] == 'Debian' else 'enterprise_linux' }}"
         bootstrap_add_fingerprint: "{{ (bootstrap_rsa_host_key.stdout.split() + ['', ''])[1] }}"
         bootstrap_add_line: >-
-          {{ 'sudo bash scripts/add-target.sh'
+          {{ 'sudo bash controller/add-target.sh'
              ~ ' --name ' ~ (bootstrap_add_name
                              if bootstrap_add_name is regex('[A-Za-z0-9][A-Za-z0-9._-]*', match_type='fullmatch') else 'NAME')
              ~ ' --address ' ~ (bootstrap_add_address

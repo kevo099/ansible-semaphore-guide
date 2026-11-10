@@ -7,6 +7,7 @@ __pycache__/
 collections/
 inventories/*
 !inventories/lab.ini.example
+!inventories/bootstrap.ini.example
 group_vars/
 host_vars/
 .env
@@ -34,5 +35,5 @@ backups/
 .DS_Store
 
 # Private values for the Azure examples.
-examples/azure/vars.yml
-examples/azure/files/
+platforms/azure/vars.yml
+platforms/azure/files/

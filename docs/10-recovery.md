@@ -114,7 +114,7 @@ Check application readiness afterward and reopen normal job access only when
 the owning checks pass:
 
 ```bash
-sudo python3 scripts/check-controller.py
+sudo python3 controller/check-controller.py
 ```
 
 Copy the recovery set through an authenticated encrypted path to independently
@@ -257,7 +257,7 @@ If your configuration still uses the guide's generated 48-character hex
 database password, the helper reads it without printing it:
 
 ```bash
-sudo python3 scripts/create-database.py
+sudo python3 controller/create-database.py
 ```
 
 It refuses an existing role/database. If you have rotated credentials or

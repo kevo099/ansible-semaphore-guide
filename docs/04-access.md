@@ -84,16 +84,16 @@ requires independent verification. Do not turn off host checking to bypass it.
 ## Step 3: prepare a dedicated target account
 
 Steps 3 and 4 are also available as one playbook,
-[`examples/bootstrap-existing-vm.yml`](../examples/bootstrap-existing-vm.yml),
+[`onboard/existing/bootstrap-existing-vm.yml`](../onboard/existing/bootstrap-existing-vm.yml),
 run from the controller as the target's own administrator. It is useful for a
 VM that already exists, such as a cloud VM created in a portal;
 [chapter 13](13-azure.md#do-finish-access-with-one-playbook) shows it end to
 end. On a seeded controller, pass it the exported service key as well, as that
 chapter shows, or it replaces the key Semaphore uses. Without SSH, the same
 steps run as root through Azure Run Command or `sudo bash` with
-[`examples/onboard/onboard-linux.sh`](../examples/onboard/onboard-linux.sh), and
+[`onboard/existing/onboard-linux.sh`](../onboard/existing/onboard-linux.sh), and
 a new VM can do them at first boot with
-[`examples/onboard/cloud-init.yaml`](../examples/onboard/cloud-init.yaml); see
+[`onboard/new-vm/cloud-init.yaml`](../onboard/new-vm/cloud-init.yaml); see
 [chapter 13](13-azure.md#do-onboard-an-existing-vm-with-run-command). On a
 seeded controller, each of them ends with what `add-target.sh` needs to add the
 VM, as [the onboarding page](ONBOARDING.md#step-by-step) shows. The manual

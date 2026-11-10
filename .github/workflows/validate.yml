@@ -23,17 +23,17 @@ jobs:
       - name: Run the offline unit tests
         run: python -m unittest discover -s tests -v
       - name: Install the pinned Azure collection for the Azure examples (no SDK needed to check them)
-        run: ansible-galaxy collection install -r examples/azure/requirements.yml
+        run: ansible-galaxy collection install -r platforms/azure/requirements.yml
       - name: Check all lesson and example playbooks
         run: |
-          for playbook in playbooks/*.yml playbooks/stig/*/*/*.yml examples/*.yml examples/semaphore/*.yml \
-              examples/azure/{network,controller,targets,power,remove}.yml; do
+          for playbook in playbooks/*.yml playbooks/stig/*/*/*.yml onboard/existing/*.yml examples/semaphore/*.yml \
+              platforms/azure/{network,controller,targets,power,remove}.yml; do
             ansible-playbook -i inventories/lab.ini.example --syntax-check "$playbook"
           done
-          ansible-lint --offline playbooks/ examples/
+          ansible-lint --offline playbooks/ examples/ onboard/ platforms/
       - name: Confirm the installers default to a plan
         run: |
-          for installer in scripts/install-controller.sh scripts/install-controller-el9.sh; do
+          for installer in controller/install-controller.sh controller/install-controller-el9.sh; do
             plan=$(bash "$installer")
             grep -q '^Plan:' <<<"$plan"
             bash "$installer" --plan >/dev/null

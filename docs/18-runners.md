@@ -55,7 +55,7 @@ Follow [HTTPS browser access](appendices/browser-access.md#https-on-the-vms-addr
 including its firewall restrictions, using:
 
 ```bash
-bash scripts/expose-semaphore.sh --mode https --address controller.example.test
+bash controller/expose-semaphore.sh --mode https --address controller.example.test
 openssl x509 -in /etc/semaphore/tls/semaphore.crt -noout -fingerprint -sha256 -ext subjectAltName
 ```
 
@@ -147,14 +147,14 @@ rm /tmp/runner-server-ca.pem /tmp/runner-known-hosts
 }
 ```
 
-Install the [runner unit](../templates/semaphore-runner.service) from the guide checkout.
+Install the [runner unit](../controller/templates/semaphore-runner.service) from the guide checkout.
 Its process `PATH` must name the venv first to find `ansible-playbook`. It retains
 the controller's hardening, allowing persistent writes only under the runner home.
 
 ```bash
 chown root:semaphore-runner /etc/semaphore-runner/config.json
 chmod 0640 /etc/semaphore-runner/config.json
-install -m 0644 templates/semaphore-runner.service /etc/systemd/system/semaphore-runner.service
+install -m 0644 controller/templates/semaphore-runner.service /etc/systemd/system/semaphore-runner.service
 systemctl daemon-reload
 runuser -u semaphore-runner -- test -r /etc/semaphore-runner/server-ca.pem
 runuser -u semaphore-runner -- test -r /etc/semaphore-runner/known_hosts
