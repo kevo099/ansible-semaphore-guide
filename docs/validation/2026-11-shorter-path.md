@@ -72,6 +72,33 @@ with the RHEL 9.8 guest as its target.
 | **Health report** | `NAME: OK` for RHEL; `needs attention: 101 package update(s) pending` for the Ubuntu controller. |
 | `fill-cloud-init.sh --password-hash-file` over a file that existed with mode 0664 | The file had mode 0600 afterwards and held the entry; `cloud-init schema` accepted it. |
 
+## RHEL, once it was registered again
+
+On 11 November 2026 the RHEL 9.8 guest was registered with the vendor again,
+so its package repositories answered. It then served as a controller and as
+that controller's one target, from the published tag `v1.10.0`.
+
+| What ran | Result |
+| --- | --- |
+| `sudo dnf install -y git`, `git clone`, `install-controller-el9.sh --plan` and then `--apply`, on RHEL 9.8 | Exit status 0 and readiness `"passed": true`; seven tabs and 24 templates; PostgreSQL 16 from the AppStream module and Python 3.12; SELinux stayed enforcing and logged no denial. `~/svc_ansible.pub` was identical to the service key, labelled `user_home_t`. |
+| `fill-cloud-init.sh --with-password` on that controller | Asked for the password twice and printed its warning; the file had mode 0600. |
+| The filled file as vendor data at a first boot of cloud-init 24.4 on RHEL 9.8 | `onboard: svc_ansible is ready, with its sudo password set` and the four lines. cloud-init created the account; its password field held a SHA-512 hash and its sudo rule was `svc_ansible ALL=(ALL:ALL) ALL`. `/run/ansible-lab-onboard.hash` was gone, cloud-init's logs and the boot's journal did not hold the hash, cloud-init's copies of the file were readable by root only, no unit had failed and SELinux logged no denial. |
+| `add-target.sh --from-info` with those lines, `lab-sudo.py`, then **Ping**, **Baseline preview**, **Baseline apply** twice and **Health report** | All passed. The first apply showed `changed=1` and the second `changed=0`; the report ended with `needs attention: 180 package update(s) pending`. |
+| `onboard-target.sh --keep-password` from the RHEL controller, for the machine cloud-init had prepared | `RESULT: OK`, `Already present`, exit status 0. |
+| `remove-target.sh --name NAME` with SELinux enforcing, a second run, and a group's name | Removed the inventory line and the trusted key. `lab.ini` and its backup kept the lab folder's owner, its group, mode 0640 and the SELinux type `usr_t`; the known-hosts file kept `root:semaphore`, mode 0640 and `etc_t`; readiness passed and no denial was logged. The second run said `nothing changed`; the group's name was refused. |
+| The one command again, then **Ping** and **Baseline preview** | `Added ...`; both passed. |
+
+The guest was an installed RHEL, not a cloud image, so three things differ
+from a reader's new VM. cloud-init was installed there from AppStream. The
+seed was the folder `/var/lib/cloud/seed/nocloud` with the three files of
+Stage 3 in place of an ISO, and a drop-in named NoCloud as the data source,
+because cloud-init did not find the folder on its own and stayed disabled.
+The user data kept the guest's host keys and name, and cloud-init's network
+configuration was switched off. The guest's own earlier `svc_ansible` account
+was first removed with the by-hand lines of Stage 4; on a pass before that,
+with the account still there, the file set its password and printed the same
+lines.
+
 ## What the runs and the review changed
 
 - **The Health report failed at its first run.** One option of its `df`
@@ -111,14 +138,18 @@ with the RHEL 9.8 guest as its target.
   reader to pause schedules after changing the password instead of before, and
   showed sample output the code does not print; these and smaller points were
   corrected.
+- **`cloud-init schema` stopped with `PermissionError`** for the administrator
+  on the RHEL guest while cloud-init was installed there but had never run;
+  with `sudo` it printed `Valid schema`, and after cloud-init's first run it
+  worked without. Stage 3 now names the error and the `sudo` form.
 
 ## Not established by this run
 
-- **A RHEL controller, Baseline on RHEL, and the opt-in password on RHEL.**
-  The RHEL guest's registration was still removed on the vendor's side, as in
-  the earlier record, so it served only as a machine that already existed:
-  onboarded with the one command, Ping, the Health report and, after the
-  review, the reboot template.
+- **Red Hat's cloud image on Proxmox, and a RHEL controller with a second
+  machine.** RHEL's cloud-init ran the filled file on an installed guest from
+  a seed folder, as described above, not on the vendor's KVM guest image with
+  `cicustom`; and the RHEL controller managed only itself, so the reboot
+  template was not run from it. `update-controller.sh` was not run on RHEL.
 - **Azure** was not rerun. The cloud-init file's default, without a password,
   is what the Azure page uses, and Run Command still gives the script its
   inputs as environment variables; offline tests cover both.
