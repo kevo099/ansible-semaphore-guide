@@ -118,10 +118,12 @@ cloud-init schema --config-file ~/onboard-new-vm.yaml
 ```
 
 It prints `Valid schema` and the file's path; warnings above that line about
-files it may not read are harmless. The same filled copy serves every new VM
-that this controller manages; keep it with the guide's folder, not in a
-public repository of your own (it holds only a public key, but it is your
-lab's).
+files it may not read are harmless. If it stops with `PermissionError` and
+names `/run/cloud-init/cloud.cfg` instead, cloud-init is installed on that
+machine but has never run there, as seen on RHEL 9.8: run the command with
+`sudo`. The same filled copy serves every new VM that this controller
+manages; keep it with the guide's folder, not in a public repository of your
+own (it holds only a public key, but it is your lab's).
 
 ### Optional: let the file set the sudo password
 
