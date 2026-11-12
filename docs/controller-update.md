@@ -14,6 +14,18 @@ second time, so use [`controller/update-controller.sh`](../controller/update-con
 instead of installing again. It works the same on Ubuntu and Enterprise Linux
 controllers, including the SELinux labels of the files it writes.
 
+The whole upgrade is at most four steps, each described below. A controller
+installed from `v1.8.0` or later needs only the first two.
+
+1. [Get the newer copy](#do-get-the-newer-copy-of-the-guide) and
+   [read the plan](#do-read-the-plan).
+2. [Apply the update](#do-apply-the-update) to the lab folder and the
+   Semaphore project.
+3. [Update the Ansible runtime and Semaphore's SSH settings](#do-update-the-ansible-runtime-and-semaphores-ssh-settings),
+   when the last lines of the plan name them.
+4. If you like, [bring machines you added earlier to the current
+   standard](#do-bring-earlier-machines-to-the-current-standard).
+
 ## Controllers installed from v1.8.0 or earlier
 
 Releases up to `v1.8.0` kept the controller tools in the guide's `scripts/`
@@ -80,7 +92,14 @@ The plan also lists the `content/` folders it would create for SCAP files you
 supply, the Semaphore variable groups, template tabs and templates it would
 add, the seeded templates it would put on a tab, and the seeded objects that
 this release replaces. It shows whether the readiness check passes before the
-update.
+update. Its last lines name the Ansible runtime and Semaphore's SSH settings
+when those are older than this copy, as
+[their section](#do-update-the-ansible-runtime-and-semaphores-ssh-settings)
+shows.
+
+To keep the plan, add `| tee ~/update-plan.txt` to the command. When the tool
+asks for a Semaphore login, the question appears on the terminal and stays out
+of the saved file.
 
 ## Do: apply the update
 
@@ -231,29 +250,98 @@ sudo bash controller/expose-semaphore.sh --mode https
 On a controller already exposed over HTTPS, or on loopback, this does not
 restart Semaphore, so running tasks continue.
 
-## SSH connection reuse for Semaphore jobs
+## Do: update the Ansible runtime and Semaphore's SSH settings
 
-Controllers installed before `v1.8.0` keep their `/etc/semaphore/config.json`,
-whose `ANSIBLE_SSH_ARGS` lacks the connection reuse that the lab's
-`ansible.cfg` gives terminal runs, so every task of a Semaphore job opens a new
-SSH login; the update does not change that file. To add the reuse, while no
-task runs:
+Two things live outside the lab folder and the Semaphore project, so the
+update tool leaves them alone. It ends its plan and its update by naming them
+when they are older than this copy:
 
-```bash
-sudo sed -i 's|"ANSIBLE_SSH_ARGS": "-o UserKnownHostsFile=|"ANSIBLE_SSH_ARGS": "-o ControlMaster=auto -o ControlPersist=60s -o UserKnownHostsFile=|' /etc/semaphore/config.json
-sudo systemctl restart semaphore
-sudo python3.12 controller/check-controller.py
+```text
+Also older than this copy of the guide, and left alone by update-controller.sh:
+  Ansible runtime /opt/ansible-venv: 2.20.8 installed, 2.21.4 pinned
+  SSH connection reuse for Semaphore jobs: not set
+To see and apply those: sudo bash controller/update-runtime.sh
 ```
 
-The readiness check should still report `"passed": true`. In the test,
-**Baseline preview** against four targets went from 19 to 14.5 seconds.
+- **The Ansible runtime.** Releases `v1.1.0` and `v1.2.0` installed ansible-core
+  2.20.8, and every later release 2.21.4. The 2.20 line has had security fixes
+  only since 2 November 2026.
+- **SSH connection reuse.** A controller installed before `v1.8.0` keeps its
+  `/etc/semaphore/config.json`, whose `ANSIBLE_SSH_ARGS` lacks the connection
+  reuse that the lab's `ansible.cfg` gives terminal runs, so every task of a
+  Semaphore job opens a new SSH login. In the test, **Baseline preview** against
+  four targets went from 19 to 14.5 seconds with it.
+
+[`controller/update-runtime.sh`](../controller/update-runtime.sh) updates both.
+Without options it shows its plan and changes nothing:
+
+```bash
+sudo bash controller/update-runtime.sh
+sudo bash controller/update-runtime.sh --apply
+```
+
+`--apply` stops Semaphore, installs the versions that
+[`requirements-controller.txt`](../requirements-controller.txt) pins into
+`/opt/ansible-venv` in place, adds the reuse to `ANSIBLE_SSH_ARGS`, starts
+Semaphore again and runs the readiness check. It ends with `Updated. The
+readiness check passed.`, and Semaphore was down for a few seconds in the test.
+It changes only what its plan lists and keeps packages you added to the virtual
+environment. A second run reports `Nothing to do: both match this copy of the
+guide.` While a Semaphore task runs it stops and changes nothing, because
+stopping Semaphore stops that task: run it when no task is running, or add
+`--force`.
+
+It does not change Semaphore itself or PostgreSQL. Every release so far
+installs Semaphore 2.19.12 and PostgreSQL 16, so those are already the versions
+this copy names.
+
+Before it changes anything, it saves two root-only files under
+`/root/ansible-lab-update/`: the list of installed packages,
+`ansible-venv-before-TIME.txt`, and the configuration as it was,
+`semaphore-config-before-TIME.json`, which holds Semaphore's secrets. If the
+installation fails, it installs the saved versions again by itself. To go back
+later, while no task runs:
+
+```bash
+sudo systemctl stop semaphore
+sudo /opt/ansible-venv/bin/pip install --requirement /root/ansible-lab-update/ansible-venv-before-TIME.txt
+sudo install -m 0640 -o root -g semaphore /root/ansible-lab-update/semaphore-config-before-TIME.json /etc/semaphore/config.json
+sudo systemctl start semaphore
+```
+
+## Do: bring earlier machines to the current standard
+
+Machines you added with an earlier release keep working. The update changes
+nothing on them, and their inventory lines and trusted host keys stay. A
+machine that was prepared by hand, or by an earlier copy of the onboarding
+files, can still differ from what the onboarding script sets up today: the
+sudo rule in `/etc/sudoers.d/90-ansible-lab`, the SSH drop-in that keeps
+`svc_ansible` key-only, and authorized keys that are exactly the service key.
+To bring such machines in line, run the one command of
+[Stage 2](stage-2-existing-machines.md) for them. `--keep-password` leaves each
+account's sudo password as it is:
+
+```bash
+bash controller/onboard-target.sh ADMIN@VM_ADDRESS ADMIN@OTHER_ADDRESS --keep-password
+```
+
+For a machine that the inventory lists under the name you gave it at the time,
+it says `Already present as NAME: ...; nothing changed.` and keeps that name,
+and the run ends with `Prepared and in the inventory: ...`. The account's
+authorized keys become exactly the service key, so pass `--extra-key FILE` for
+a key of your own that must stay. Afterwards
+`sudo python3.12 controller/lab-sudo.py` reports that the lab inventory already
+uses your **Lab sudo** key, and **Ping** and **Baseline preview** pass as
+before.
 
 ## Check
 
 The update ends with `Updated to RELEASE_TAG. The readiness check passed.`, or
 with the readiness checks that already failed before it. The **Task Templates**
 page shows the tabs **Lessons**, **Patching**, one **STIG ·** tab per system and
-**Operations** beside **All**, and **Ping** still succeeds. On a controller updated from
+**Operations** beside **All**, and **Ping** still succeeds. After
+`update-runtime.sh --apply`, `/opt/ansible-venv/bin/ansible --version` names
+the pinned ansible-core, and its plan reports nothing to do. On a controller updated from
 `v1.6.x`, the old **STIG** tab stays until you remove it; older controllers
 keep their old STIG templates under **All**.
 

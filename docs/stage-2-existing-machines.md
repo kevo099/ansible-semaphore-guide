@@ -195,8 +195,10 @@ without the option.
 
 Then run the command again for the unfinished machines only. Running it again
 for a machine that is done is safe: the script reports what is unchanged,
-`add-target.sh` says `Already present: ...`, and a password you type again is
-set again, so type the same one, or pass `--keep-password`.
+`add-target.sh` says `Already present: ...`, or `Already present as NAME: ...`
+for a machine that the inventory lists under a name you gave it earlier, and a
+password you type again is set again, so type the same one, or pass
+`--keep-password`.
 
 **A key of your own as well.** The account's authorized keys become exactly
 the service key, and any other key is removed. To also log in as `svc_ansible`

@@ -69,7 +69,12 @@ ansible-playbook playbooks/patch.yml --limit lab-ubuntu \
 ```
 
 The playbook reboots only if the OS reports that a reboot is needed. If none is
-needed, an unchanged boot ID is expected. For a deliberate forced reboot
+needed, an unchanged boot ID is expected. It never reboots the controller the
+run comes from, should that be in the inventory: the reboot would stop the run
+in the middle and leave the hosts after it unpatched. The controller is patched
+like any other host, and the report says `Reboot required and left alone`;
+restart it from its own terminal, with `sudo systemctl reboot`, when no task is
+running. For a deliberate forced reboot
 exercise, write a separately named playbook, make the choice explicit, and
 include connection and application checks. Do not hide power actions in a
 connectivity or audit job.

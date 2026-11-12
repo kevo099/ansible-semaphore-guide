@@ -634,6 +634,20 @@ class LoginTests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "SEMAPHORE_API_TOKEN to an administrator's API token"):
                 seed.log_in(client, "admin", ask=True)
 
+    def test_the_login_is_asked_for_on_standard_error(self):
+        # A plan saved to a file or piped must still show its question on the terminal.
+        self.password_file.unlink()
+        fake = FakeSemaphore()
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(seed.sys.stdin, "isatty", return_value=True), \
+                mock.patch("builtins.input", return_value="") as asked, \
+                mock.patch.object(seed.getpass, "getpass", return_value=PASSWORD), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(seed.log_in(fake, "admin", ask=True), fake.user)
+        asked.assert_called_once_with()
+        self.assertEqual(out.getvalue(), "")
+        self.assertTrue(err.getvalue().endswith("Semaphore administrator login [admin]: "), err.getvalue())
+
     def test_a_password_login_returns_the_user_once_its_session_works(self):
         fake = FakeSemaphore()
         self.assertEqual(seed.log_in(fake, "admin"), fake.user)

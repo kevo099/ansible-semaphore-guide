@@ -79,17 +79,38 @@
               {{ (lab_reboot_marker.stat.exists | default(false)) or
                  ((lab_reboot_hint.rc | default(0)) == 1) }}
 
+        # The boot ID is new at every start and differs between any two machines. The
+        # lookup reads it where Ansible runs, so the same value means this host is the
+        # controller the run comes from. Its reboot would stop the run in the middle and
+        # leave the hosts after it unpatched, so it is left for its own terminal.
+        - name: Read the boot ID
+          ansible.builtin.slurp:
+            src: /proc/sys/kernel/random/boot_id
+          register: lab_boot_id
+
+        - name: Recognize the controller this run comes from
+          ansible.builtin.set_fact:
+            lab_is_controller: >-
+              {{ (lab_boot_id.content | b64decode | trim) ==
+                 (lookup('ansible.builtin.file', '/proc/sys/kernel/random/boot_id') | trim) }}
+
         - name: Reboot only when required and explicitly approved
           ansible.builtin.reboot:
             reboot_timeout: 900
             connect_timeout: 10
             post_reboot_delay: 10
-          when: lab_reboot_needed and allow_reboot
+          when: lab_reboot_needed and allow_reboot and not lab_is_controller
 
         - name: Report the completed patch result
+          vars:
+            lab_controller_note: >-
+              required and left alone: {{ inventory_hostname }} is the controller this run
+              comes from, and its reboot would stop the run. Restart it from its own terminal
+              when no task is running, with sudo systemctl reboot
           ansible.builtin.debug:
             msg: >-
               {{ inventory_hostname }}: updates completed. Reboot
-              {{ 'completed and connection restored' if (lab_reboot_needed and allow_reboot)
+              {{ lab_controller_note if (lab_reboot_needed and allow_reboot and lab_is_controller)
+                 else ('completed and connection restored' if (lab_reboot_needed and allow_reboot)
                  else ('required; left for the operator' if lab_reboot_needed
-                 else 'not requested by the operating system') }}.
+                 else 'not requested by the operating system')) }}.

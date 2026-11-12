@@ -180,6 +180,7 @@ The files you run yourself, one by one:
 | [`controller/expose-semaphore.sh`](controller/expose-semaphore.sh) | The controller | Publishes the UI on the VM's address behind an nginx TLS proxy, or in plain HTTP, or reverts to loopback. |
 | [`controller/check-controller.py`](controller/check-controller.py) | The controller | Checks services, permissions and loopback listeners without printing credentials. |
 | [`controller/update-controller.sh`](controller/update-controller.sh) | The controller | Brings an installed controller up to this copy of the guide; plan by default. |
+| [`controller/update-runtime.sh`](controller/update-runtime.sh) | The controller | Brings an older controller's Ansible runtime and Semaphore's SSH connection reuse up to this copy of the guide; plan by default. |
 
 The lesson and operations playbooks:
 

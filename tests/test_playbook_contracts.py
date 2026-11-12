@@ -673,6 +673,58 @@ class RebootTests(unittest.TestCase):
         self.assertIn("A real run also needs the acknowledgement, REBOOT NOW.", preview)
 
 
+class PatchControllerTests(unittest.TestCase):
+    """A patch run that reaches the controller it comes from never reboots it."""
+
+    def block(self):
+        [play] = yaml.safe_load((ROOT / "playbooks" / "patch.yml").read_text())
+        return play, named(play["tasks"], "Detect and optionally handle a reboot after real patching")["block"]
+
+    def test_the_reboot_is_skipped_for_the_controller_itself(self):
+        _play, block = self.block()
+        names = [task["name"] for task in block]
+        [reboot] = [task for task in block if "ansible.builtin.reboot" in task]
+        self.assertEqual(reboot["when"], "lab_reboot_needed and allow_reboot and not lab_is_controller")
+        read = named(block, "Read the boot ID")
+        self.assertEqual(read["ansible.builtin.slurp"]["src"], "/proc/sys/kernel/random/boot_id")
+        self.assertLess(names.index(read["name"]), names.index("Recognize the controller this run comes from"))
+        self.assertLess(names.index("Recognize the controller this run comes from"), names.index(reboot["name"]))
+        # The whole block runs only after real patching, so a preview reads nothing more.
+        guarded = named(self.block()[0]["tasks"], "Detect and optionally handle a reboot after real patching")
+        self.assertEqual(guarded["when"], "not ansible_check_mode")
+
+    @unittest.skipUnless(Templar and Path("/proc/sys/kernel/random/boot_id").exists(),
+                         "needs ansible-core, as CI installs it, and Linux")
+    def test_the_controller_is_told_apart_by_its_boot_id_and_reported(self):
+        play, block = self.block()
+        from ansible.plugins.loader import init_plugin_loader
+        try:
+            init_plugin_loader([])
+        except RuntimeError:  # set up already by an earlier test
+            pass
+        here = Path("/proc/sys/kernel/random/boot_id").read_text()
+        fact = named(block, "Recognize the controller")["ansible.builtin.set_fact"]["lab_is_controller"]
+        report = named(block, "Report the completed patch result")
+        cases = ((here, True, True, "required and left alone: lab-alma is the controller this run comes from, and "
+                                    "its reboot would stop the run. Restart it from its own terminal when no task "
+                                    "is running, with sudo systemctl reboot"),
+                 ("1111-aaaa\n", True, True, "completed and connection restored"),
+                 (here, True, False, "required; left for the operator"),
+                 (here, False, True, "not requested by the operating system"))
+        for content, needed, allowed, expected in cases:
+            with self.subTest(controller=content == here, needed=needed, allowed=allowed):
+                variables = {"inventory_hostname": "lab-alma", "lab_boot_id": encoded(content),
+                             "lab_reboot_needed": needed, "allow_reboot": allowed}
+                is_controller = rendered(play, variables, fact)
+                self.assertIs(is_controller, content == here)
+                variables.update(lab_is_controller=is_controller,
+                                 lab_controller_note=trusted(report["vars"]["lab_controller_note"]))
+                reboots = rendered(play, variables, "{{ lab_reboot_needed and allow_reboot and not lab_is_controller }}")
+                self.assertIs(reboots, needed and allowed and content != here)
+                message = " ".join(rendered(play, variables, report["ansible.builtin.debug"]["msg"]).split())
+                self.assertEqual(message, f"lab-alma: updates completed. Reboot {expected}.")
+
+
 class PackageLockTests(unittest.TestCase):
     """A fresh VM can hold the package lock for minutes while it installs the image's own updates.
 

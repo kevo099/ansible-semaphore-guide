@@ -478,7 +478,10 @@ def log_in(client, admin_login, ask=False):
     print("The installer's admin password is missing or no longer logs in (changed in the UI?).",
           file=sys.stderr)
     try:
-        login = input(f"Semaphore administrator login [{admin_login}]: ").strip() or admin_login
+        # On standard error, as the line above and getpass's prompt are: with the plan saved
+        # to a file or piped, a prompt on standard output would go there and look like a hang.
+        print(f"Semaphore administrator login [{admin_login}]: ", end="", file=sys.stderr, flush=True)
+        login = input().strip() or admin_login
         password = getpass.getpass("Password: ")
     except (EOFError, KeyboardInterrupt):
         raise SystemExit("\nNo login given; nothing was changed.") from None

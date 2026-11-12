@@ -169,19 +169,22 @@ if [[ -n "$trusted" ]] && printf '%s\n' "$trusted" | ssh-keygen -lf - 2>/dev/nul
   trusted_matches=yes
 fi
 key_only=no
+# The section a host's line is under; a line above every section is in Ansible's ungrouped.
+section_of() {
+  awk -v n="$1" '
+      BEGIN {section = "ungrouped"}
+      match($0, /^[[:space:]]*\[[^]]+\]/) {
+        section = substr($0, RSTART, RLENGTH); sub(/^[[:space:]]*\[/, "", section); sub(/\]$/, "", section); next
+      }
+      $1 == (n "") {print section; exit}' "$inventory"
+}
 if [[ -n "$existing" ]]; then
   if [[ "$existing" != "$name ansible_host=$address" ]]; then
     echo "Inventory already contains $name with other settings ($existing); edit it by hand instead."
     echo "If that line is an earlier machine's, retire it first: sudo bash controller/remove-target.sh --name $name"
     exit 1
   fi
-  # The section the line is under; a line above every section is in Ansible's ungrouped.
-  listed_group=$(awk -v n="$name" '
-      BEGIN {section = "ungrouped"}
-      match($0, /^[[:space:]]*\[[^]]+\]/) {
-        section = substr($0, RSTART, RLENGTH); sub(/^[[:space:]]*\[/, "", section); sub(/\]$/, "", section); next
-      }
-      $1 == (n "") {print section; exit}' "$inventory")
+  listed_group=$(section_of "$name")
   if [[ "$listed_group" != "$group" ]]; then
     echo "Inventory lists $name under [$listed_group], not under [$group]; edit it by hand instead."
     echo "If that line is an earlier machine's, retire it first: sudo bash controller/remove-target.sh --name $name"
@@ -203,6 +206,18 @@ if [[ -n "$existing" ]]; then
   key_only=yes
 fi
 if [[ -n "$owner" ]]; then
+  # The same machine under the name it was given when it was added, by hand or by an
+  # earlier release: the name here is only the one the machine printed, the line is the
+  # plain one this script writes, under the same group, and the key the machine presents
+  # is the one already trusted for the address. A name given with --name is a request for
+  # that name, so it is refused below as before.
+  owner_line=$(awk -v n="$owner" '$1 == (n "") {print $1, $2, NF; exit}' "$inventory")
+  if [[ $name_pasted == yes && $trusted_matches == yes && "$owner_line" == "$owner ansible_host=$address 2" &&
+        $(section_of "$owner") == "$group" ]]; then
+    echo "Already present as $owner: $address is in $inventory under that name and its verified key is trusted; nothing changed."
+    echo "The machine calls itself $name. To list it under that name instead, retire $owner first: sudo bash controller/remove-target.sh --name $owner"
+    exit 0
+  fi
   echo "Inventory already lists $address as $owner; edit it by hand instead."
   echo "If $owner is an earlier machine at that address, retire it first: sudo bash controller/remove-target.sh --name $owner"
   exit 1

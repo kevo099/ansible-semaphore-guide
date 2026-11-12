@@ -190,6 +190,42 @@ class AddTargetTests(unittest.TestCase):
         self.assertIn(f"already lists {TEST_NET}.12 as lab-alma", result.stdout)
         self.assertEqual(self.state(), before)
 
+    def test_a_machine_listed_under_an_earlier_name_is_already_present(self):
+        # Added by hand or by an earlier release as lab-alma; the machine calls itself alma9-vm.
+        self.assertEqual(self.add().returncode, 0)
+        before = self.state()
+        result = self.paste(self.info(name="alma9-vm"))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(f"Already present as lab-alma: {TEST_NET}.12 is in {self.inventory} under that name and its "
+                      "verified key is trusted; nothing changed.", result.stdout)
+        self.assertIn("retire lab-alma first: sudo bash controller/remove-target.sh --name lab-alma", result.stdout)
+        self.assertEqual(self.state(), before)
+
+    def test_an_earlier_name_is_refused_when_anything_else_differs(self):
+        self.assertEqual(self.add().returncode, 0)
+        added = self.state()
+        cases = {
+            # A name given as an option asks for that name.
+            "a name given as an option": lambda: self.paste(self.info(name=None), "--name", "alma9-vm"),
+            # The address answers with another key than the trusted one: not known to be the same machine.
+            "another key": lambda: self.paste(self.info(name="alma9-vm", fingerprint=self.other_key["fingerprint"]),
+                                              served=self.other_key),
+            "another group": lambda: self.paste(self.info(name="alma9-vm", group="ubuntu")),
+        }
+        for label, run in cases.items():
+            with self.subTest(label):
+                result = run()
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn(f"already lists {TEST_NET}.12 as lab-alma; edit it by hand instead.", result.stdout)
+                self.assertNotIn("Already present", result.stdout)
+                self.assertEqual(self.state(), added)
+        # A line with settings of its own is for editing by hand.
+        self.inventory.write_text(added[0].replace(f"lab-alma ansible_host={TEST_NET}.12",
+                                                   f"lab-alma ansible_host={TEST_NET}.12 ansible_port=2222"))
+        result = self.paste(self.info(name="alma9-vm"))
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn(f"already lists {TEST_NET}.12 as lab-alma; edit it by hand instead.", result.stdout)
+
     def test_the_same_name_with_other_settings_is_refused(self):
         self.assertEqual(self.add().returncode, 0)
         before = self.state()

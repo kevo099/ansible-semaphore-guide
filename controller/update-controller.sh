@@ -23,7 +23,9 @@ up to the version of the guide in this copy, without reinstalling anything:
   - lists the seeded templates, tab and variable group this release replaces,
     and keeps them unless you pass --remove-replaced.
 It does not change Semaphore, PostgreSQL, Ansible, the inventory, keys or other
-template settings. It stops, changing nothing, when the lab folder has
+template settings; when the Ansible runtime or Semaphore's SSH settings are older
+than this copy, it says so and names controller/update-runtime.sh, which updates
+those. It stops, changing nothing, when the lab folder has
 uncommitted changes to guide files, staged changes, links where guide files
 belong, or files that both you and this release changed. If writing the files
 fails part way, it puts back the ones it wrote.
@@ -60,4 +62,12 @@ done
 [[ $(id -u) == 0 ]] || { echo 'Run it with sudo on the controller.' >&2; exit 1; }
 command -v python3.12 >/dev/null || { echo 'python3.12 is missing; the installer put it there.' >&2; exit 1; }
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-exec python3.12 "$script_dir/update-controller.py" "$@"
+status=0
+python3.12 "$script_dir/update-controller.py" "$@" || status=$?
+# The Ansible runtime and Semaphore's SSH settings are outside this tool's reach. After a
+# plan or an update, name them when they are older than this copy too; this never changes
+# the result above.
+if [[ $status == 0 || $status == 1 ]]; then
+  bash "$script_dir/update-runtime.sh" --hint || true
+fi
+exit "$status"
