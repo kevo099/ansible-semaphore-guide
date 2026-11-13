@@ -357,7 +357,7 @@ The output ends like this; the values are this machine's:
 host: HOSTNAME (AlmaLinux 9.6 (Sage Margay))
 packages: present
 account: svc_ansible created; authorized keys replaced:
-  4096 SHA256:... ansible-practice (RSA)
+  4096 SHA256:... ansible-automation (RSA)
 password: set from PASSWORD_HASH
 sudo: /etc/sudoers.d/90-ansible-lab written; svc_ansible's own password is required
 ssh: /etc/ssh/sshd_config.d/70-ansible-lab.conf written; sshd.service active; key only for svc_ansible, checked from CONTROLLER_IP to 1 local address and port pair(s)

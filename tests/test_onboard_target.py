@@ -114,7 +114,7 @@ class OnboardTargetTests(unittest.TestCase):
         for name, text in (("ssh", FAKE_SSH), ("scp", FAKE_SCP), ("sudo", FAKE_SUDO), ("ssh-keygen", FAKE_SSH_KEYGEN)):
             (self.bin / name).write_text(text)
             (self.bin / name).chmod(0o755)
-        subprocess.run(["ssh-keygen", "-q", "-t", "rsa", "-b", "2048", "-N", "", "-C", "ansible-practice",
+        subprocess.run(["ssh-keygen", "-q", "-t", "rsa", "-b", "2048", "-N", "", "-C", "ansible-guide",
                         "-f", str(work / "service-key")], check=True)
         shutil.copy(work / "service-key.pub", self.log / "service-key.pub")
         self.env = {"PATH": f"{self.bin}:{os.environ['PATH']}", "HOME": str(self.home), "FAKE_LOG": str(self.log),
@@ -441,10 +441,10 @@ class OnboardLinuxOptionTests(unittest.TestCase):
     def test_keys_and_hash_come_from_their_files(self):
         with tempfile.TemporaryDirectory() as directory:
             keys, stored = Path(directory) / "keys.pub", Path(directory) / "hash"
-            keys.write_text("ssh-rsa AAAAB3NzaC1yc2E= ansible-practice\n")
+            keys.write_text("ssh-rsa AAAAB3NzaC1yc2E= ansible-guide\n")
             stored.write_text("\n$6$salt$" + "a" * 86 + "\r\n")
             status, output = self.section(keys_file=str(keys), hash_file=str(stored))
-            self.assertEqual((status, output), (0, "KEYS: ssh-rsa AAAAB3NzaC1yc2E= ansible-practice\nHASH: valid\n"))
+            self.assertEqual((status, output), (0, "KEYS: ssh-rsa AAAAB3NzaC1yc2E= ansible-guide\nHASH: valid\n"))
             for variables, reason in (({"keys_file": str(keys) + ".missing"}, "cannot read the key file"),
                                       ({"hash_file": str(stored) + ".missing"}, "cannot read the hash file"),
                                       ({"hash_file": str(stored), "ask_password": "yes"}, "give the password one way")):

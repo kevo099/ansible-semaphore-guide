@@ -313,7 +313,7 @@ controller_start() {
 controller_seed_lab() {
   # 10. Automation key pair. Unencrypted by explicit choice for an unattended lab;
   #     the private key never leaves root-only storage except into the Key Store.
-  ssh-keygen -q -t rsa -b 4096 -N '' -C ansible-practice -f /etc/semaphore/svc_ansible
+  ssh-keygen -q -t rsa -b 4096 -N '' -C ansible-automation -f /etc/semaphore/svc_ansible
   chmod 0600 /etc/semaphore/svc_ansible
   chmod 0644 /etc/semaphore/svc_ansible.pub
   # A copy of the public key in the editor's home, where the onboarding steps look
@@ -362,9 +362,9 @@ INVENTORY
   # No hook samples from Git's templates: the folder needs none, and where fapolicyd is
   # active an account other than root may not read one of them, which stops git init.
   runuser -u "$editor" -- git -C "$lab_dir" init -q -b main --template=
-  runuser -u "$editor" -- git -C "$lab_dir" -c user.name=ansible-practice -c user.email=ansible-practice@example.test \
+  runuser -u "$editor" -- git -C "$lab_dir" -c user.name=ansible-guide -c user.email=ansible-guide@example.test \
     add -A
-  runuser -u "$editor" -- git -C "$lab_dir" -c user.name=ansible-practice -c user.email=ansible-practice@example.test \
+  runuser -u "$editor" -- git -C "$lab_dir" -c user.name=ansible-guide -c user.email=ansible-guide@example.test \
     commit -q -m 'Seed the local lab folder from the guide'
   # Editor owns everything; the service only needs to read. Git history included, so a later
   # push from this folder needs no permission changes.

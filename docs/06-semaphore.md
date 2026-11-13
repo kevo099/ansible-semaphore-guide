@@ -13,7 +13,7 @@ older releases call variable groups “environments.” Do not assume a feature 
 newer online documentation exists in the pinned release.
 
 If you used either [installer](stage-1-controller.md),
-the **Ansible Practice** project, its SSH key, inventory, repository, variable
+the **Ansible Automation** project, its SSH key, inventory, repository, variable
 groups and 24 templates already exist. Do not create a second project with
 the same name. Read steps 1-6 to understand those objects, and add the sudo
 credential as
@@ -48,7 +48,7 @@ certificate, so keep LDAP on a network you trust.
 
 ## Step 1: create a project
 
-Create a project named **Ansible Practice**. Use one project while learning so
+Create a project named **Ansible Automation**. Use one project while learning so
 you can easily see how its objects relate. Do not add automatic schedules yet.
 
 **Concept:** a project groups automation resources and access to them. It does
@@ -61,7 +61,7 @@ generated in your own lab:
 
 | Entry name | Type | Contents |
 | --- | --- | --- |
-| `Practice target SSH` | SSH Key | Username `svc_ansible`; the dedicated automation private key; its passphrase if required. |
+| `Target SSH key` | SSH Key | Username `svc_ansible`; the dedicated automation private key; its passphrase if required. |
 | `Ubuntu sudo` | Login with password | Username **left empty**; Password: the Ubuntu target's sudo password for `svc_ansible`. |
 | `Alma sudo` | Login with password | Username **left empty**; Password: the Alma target's sudo password for `svc_ansible`. |
 | `No repository credential` | None | Used for the public HTTPS example repository. A new project already contains an entry named **None** of this type; you can use it instead. |
@@ -96,7 +96,7 @@ set **Type** to **Static** and enter:
 lab-ubuntu ansible_host=ubuntu.example.test ansible_user=svc_ansible ansible_python_interpreter=/usr/bin/python3
 ```
 
-Replace the example address. Select **Practice target SSH** as **User
+Replace the example address. Select **Target SSH key** as **User
 Credentials** and **Ubuntu sudo** as **Sudo Credentials**. The sudo list only
 offers “Login with password” entries.
 
@@ -145,7 +145,7 @@ them separate allows the same playbook to run against different approved labs.
 
 ## Step 5: create variable groups
 
-Use **Variable Groups → New Group**. Create **Practice defaults** with empty
+Use **Variable Groups → New Group**. Create **Defaults** with empty
 extra variables:
 
 ```json
@@ -167,21 +167,21 @@ group's **Secrets** tab is not needed for these lessons.
 
 Use **Task Templates → New template → Ansible Playbook**. Fill in **Name**,
 **Repository** (**Guide examples**), **Path to playbook file** (relative to the
-repository root), **Inventory** and **Variable Groups** (**Practice defaults**,
+repository root), **Inventory** and **Variable Groups** (**Defaults**,
 except for the explicitly named reboot template). Under **Ansible options**,
 use **Limit → Add limit** for the target. Under **CLI args**, add each extra
 argument as its own entry.
 
 | Template | Path to playbook file | Limit | CLI args |
 | --- | --- | --- | --- |
-| Ubuntu — Ping | `playbooks/ping.yml` | `lab-ubuntu` | none |
-| Ubuntu — Baseline preview | `playbooks/baseline.yml` | `lab-ubuntu` | `--check`, `--diff` |
-| Ubuntu — Baseline apply | `playbooks/baseline.yml` | `lab-ubuntu` | `--diff` |
-| Ubuntu — Users | `playbooks/users.yml` | `lab-ubuntu` | none |
-| Ubuntu — Webserver | `playbooks/webserver.yml` | `lab-ubuntu` | none |
-| Ubuntu — Patch preview | `playbooks/patch.yml` | `lab-ubuntu` | `--check`, `--diff` |
-| Ubuntu — Patch, no reboot | `playbooks/patch.yml` | `lab-ubuntu` | none |
-| Ubuntu — Patch, allow required reboot | `playbooks/patch.yml` | `lab-ubuntu` | none; select the **Allow required reboot** variable group |
+| Ubuntu — Ping | `playbooks/baseline/ping.yml` | `lab-ubuntu` | none |
+| Ubuntu — Baseline preview | `playbooks/baseline/baseline.yml` | `lab-ubuntu` | `--check`, `--diff` |
+| Ubuntu — Baseline apply | `playbooks/baseline/baseline.yml` | `lab-ubuntu` | `--diff` |
+| Ubuntu — Users | `playbooks/examples/users.yml` | `lab-ubuntu` | none |
+| Ubuntu — Webserver | `playbooks/examples/webserver.yml` | `lab-ubuntu` | none |
+| Ubuntu — Patch preview | `playbooks/patching/patch.yml` | `lab-ubuntu` | `--check`, `--diff` |
+| Ubuntu — Patch, no reboot | `playbooks/patching/patch.yml` | `lab-ubuntu` | none |
+| Ubuntu — Patch, allow required reboot | `playbooks/patching/patch.yml` | `lab-ubuntu` | none; select the **Allow required reboot** variable group |
 
 Make equivalent Alma templates using **Alma practice** and `lab-alma`. Leave the
 **Prompts** and **Ansible prompts** check boxes and schedules off while you learn
@@ -203,13 +203,14 @@ field and Galaxy role and collection install arguments are not in 2.19.12. The
 does not list those fields.
 
 **Optional: group templates in tabs.** Semaphore calls them views. On **Task
-Templates**, select the pencil next to **All**, add a tab such as `Lessons` or
+Templates**, select the pencil next to **All**, add a tab such as `Baseline` or
 `Patching`, and save; then open each template and choose its tab in the
 **View** field. A tab only changes how the list is shown: a template's limit,
 variables and access stay the same. Tabs cannot be nested, so the seeded
-controllers create **Lessons** and **Patching**, one flat tab per STIG
-system and version, such as **STIG · RHEL 9** and **STIG · Ubuntu 24.04**, and
-**Operations**, with **Health report** and **Reboot one target**. They start
+controllers create one tab per feature: **Baseline** and **Patching**, one
+flat tab per STIG system and version, such as **STIG · RHEL 9** and
+**STIG · Ubuntu 24.04**, **Operations**, with **Health report** and **Reboot
+one target**, and **Examples**, with **Users** and **Webserver**. They start
 each STIG template's name with its system, so the **All** tab still shows
 which system each one is for.
 

@@ -19,7 +19,7 @@ key and an explicitly configured privilege-escalation path.
 
 ```bash
 install -d -m 0700 ~/.ssh
-ssh-keygen -t rsa -b 4096 -f ~/.ssh/ansible_lab -C ansible-practice
+ssh-keygen -t rsa -b 4096 -f ~/.ssh/ansible_lab -C ansible-automation
 ```
 
 Use a fresh filename. If it already exists, inspect the existing key's ownership
@@ -232,7 +232,7 @@ Next, create the controller's private inventory from the repository root:
 cp inventories/lab.ini.example inventories/lab.ini
 $EDITOR inventories/lab.ini
 /opt/ansible-venv/bin/ansible-inventory --graph
-/opt/ansible-venv/bin/ansible-playbook playbooks/ping.yml \
+/opt/ansible-venv/bin/ansible-playbook playbooks/baseline/ping.yml \
   --limit lab-ubuntu --private-key ~/.ssh/ansible_lab
 /opt/ansible-venv/bin/ansible lab-ubuntu -b -K \
   --private-key ~/.ssh/ansible_lab -m ansible.builtin.command -a 'id -u'

@@ -1,0 +1,66 @@
+---
+- name: An example group and ordinary local accounts
+  hosts: lab
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    lab_example_users:
+      - lab_alice
+      - lab_bob
+  pre_tasks:
+    - name: Check scope and supported operating system
+      ansible.builtin.import_tasks: ../tasks/preflight.yml
+      tags: always
+
+    # Releases before v1.12.0 called the list lab_practice_users. A value still given
+    # under that name would be ignored without a word, so it stops the run instead.
+    - name: Refuse the list's earlier name
+      ansible.builtin.assert:
+        that:
+          - lab_practice_users is not defined
+        fail_msg: The variable lab_practice_users is now lab_example_users; rename it where you set it.
+        quiet: true
+
+    - name: Keep this exercise within its reserved account names
+      ansible.builtin.assert:
+        that:
+          - lab_example_users is sequence
+          - lab_example_users is not string
+          - lab_example_users | length > 0
+          - lab_example_users | unique | length == lab_example_users | length
+          - lab_example_users | select('match', '^lab_[a-z][a-z0-9_]{0,19}$') | list | length == lab_example_users | length
+        fail_msg: Use a nonempty list of unique lab_ names such as lab_alice.
+        quiet: true
+  tasks:
+    - name: Inspect whether the example group already exists
+      ansible.builtin.getent:
+        database: group
+        key: lab_learners
+        fail_key: false
+
+    - name: Create the example group
+      ansible.builtin.group:
+        name: lab_learners
+        state: present
+
+    - name: Create ordinary users with locked passwords
+      ansible.builtin.user:
+        name: "{{ item }}"
+        comment: Ansible example account
+        group: lab_learners
+        groups: ''
+        append: false
+        shell: /bin/bash
+        create_home: true
+        password_lock: true
+        state: present
+      loop: "{{ lab_example_users }}"
+      when: not ansible_check_mode or ansible_facts['getent_group']['lab_learners'] is not none
+
+    - name: Explain a first-run preview limitation
+      ansible.builtin.debug:
+        msg: >-
+          CHECK MODE: lab_learners does not exist yet. Its creation was predicted;
+          user creation waits for a real group. No login key or sudo access is added.
+      when: ansible_check_mode and ansible_facts['getent_group']['lab_learners'] is none

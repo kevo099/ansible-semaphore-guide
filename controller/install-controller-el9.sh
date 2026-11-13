@@ -73,9 +73,10 @@ Plan:
      keeps inventories/, host_vars/ and group_vars/ out of the folder's Git
      history. Confirm the semaphore account can read the inventory.
  12. Seed Semaphore through its API: project, keys, local folder repository,
-     file inventory, variable groups and 24 scoped task templates on the
-     tabs Lessons, Patching, one STIG tab per system and version (RHEL 9,
-     AlmaLinux 9, Rocky Linux 9 and Ubuntu 24.04) and Operations.
+     file inventory, variable groups and 24 scoped task templates on one tab
+     per feature: Baseline, Patching, one STIG tab per system and version
+     (RHEL 9, AlmaLinux 9, Rocky Linux 9 and Ubuntu 24.04), Operations and
+     Examples.
  13. With --expose, publish the UI on this VM's address, or the one --address
      names (TLS proxy or plain HTTP). If only this step fails, the installer says
      so and prints the exposure command to run again.

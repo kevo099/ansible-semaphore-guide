@@ -20,7 +20,7 @@ OpenBao's HTTP API itself, using only `ansible.builtin` modules.
 
 ## Do: prepare the practice objects
 
-**Where: browser, as the practice project's administrator.**
+**Where: browser, as an administrator of the Ansible Automation project.**
 
 Complete [the first Semaphore job](../06-semaphore.md) first. Use a reviewed
 repository revision containing
@@ -77,7 +77,7 @@ restart. The campaign saw HTTP 404 while JWT was disabled, then one `EC`,
 `P-256`, `ES256` signing key when enabled. This URL is at the web root, outside `/api`; it
 publishes the public key, not a task token. Stop if the key set is unavailable.
 
-**Where: browser, as the practice project's administrator.**
+**Where: browser, as an administrator of the Ansible Automation project.**
 
 Edit both templates and enable **Issue JWT to task runner**. Set **JWT audience**
 to `http://127.0.0.1:8200` on both. Set **JWT TTL** to `5m` on the allowed template
@@ -229,7 +229,7 @@ Expiry and altered-token denials remain **not tested**.
 
 ## Do: clean up the exercise
 
-**Where: browser, as the practice project's administrator.**
+**Where: browser, as an administrator of the Ansible Automation project.**
 
 Delete the two **JWT practice** templates, then **JWT practice localhost**;
 keep the pre-existing repository and other objects.

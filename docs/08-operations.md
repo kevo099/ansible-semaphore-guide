@@ -33,13 +33,13 @@ Semaphore's job schedules.
 ## Patching one target at a time
 
 **Where: controller.** Establish a usable recovery point and a maintenance
-window before package changes. Read [`patch.yml`](../playbooks/patch.yml).
+window before package changes. Read [`patch.yml`](../playbooks/patching/patch.yml).
 
 ```bash
-ansible-playbook playbooks/patch.yml --limit lab-ubuntu --list-hosts
-ansible-playbook playbooks/patch.yml --limit lab-ubuntu \
+ansible-playbook playbooks/patching/patch.yml --limit lab-ubuntu --list-hosts
+ansible-playbook playbooks/patching/patch.yml --limit lab-ubuntu \
   --private-key ~/.ssh/ansible_lab -K --check --diff
-ansible-playbook playbooks/patch.yml --limit lab-ubuntu \
+ansible-playbook playbooks/patching/patch.yml --limit lab-ubuntu \
   --private-key ~/.ssh/ansible_lab -K
 ```
 
@@ -64,7 +64,7 @@ cat /proc/sys/kernel/random/boot_id
 Then, from the controller:
 
 ```bash
-ansible-playbook playbooks/patch.yml --limit lab-ubuntu \
+ansible-playbook playbooks/patching/patch.yml --limit lab-ubuntu \
   --private-key ~/.ssh/ansible_lab -K -e '{"allow_reboot":true}'
 ```
 

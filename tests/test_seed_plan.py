@@ -6,6 +6,8 @@ from pathlib import Path
 import re
 import unittest
 
+import yaml
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -19,7 +21,7 @@ def load(name):
 
 seed = load("seed-semaphore")
 IDS = {"none_key": 1, "ssh_key": 2, "repository": 3, "inventory": 4,
-       "environments": {"Practice defaults": 5, "Allow required reboot": 6, "DISA SCAP file · RHEL 9": 8,
+       "environments": {"Defaults": 5, "Allow required reboot": 6, "DISA SCAP file · RHEL 9": 8,
                         "DISA SCAP file · Ubuntu 24.04": 9}}
 GROUP_OF_PLAYBOOK = {f"playbooks/stig/{folder}/audit.yml": group for _label, folder, group, _file in seed.STIG_SYSTEMS}
 
@@ -51,7 +53,7 @@ class SeedPlanTests(unittest.TestCase):
             arguments = json.loads(template["arguments"])
             # The limit lives in the template's Ansible options, never duplicated as an argument.
             self.assertNotIn("--limit", " ".join(arguments))
-            if template["playbook"].endswith("/apply.yml") or template["playbook"] == "playbooks/reboot.yml":
+            if template["playbook"].endswith("/apply.yml") or template["playbook"] == "playbooks/operations/reboot.yml":
                 self.assertEqual(template["task_params"], {"limit": [], "allow_override_limit": True})
             elif template["playbook"] in GROUP_OF_PLAYBOOK:
                 self.assertEqual(template["task_params"], {"limit": [GROUP_OF_PLAYBOOK[template["playbook"]]]})
@@ -83,7 +85,7 @@ class SeedPlanTests(unittest.TestCase):
             if reboot_env in template["environment_ids"]:
                 self.assertIn("allow required reboot", template["name"].lower())
         self.assertEqual(json.loads(plan["environments"]["Allow required reboot"]["json"]), {"allow_reboot": True})
-        self.assertEqual(json.loads(plan["environments"]["Practice defaults"]["json"]), {})
+        self.assertEqual(json.loads(plan["environments"]["Defaults"]["json"]), {})
 
     def test_api_bodies_may_be_json_or_plain_text(self):
         self.assertEqual(seed.parse_body(b"pong"), "pong")
@@ -96,29 +98,59 @@ class SeedPlanTests(unittest.TestCase):
                 self.assertEqual(template["survey_vars"][0]["name"], "recovery_snapshot_ack")
                 self.assertTrue(template["survey_vars"][0]["required"])
                 self.assertEqual(template["survey_vars"][0]["values"][0]["value"], "SNAPSHOT READY")
-            elif template["playbook"] == "playbooks/reboot.yml":
+            elif template["playbook"] == "playbooks/operations/reboot.yml":
                 self.assertEqual(template["survey_vars"], seed.REBOOT_PROMPT)
             else:
                 self.assertEqual(template["survey_vars"], [])
 
-    def test_the_operations_tab_comes_last_with_its_two_templates(self):
+    def test_the_tabs_are_the_features_in_the_order_releases_added_them(self):
         plan = self.plan()
-        # An update adds a missing tab after the existing ones, so a fresh seed puts it last too.
-        self.assertEqual(seed.VIEWS[-1], ("Operations", ["Health report", "Reboot one target"]))
+        # An update adds a missing tab after the existing ones, so a fresh seed puts the newest last too.
+        self.assertEqual(seed.VIEWS[-2:], [("Operations", ["Health report", "Reboot one target"]),
+                                           ("Examples", ["Users", "Webserver"])])
         self.assertEqual([title for title, _names in seed.VIEWS],
-                         ["Lessons", "Patching"] + [f"STIG · {label}" for label, *_rest in seed.STIG_SYSTEMS]
-                         + ["Operations"])
+                         ["Baseline", "Patching"] + [f"STIG · {label}" for label, *_rest in seed.STIG_SYSTEMS]
+                         + ["Operations", "Examples"])
+        self.assertEqual(seed.VIEWS[0], ("Baseline", ["Ping", "Baseline preview", "Baseline apply"]))
         positions = {title: body["position"] for title, body in plan["views"].items()}
-        self.assertEqual(max(positions, key=positions.get), "Operations")
+        self.assertEqual(max(positions, key=positions.get), "Examples")
+        # Semaphore's own All tab has position 0; a seeded tab there would share its place.
+        self.assertEqual(sorted(positions.values()), list(range(1, len(seed.VIEWS) + 1)))
+        # No name of today has the wording of the earlier releases.
+        named = ([seed.PROJECT_NAME, seed.REPOSITORY_NAME, seed.INVENTORY_NAME, seed.SSH_KEY_NAME, seed.SUDO_KEY_NAME,
+                  seed.ADMIN_NAME] + list(seed.VARIABLE_GROUPS) + [title for title, _names in seed.VIEWS]
+                 + [lesson[0] for lesson in seed.LESSONS])
+        for name in named:
+            self.assertNotRegex(name, r"(?i)practice|\blab\b|lesson")
+
+    def test_every_moved_playbook_keeps_a_thin_file_at_its_earlier_path(self):
+        root = Path(__file__).resolve().parents[1]
+        for earlier, moved in seed.MOVED_PLAYBOOKS.items():
+            with self.subTest(playbook=earlier):
+                self.assertTrue((root / moved).is_file())
+                (entry,) = yaml.safe_load((root / earlier).read_text())
+                # Relative to the earlier file, which is directly in playbooks/.
+                self.assertEqual(entry, {"name": "Run the playbook from its folder",
+                                         "ansible.builtin.import_playbook": moved.removeprefix("playbooks/")})
+        # Nothing else is directly in playbooks/, and every seeded template names a path of today.
+        self.assertEqual(sorted(path.name for path in (root / "playbooks").glob("*.yml")),
+                         sorted(path.removeprefix("playbooks/") for path in seed.MOVED_PLAYBOOKS))
+        for lesson in seed.LESSONS:
+            self.assertNotIn(lesson[1], seed.MOVED_PLAYBOOKS)
+            self.assertTrue((root / lesson[1]).is_file(), lesson[1])
+        self.assertTrue((root / "playbooks" / "site" / "README.md").is_file())
+
+    def test_the_operations_templates_are_scoped_as_their_playbooks_need(self):
+        plan = self.plan()
         templates = {t["name"]: t for t in plan["templates"]}
         report, reboot = templates["Health report"], templates["Reboot one target"]
         self.assertEqual((report["playbook"], report["task_params"], json.loads(report["arguments"])),
-                         ("playbooks/report.yml", {"limit": ["lab"]}, []))
+                         ("playbooks/operations/report.yml", {"limit": ["lab"]}, []))
         self.assertEqual((reboot["playbook"], reboot["task_params"], json.loads(reboot["arguments"])),
-                         ("playbooks/reboot.yml", {"limit": [], "allow_override_limit": True}, []))
+                         ("playbooks/operations/reboot.yml", {"limit": [], "allow_override_limit": True}, []))
         self.assertIn("Enter exactly one host in the Limit prompt.", reboot["description"])
         for template in (report, reboot):
-            self.assertEqual(template["environment_ids"], [IDS["environments"]["Practice defaults"]])
+            self.assertEqual(template["environment_ids"], [IDS["environments"]["Defaults"]])
         prompt = reboot["survey_vars"][0]
         self.assertEqual((prompt["name"], prompt["type"], prompt["required"]), ("reboot_target_ack", "enum", True))
         self.assertEqual([choice["value"] for choice in prompt["values"]], ["REBOOT NOW"])

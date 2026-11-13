@@ -24,7 +24,7 @@ are pinned to the tested versions.
 
 The installer runs these six steps, then goes further: it creates the
 service key `/etc/semaphore/svc_ansible`, the lab folder `/opt/ansible-lab`
-and the seeded **Ansible Practice** project with its 24 task templates. This
+and the seeded **Ansible Automation** project with its 24 task templates. This
 page stops after the application is running. On this path you create your own
 automation key and prepare the targets in [SSH and sudo by
 hand](manual-access.md), then build the Semaphore project yourself in

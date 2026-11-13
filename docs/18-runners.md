@@ -47,7 +47,7 @@ Take a [recovery capture](10-recovery.md); record the existing `use_remote_runne
 
 This creates one global runner, an account/unit/configuration, a venv, and three
 project objects prefixed **Runner practice**. Reuse the target credentials and
-**Practice defaults**. Arrange a quiet window: the switch affects the whole server.
+**Defaults**. Arrange a quiet window: the switch affects the whole server.
 
 **Where: controller, as root, in the guide checkout.**
 
@@ -230,7 +230,7 @@ an inactive, non-default runner. Prefer the one-time flow above.
 
 ## Do: prepare and dispatch Ping
 
-**Where: browser, in Ansible Practice, as a project owner.**
+**Where: browser, in Ansible Automation, as a project owner.**
 
 Use the [chapter 6 forms](06-semaphore.md) to create these exercise objects:
 
@@ -238,7 +238,7 @@ Use the [chapter 6 forms](06-semaphore.md) to create these exercise objects:
 | --- | --- |
 | **Runner practice repository** | **Repositories → New Repository**; the guide's public HTTPS Git URL; reviewed tag `v1.2.0`; Access Key **None**. |
 | **Runner practice inventory** | **Inventory → New Inventory → Ansible Inventory**; **Static**; text below; existing target SSH and sudo credentials. |
-| **Runner practice Ping** | **Task Templates → New template → Ansible Playbook**; the two objects above; `playbooks/ping.yml`; **Practice defaults**; **Limit → Add limit**: `runner-target`. |
+| **Runner practice Ping** | **Task Templates → New template → Ansible Playbook**; the two objects above; `playbooks/baseline/ping.yml`; **Defaults**; **Limit → Add limit**: `runner-target`. |
 
 ```ini
 [lab]
@@ -272,7 +272,7 @@ liveness/reconciliation. Source defaults are 120/420/30 seconds respectively;
 
 ## Check: execution and availability
 
-**Where: browser, in Ansible Practice, as a project owner.** Run **Runner practice
+**Where: browser, in Ansible Automation, as a project owner.** Run **Runner practice
 Ping**. Read the full target recap and runner-assignment message; record the task ID.
 
 **Where: runner, as root.** Run `journalctl -u semaphore-runner --since '5

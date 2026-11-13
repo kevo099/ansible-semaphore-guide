@@ -28,13 +28,22 @@ import sys
 sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
-MARKER = Path("/etc/semaphore/.practice-project-seeded")
+# The installer's marker, under its name of today and of releases before v1.12.0.
+MARKERS = (Path("/etc/semaphore/.guide-project-seeded"), Path("/etc/semaphore/.practice-project-seeded"))
 # The guide's own version of each file, recorded by every update as SHA-256 hashes.
 # Before the first update, the installer's first commit holds the guide's files.
 MANIFEST = ".guide-files.json"
 SEED_MESSAGE = "^Seed the local lab folder from the guide$"
-FALLBACK_IDENTITY = ["-c", "user.name=ansible-practice", "-c", "user.email=ansible-practice@example.test"]
+FALLBACK_IDENTITY = ["-c", "user.name=ansible-guide", "-c", "user.email=ansible-guide@example.test"]
 DECISIONS = ("add", "update", "remove", "yours", "removed by you", "conflict", "current")
+
+
+def moved_files():
+    """Where release v1.12.0 moved the guide's files, by their earlier paths in the lab folder."""
+    moved = dict(load_seeder().MOVED_PLAYBOOKS)
+    moved.update({"playbooks/templates/nginx.conf.j2": "playbooks/examples/templates/nginx.conf.j2",
+                  "playbooks/templates/practice.html.j2": "playbooks/examples/templates/page.html.j2"})
+    return moved
 
 
 def load_seeder():
@@ -287,6 +296,19 @@ class LabFolder:
             os.unlink(leaf, dir_fd=fd)
         finally:
             os.close(fd)
+        # A folder the release emptied goes too, innermost first. rmdir refuses one that
+        # still holds anything, so a file of yours keeps its folder.
+        while folders:
+            *folders, last = folders
+            parent = self._walk(folders)
+            if parent is None:
+                return
+            try:
+                os.rmdir(last, dir_fd=parent)
+            except OSError:
+                return
+            finally:
+                os.close(parent)
 
     def make_folder(self, relative):
         fd = self._walk(relative.split("/"), create=True)
@@ -352,7 +374,7 @@ def base_hashes(lab):
 
 def lab_plan(lab, repo, files, replace_edited):
     """Everything the file part would do, and every reason it must not."""
-    plan = {name: [] for name in DECISIONS}
+    plan = {name: [] for name in (*DECISIONS, "edits replaced")}
     expected, problems, source = {}, [], None
     try:
         lab.folder_state("content")
@@ -401,11 +423,31 @@ def lab_plan(lab, repo, files, replace_edited):
         decision = classify(current, base.get(relative), new)
         if decision == "conflict" and replace_edited:
             decision = "update" if new is not None else "remove"
+            plan["edits replaced"].append(relative)
         plan[decision].append(relative)
+    moved = moved_files()
+    # Named by its commit, because HEAD is the update's own commit afterwards.
+    head = lab.git("rev-parse", "--short", "HEAD").stdout.decode().strip()
     if plan["conflict"]:
         problems.append("files that both you and this release changed or claim: " + ", ".join(plan["conflict"])
                         + ". Compare them with the new copy; --replace-edited takes the release's version, "
                         "and Git keeps yours")
+    for relative in plan["conflict"]:
+        if relative in moved:
+            # The release's file at this path is no longer the playbook, so "the new copy" would mislead.
+            problems.append(f"{relative} is one of them, and this release moved it to {moved[relative]}. "
+                            "--replace-edited leaves your change in the folder's Git history only, and the seeded "
+                            f"templates then run the release's {moved[relative]}: make your change again there "
+                            f"(git show {head}:{relative} shows yours)")
+    # Ansible reads group_vars/ and host_vars/ beside the playbook that runs. The update that moves
+    # the playbooks one folder down would have values kept beside the earlier ones ignored without
+    # a word. Afterwards such a folder serves playbooks of the reader's own and is theirs to keep.
+    moving = any(target in files and target not in base for target in moved.values())
+    for folder in ("group_vars", "host_vars") if moving else ():
+        if os.path.lexists(lab.root / "playbooks" / folder):
+            problems.append(f"playbooks/{folder} holds values that Ansible reads only for a playbook directly in "
+                            "playbooks/, and this release keeps its playbooks one folder below. Move it to "
+                            f"inventories/{folder}, which Ansible reads for every playbook, then run this again")
     return plan, expected, problems, source
 
 
@@ -578,7 +620,7 @@ def main():
 
     if os.geteuid() != 0:
         raise SystemExit("Run it with sudo on the controller.")
-    if not MARKER.exists():
+    if not any(marker.exists() for marker in MARKERS):
         raise SystemExit("This controller was not set up by an installer that seeds Semaphore; "
                          "there is nothing to update.")
     root = Path(os.path.realpath(args.lab_dir))
@@ -621,6 +663,15 @@ def main():
     show("Your edits, kept (the guide did not change these files)", plan["yours"])
     show("Guide files you removed, left removed", plan["removed by you"])
     show("Files that both you and this release changed or claim", plan["conflict"])
+    if plan["edits replaced"]:
+        show("Your edits that --replace-edited replaces with the release's version (the folder's Git history keeps "
+             "yours)", plan["edits replaced"])
+        moved = moved_files()
+        head = lab.git("rev-parse", "--short", "HEAD").stdout.decode().strip()
+        for relative in plan["edits replaced"]:
+            if relative in moved:
+                print(f"    {relative} moved to {moved[relative]}, which the seeded templates run from now on: "
+                      f"make your change again there (git show {head}:{relative} shows yours)")
     print(f"  Guide files already current: {len(plan['current'])}")
     if new_folders:
         print(f"  Folders for SCAP files you supply, to create: {', '.join(f + '/' for f in new_folders)}")
@@ -644,14 +695,28 @@ def main():
     client = seeder.Client(seeder.API, os.environ.get("SEMAPHORE_API_TOKEN") or None)
     seeder.wait_ready(client)
     user = seeder.log_in(client, "admin", ask=True)
-    found = seeder.resolve(client, "Ansible Practice", str(root), args.project_id, user)
+    found = seeder.resolve(client, seeder.PROJECT_NAME, str(root), args.project_id, user)
     seeder.check_access(client, user, found)
+    found = seeder.read_for_renames(client, found, user)
     semaphore_plan = seeder.plan_for(found)
     print(f"Semaphore project {found['project']['name']!r} (ID {found['project']['id']})")
+    show("To rename, from an earlier release's name to the feature's own",
+         [f"{rename['what']} {rename['from']!r} -> {rename['to']!r}" for rename in semaphore_plan["renames"]])
+    for note in semaphore_plan["notes"]:
+        print(f"  Note: {note}")
+    show("Tabs to renumber, so that Semaphore's own All tab stays first",
+         [f"{item['title']}: place {item['from']} -> {item['to']}" for item in semaphore_plan["positions"]])
     show("Variable groups to add", semaphore_plan["environments"])
     show("Template tabs to add", semaphore_plan["views"])
     show("Templates to add", semaphore_plan["templates"])
     show("Templates to put on their tab", [t["name"] for t in semaphore_plan["tabs"]])
+    show("Templates to move to their feature's tab",
+         [f"{move['name']} -> {move['to']}" for move in semaphore_plan["moves"]])
+    show("Templates to point at their playbook's new path, after the files are updated",
+         [f"{item['name']}: {item['from']} -> {item['to']}" for item in semaphore_plan["repoint"]])
+    show("Templates of yours that name a playbook's earlier path (it works for this release; name the new path "
+         "in each)", [f"{item['name']}: {item['playbook']} -> {item['moved_to']}"
+                      for item in semaphore_plan["earlier_paths"]])
     replaced = seeder.replaced_names(semaphore_plan)
     if args.remove_replaced:
         show("Replaced by this release, to remove after the files are updated (with the templates' task "
@@ -670,14 +735,22 @@ def main():
         show("Seeded template names used more than once, left as they are", semaphore_plan["duplicates"])
     for item in semaphore_plan["ambiguous"]:
         print(f"  Problem: several objects are named {item}")
+    for item in semaphore_plan["taken"]:
+        print(f"  Problem: there already is a {item}; rename or remove yours")
     if not args.apply:
-        count = len(problems) + len(pending) + len(semaphore_plan["ambiguous"])
+        count = len(problems) + len(pending) + len(semaphore_plan["ambiguous"]) + len(semaphore_plan["taken"])
         if count:
             print(f"Plan only. Resolve the {count} problem(s) above before you run it with --apply.")
             return 1
-        print("Plan only. Run again with --apply to make these changes.")
+        changes = (plan["add"] or plan["update"] or plan["remove"] or new_folders
+                   or any(semaphore_plan[key] for key in ("renames", "positions", "environments", "views",
+                                                          "templates", "tabs", "moves", "repoint"))
+                   or (args.remove_replaced and replaced)
+                   or seeder.seeded_marker() not in (None, seeder.MARKER))
+        print("Plan only. Run again with --apply to make these changes." if changes else
+              "Plan only. There is nothing to change.")
         return 0
-    if semaphore_plan["ambiguous"]:
+    if semaphore_plan["ambiguous"] or semaphore_plan["taken"]:
         raise SystemExit("Nothing was changed. Rename or remove the duplicates, then run again.")
 
     seeder.apply_update(client, found, semaphore_plan, seeder.BACKUP_DIR)
@@ -710,6 +783,12 @@ def main():
                              f"{result.stderr.decode(errors='replace').strip()}\nCommit them in {root} with: "
                              f"git commit -m \"Update the guide's files to {version}\" -- " + " ".join(changed))
         print(f"Committed {len(changed)} file(s) in {root}; git revert HEAD there undoes them.")
+
+    # Only now does the lab folder hold the playbooks at their new paths.
+    repointed = seeder.repoint_templates(client, found, semaphore_plan, seeder.BACKUP_DIR)
+    if repointed:
+        print(f"Pointed {len(repointed)} seeded template(s) at their playbook's new path.")
+    seeder.rename_marker()
 
     if args.remove_replaced:
         # Only now do the lab folder's playbooks match the templates that remain.

@@ -19,7 +19,7 @@ cd ~/ansible-semaphore-guide
 . /opt/ansible-venv/bin/activate
 ansible --version
 ansible-inventory --graph
-ansible-playbook playbooks/ping.yml --limit lab-ubuntu --list-hosts
+ansible-playbook playbooks/baseline/ping.yml --limit lab-ubuntu --list-hosts
 ```
 
 On a controller made by either installer ([Stage 1](stage-1-controller.md)), run `cd /opt/ansible-lab` (or your `--lab-dir`)
@@ -54,7 +54,7 @@ still show `--private-key` so the intended key is explicit.
 **Do:**
 
 ```bash
-ansible-playbook playbooks/ping.yml --limit lab-ubuntu \
+ansible-playbook playbooks/baseline/ping.yml --limit lab-ubuntu \
   --private-key ~/.ssh/ansible_lab
 ```
 
@@ -67,15 +67,15 @@ does not mean that sudo, services or a security baseline have been validated.
 
 ## Lesson 2: manage a banner and time service
 
-Read [`baseline.yml`](../playbooks/baseline.yml), then:
+Read [`baseline.yml`](../playbooks/baseline/baseline.yml), then:
 
 ```bash
-ansible-playbook playbooks/baseline.yml --syntax-check
-ansible-playbook playbooks/baseline.yml --limit lab-ubuntu \
+ansible-playbook playbooks/baseline/baseline.yml --syntax-check
+ansible-playbook playbooks/baseline/baseline.yml --limit lab-ubuntu \
   --private-key ~/.ssh/ansible_lab -K --check --diff
-ansible-playbook playbooks/baseline.yml --limit lab-ubuntu \
+ansible-playbook playbooks/baseline/baseline.yml --limit lab-ubuntu \
   --private-key ~/.ssh/ansible_lab -K --diff
-ansible-playbook playbooks/baseline.yml --limit lab-ubuntu \
+ansible-playbook playbooks/baseline/baseline.yml --limit lab-ubuntu \
   --private-key ~/.ssh/ansible_lab -K --diff
 ```
 
@@ -107,11 +107,11 @@ time and confirm no further configuration change is needed.
 ## Lesson 3: create ordinary users
 
 ```bash
-ansible-playbook playbooks/users.yml --limit lab-ubuntu \
+ansible-playbook playbooks/examples/users.yml --limit lab-ubuntu \
   --private-key ~/.ssh/ansible_lab -K --check --diff
-ansible-playbook playbooks/users.yml --limit lab-ubuntu \
+ansible-playbook playbooks/examples/users.yml --limit lab-ubuntu \
   --private-key ~/.ssh/ansible_lab -K
-ansible-playbook playbooks/users.yml --limit lab-ubuntu \
+ansible-playbook playbooks/examples/users.yml --limit lab-ubuntu \
   --private-key ~/.ssh/ansible_lab -K
 ```
 
@@ -125,7 +125,7 @@ id lab_bob
 
 The playbook creates reserved `lab_` users with locked passwords and no extra
 groups, sudo grant or SSH key. It does not manage your administrator or
-`svc_ansible`. Adding `lab_charlie` to `lab_practice_users` is a useful first
+`svc_ansible`. Adding `lab_charlie` to `lab_example_users` is a useful first
 edit. Predict the task results before applying it.
 
 Removing a name from the variable list does **not** delete its existing account.
@@ -141,11 +141,11 @@ This lesson owns the entire nginx configuration on a fresh target. It serves
 only `127.0.0.1:8080`, so it does not open a network-facing website.
 
 ```bash
-ansible-playbook playbooks/webserver.yml --limit lab-ubuntu \
+ansible-playbook playbooks/examples/webserver.yml --limit lab-ubuntu \
   --private-key ~/.ssh/ansible_lab -K --check --diff
-ansible-playbook playbooks/webserver.yml --limit lab-ubuntu \
+ansible-playbook playbooks/examples/webserver.yml --limit lab-ubuntu \
   --private-key ~/.ssh/ansible_lab -K --diff
-ansible-playbook playbooks/webserver.yml --limit lab-ubuntu \
+ansible-playbook playbooks/examples/webserver.yml --limit lab-ubuntu \
   --private-key ~/.ssh/ansible_lab -K --diff
 ```
 
@@ -156,7 +156,7 @@ View the page from inside the target with `curl http://127.0.0.1:8080/`.
 Change just the page text:
 
 ```bash
-ansible-playbook playbooks/webserver.yml --limit lab-ubuntu \
+ansible-playbook playbooks/examples/webserver.yml --limit lab-ubuntu \
   --private-key ~/.ssh/ansible_lab -K \
   -e '{"lab_web_message":"My second page version."}' --diff
 ```
@@ -174,9 +174,9 @@ Read [the operations guide](08-operations.md) and establish recovery first.
 Then preview and apply updates to one target:
 
 ```bash
-ansible-playbook playbooks/patch.yml --limit lab-ubuntu \
+ansible-playbook playbooks/patching/patch.yml --limit lab-ubuntu \
   --private-key ~/.ssh/ansible_lab -K --check --diff
-ansible-playbook playbooks/patch.yml --limit lab-ubuntu \
+ansible-playbook playbooks/patching/patch.yml --limit lab-ubuntu \
   --private-key ~/.ssh/ansible_lab -K
 ```
 
@@ -184,7 +184,7 @@ Reboot is disabled by default. The playbook reports whether the OS requests
 one. A separately planned run can enable it with a real JSON boolean:
 
 ```bash
-ansible-playbook playbooks/patch.yml --limit lab-ubuntu \
+ansible-playbook playbooks/patching/patch.yml --limit lab-ubuntu \
   --private-key ~/.ssh/ansible_lab -K -e '{"allow_reboot":true}'
 ```
 

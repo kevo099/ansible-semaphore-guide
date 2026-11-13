@@ -1,5 +1,5 @@
 [Unit]
-Description=Semaphore UI for Ansible practice
+Description=Semaphore UI for Ansible
 Wants=network-online.target
 After=network-online.target postgresql@16-main.service
 Requires=postgresql@16-main.service

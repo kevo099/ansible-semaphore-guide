@@ -11,16 +11,19 @@
 - name: Note whether this scan uses a local SCAP content file or an exceptions file
   ansible.builtin.set_fact:
     stig_local_content: "{{ stig_content_file | default('') | length > 0 }}"
-    # A relative path is inside the lab folder, next to playbooks/.
+    # A relative path is inside the lab folder, next to playbooks/. The first folder
+    # Ansible searches is this file's own, playbooks/tasks, wherever the playbook that
+    # imports it is: the lab folder is two up from there.
     stig_content_source: >-
       {{ stig_content_file if stig_content_file | default('') is abs
-         else playbook_dir ~ '/../' ~ stig_content_file | default('') }}
+         else (ansible_search_path[0] | dirname | dirname) ~ '/' ~ stig_content_file | default('') }}
     # Without stig_tailoring_file, a per-system playbook uses tailoring.xml in its
     # system's content folder when that file exists; it fits the vendor's content only.
     stig_tailoring_source: >-
-      {{ (stig_tailoring_file if stig_tailoring_file is abs else playbook_dir ~ '/../' ~ stig_tailoring_file)
+      {{ (stig_tailoring_file if stig_tailoring_file is abs
+          else (ansible_search_path[0] | dirname | dirname) ~ '/' ~ stig_tailoring_file)
          if stig_tailoring_file | default('') | length > 0
-         else (playbook_dir ~ '/../content/' ~ stig_report_folder ~ '/tailoring.xml'
+         else ((ansible_search_path[0] | dirname | dirname) ~ '/content/' ~ stig_report_folder ~ '/tailoring.xml'
                if stig_report_folder | default('') | length > 0 and stig_content_file | default('') | length == 0
                else '') }}
 
@@ -106,7 +109,7 @@
       ansible.builtin.command:
         argv:
           - /usr/bin/python3
-          - "{{ playbook_dir }}/../scripts/summarize_xccdf.py"
+          - "{{ ansible_search_path[0] | dirname | dirname }}/scripts/summarize_xccdf.py"
           - --tailoring
           - "{{ stig_tailoring_source }}"
       register: stig_tailoring_read
@@ -363,7 +366,7 @@
 - name: Summarize the fetched XCCDF result on the controller
   ansible.builtin.command:
     argv: >-
-      {{ ['/usr/bin/python3', playbook_dir ~ '/../scripts/summarize_xccdf.py',
+      {{ ['/usr/bin/python3', (ansible_search_path[0] | dirname | dirname) ~ '/scripts/summarize_xccdf.py',
           stig_fetch_dir ~ '/' ~ inventory_hostname ~ '/' ~ stig_phase ~ '.xml',
           '--findings', stig_fetch_dir ~ '/' ~ inventory_hostname ~ '/' ~ stig_phase ~ '-findings.csv']
          + (['--tailoring', stig_tailoring_source] if stig_tailored else []) }}

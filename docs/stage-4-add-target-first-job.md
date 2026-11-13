@@ -20,8 +20,8 @@ or at the console, by the bootstrap playbook, or through Azure.
 
 ## Before you start
 
-- **The controller from Stage 1,** with the **Ansible Practice** project the
-  installer seeded. Its inventory, **Lab inventory file**, is the local file
+- **The controller from Stage 1,** with the **Ansible Automation** project the
+  installer seeded. Its inventory, **Inventory file**, is the local file
   `/opt/ansible-lab/inventories/lab.ini`, empty at first. Do not recreate the
   project, and do not set up a Git host to run these templates.
 - **The guide's folder** on the controller, `~/ansible-semaphore-guide`: the
@@ -168,14 +168,14 @@ Semaphore administrator login [admin]:
 Password:
 Sudo password of svc_ansible on the lab targets:
 The same password again:
-Stored the targets' sudo password as the key 'Lab sudo' (ID 3), with an empty Username, and chose it as the Sudo Credentials of 'Lab inventory file'.
+Stored the targets' sudo password as the key 'Target sudo password' (ID 3), with an empty Username, and chose it as the Sudo Credentials of 'Inventory file'.
 Next: run the Baseline preview template. Every lab target needs this same sudo password for svc_ansible.
 ```
 
 The ID is your own. Through Semaphore's API on loopback, it stores the
-password as the key **Lab sudo**, of the type **Login with password** and with
+password as the key **Target sudo password**, of the type **Login with password** and with
 an empty **Username**, and chooses that key as the **Sudo Credentials** of
-**Lab inventory file**. The password goes only to Semaphore and is never
+**Inventory file**. The password goes only to Semaphore and is never
 printed. It warns about a password shorter than 12 characters, which the
 onboarding script and the bootstrap playbook cannot give to a target.
 
@@ -185,8 +185,8 @@ instead, as [updating a controller](controller-update.md#options-and-logins)
 explains, with
 `sudo --preserve-env=SEMAPHORE_API_TOKEN python3.12 controller/lab-sudo.py`.
 
-Running it again changes nothing and says that **Lab inventory file** already
-uses **Lab sudo**. To change the password later, after you changed it on
+Running it again changes nothing and says that **Inventory file** already
+uses **Target sudo password**. To change the password later, after you changed it on
 every target, store the new one in the same key:
 
 ```bash
@@ -194,19 +194,19 @@ sudo python3.12 controller/lab-sudo.py --replace
 ```
 
 It refuses, with what to do and `Nothing was changed.`, when the inventory
-already uses another key as its sudo credential, when a key named **Lab sudo**
+already uses another key as its sudo credential, when a key named **Target sudo password**
 has another type, or when two keys share that name. Other
 options: `--lab-dir DIR` for another lab folder, `--project-id ID` when
-several projects are named **Ansible Practice**, and `--password-stdin` to read
+several projects are named **Ansible Automation**, and `--password-stdin` to read
 the password from one line of standard input in a script. It exits with
 status 0 on success, 1 when it refuses or fails, and 2 for an unknown option.
 
 **Or in the UI.** The same two steps by hand:
 
-1. Open **Key Store → New Key**. Name it **Lab sudo**, choose the type
+1. Open **Key Store → New Key**. Name it **Target sudo password**, choose the type
    **Login with password**, leave **Username empty**, and enter the sudo
    password as **Password**. Save.
-2. Open **Inventory → Lab inventory file**, select **Lab sudo** as **Sudo
+2. Open **Inventory → Inventory file**, select **Target sudo password** as **Sudo
    Credentials**, and save.
 
 Leave the Username empty. Semaphore passes it to Ansible as `--become-user`,
@@ -257,7 +257,7 @@ nothing.
 
 ## Do: run Ping and Baseline preview
 
-**Where: Semaphore, the Lessons tab of the Ansible Practice project.** Start a
+**Where: Semaphore, the Baseline tab of the Ansible Automation project.** Start a
 template with its run (▶) button, then **Run** in the dialog. Both templates
 run on every host in the `lab` group, the new one included.
 
@@ -302,7 +302,7 @@ A host that needs a look says `needs attention:` and why, for example
 `lab-alma: needs attention: reboot pending; 12 package update(s) pending`.
 [The runbooks](runbooks.md#check-every-machines-health) explain each line.
 
-The natural next lesson continues on the **Lessons** tab:
+The natural next step continues on the **Baseline** tab:
 
 3. Run **Baseline apply**. It makes the changes the preview showed. Check the
    banner and the time service on the target.
@@ -463,7 +463,7 @@ sudo python3.12 controller/check-controller.py
 ```
 
 The readiness report ends with `"passed": true`. In Semaphore, the **Lab
-inventory file** shows **Lab sudo** as its **Sudo Credentials**, or every
+inventory file** shows **Target sudo password** as its **Sudo Credentials**, or every
 template lists **Lab vault password** under **Vaults**. **Ping** and
 **Baseline preview** succeed for the new host, and Ping names its
 distribution. The target is onboarded.
@@ -473,7 +473,7 @@ distribution. The target is onboarded.
 | Value | Where it came from | Needed for |
 | --- | --- | --- |
 | The target's inventory name and address | `add-target.sh`'s `Added` line | `--limit` in later lessons; retiring it |
-| The **Lab sudo** password, or each target's | Stage 2 or 3; already in your password manager | Recovery, and every new target with the shared password |
+| The **Target sudo password** password, or each target's | Stage 2 or 3; already in your password manager | Recovery, and every new target with the shared password |
 | The Vault password, if you chose per-target passwords | You chose it at `ansible-vault create` | Every edit of the host files; the command-line lessons |
 
 ## When a step fails
@@ -490,10 +490,10 @@ distribution. The target is onboarded.
 | Ping fails with `Permission denied (publickey)` | `svc_ansible` lacks the service key, the controller was reinstalled with a new key, or an `AllowUsers`/`AllowGroups` rule leaves the account out | Compare `sudo ssh-keygen -lf /home/svc_ansible/.ssh/authorized_keys` on the VM with `sudo ssh-keygen -lf /etc/semaphore/svc_ansible.pub` on the controller; run [Stage 2's one command](stage-2-existing-machines.md#do-onboard-it-in-one-command-from-the-controller) again, which gives the account the controller's current key. |
 | Ping or Baseline fails for every host while only one is broken | The lessons stop all hosts when one fails, and an unreachable host fails the run | Fix or retire the broken host, then run again. |
 | Baseline preview says `Missing sudo password` | Semaphore has no sudo password for the inventory | [Give Semaphore the sudo password](#do-give-semaphore-the-sudo-password): `sudo python3.12 controller/lab-sudo.py`. |
-| A task fails with `Destination /etc not writable`, or similar only when something must change | **Lab sudo** has a Username | `sudo python3.12 controller/lab-sudo.py --replace` stores the password anew with an empty Username. |
+| A task fails with `Destination /etc not writable`, or similar only when something must change | **Target sudo password** has a Username | `sudo python3.12 controller/lab-sudo.py --replace` stores the password anew with an empty Username. |
 | `Incorrect sudo password`, or the account is locked after several tries | Semaphore's password differs from the VM's, for example one shared credential for targets whose passwords differ; after a vendor STIG, `faillock` locks the account after three failures | Reset the lock at the VM's console as its administrator with `sudo faillock --user svc_ansible --reset`, or through Azure Run Command, before the next run. Then make the two agree: `sudo python3.12 controller/lab-sudo.py --replace` with the targets' password, or give each target its own with Vault. [The runbooks](runbooks.md#svc_ansible-is-locked-out-after-hardening) have the sequence. |
-| `lab-sudo.py` says `'Lab inventory file' already uses the key ... as its Sudo Credentials, not 'Lab sudo'` | The inventory already has another sudo credential, such as one you made by hand | Nothing changed. Choose **Lab sudo** under **Inventory → Lab inventory file → Sudo Credentials** in the UI, or empty that field and run it again. |
-| `lab-sudo.py` says `The key 'Lab sudo' (ID N) has the type ...` or `N keys are named 'Lab sudo'` | A key of another type, or a second key, has that name | Nothing changed. Rename or delete the extra key in **Key Store**, then run it again. |
+| `lab-sudo.py` says `'Inventory file' already uses the key ... as its Sudo Credentials, not 'Target sudo password'` | The inventory already has another sudo credential, such as one you made by hand | Nothing changed. Choose **Target sudo password** under **Inventory → Inventory file → Sudo Credentials** in the UI, or empty that field and run it again. |
+| `lab-sudo.py` says `The key 'Target sudo password' (ID N) has the type ...` or `N keys are named 'Target sudo password'` | A key of another type, or a second key, has that name | Nothing changed. Rename or delete the extra key in **Key Store**, then run it again. |
 | `lab-sudo.py` says `The installer's admin password is missing or no longer logs in` and the login it asks for is refused | The administrator's password was mistyped, or it uses a second factor | Type the current password, or give an API token with `SEMAPHORE_API_TOKEN`, as [updating a controller](controller-update.md#options-and-logins) explains. |
 | `lab-sudo.py` says `semaphore.service is not running; start it first.` | Semaphore is stopped | `sudo systemctl start semaphore`, then run it again. |
 | Semaphore says `Permission denied` reading a host variables file | The file is not in the `semaphore` group | Run the `chgrp` and `chmod` from the per-target way again. |
@@ -513,7 +513,7 @@ current contents, uncommitted edits included. The folder's `.gitignore` keeps
 playbooks as the lab folder's owner and keep the service's group read access.
 When you want tasks to run only reviewed, pushed code, follow
 [moving the lab folder to Git](appendices/git-migration.md); it explains why
-**Lab inventory file** stays bound to the local folder.
+**Inventory file** stays bound to the local folder.
 
 ## Next
 

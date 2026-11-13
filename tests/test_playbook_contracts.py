@@ -24,7 +24,11 @@ ROOT = Path(__file__).resolve().parents[1]
 # Each accepted Enterprise Linux distribution and the data stream its own
 # scap-security-guide package ships. Update both playbooks and this table together.
 VENDOR_DATA_STREAMS = {"RedHat": "rhel9", "AlmaLinux": "almalinux9", "Rocky": "rl9"}
-STIG_PLAYBOOKS = ("playbooks/stig-audit.yml", "playbooks/stig-apply.yml")
+STIG_PLAYBOOKS = ("playbooks/stig/audit.yml", "playbooks/stig/apply.yml")
+# Every playbook with plays of its own is one folder below playbooks/, the folder of its
+# feature; tasks/ and vars/ hold what they share. The files directly in playbooks/ and
+# below stig/<system>/ only import one of them.
+FEATURE_PLAYBOOKS = sorted(path for path in (ROOT / "playbooks").glob("*/*.yml") if path.parent.name not in ("tasks", "vars"))
 
 
 def tasks(relative):
@@ -40,7 +44,8 @@ def walk(task_list, inherited=None):
     for task in task_list or []:
         effective = dict(inherited or {}, **{key: task[key] for key in ("become", "delegate_to") if key in task})
         if "ansible.builtin.import_tasks" in task:
-            yield from walk(tasks(f"playbooks/{task['ansible.builtin.import_tasks']}"), effective)
+            # The path is relative to the playbook's own folder, one below playbooks/.
+            yield from walk(tasks(os.path.normpath(f"playbooks/feature/{task['ansible.builtin.import_tasks']}")), effective)
         elif "block" in task:
             for section in ("block", "rescue", "always"):
                 yield from walk(task.get(section), effective)
@@ -103,7 +108,7 @@ class DataStreamTests(unittest.TestCase):
 
 class ApprovalTests(unittest.TestCase):
     def stig_confirm(self):
-        return tasks("playbooks/stig-apply.yml")[0]["vars"]["stig_confirm"]
+        return tasks("playbooks/stig/apply.yml")[0]["vars"]["stig_confirm"]
 
     def test_seeded_recovery_answer_is_the_one_stig_apply_accepts(self):
         prompt = load("seed-semaphore").RECOVERY_PROMPT[0]
@@ -226,7 +231,7 @@ def render(expression, **variables):
     """Render a playbook expression with the Ansible filters and tests the STIG tasks use."""
     environment = NativeEnvironment(undefined=jinja2.StrictUndefined)
     environment.filters.update({
-        "from_json": json.loads, "basename": os.path.basename,
+        "from_json": json.loads, "basename": os.path.basename, "dirname": os.path.dirname,
         "regex_replace": lambda value, pattern, replacement: re.sub(pattern, replacement, value)})
     environment.tests.update({"match": lambda value, pattern: re.match(pattern, value) is not None,
                               "abs": os.path.isabs})
@@ -269,7 +274,7 @@ class ContentFolderTests(unittest.TestCase):
     def verdict(self, content_file, stat, found=None, profile=PROFILE):
         task = scan_task("Refuse a missing file, a placeholder or an incomplete profile ID")
         variables = {"stig_content_file": content_file, "stig_content_profile": profile, "stig_content_stat": {"stat": stat},
-                     "stig_content_found": {"files": [{"path": f"/opt/ansible-lab/playbooks/../{content_file}/{name}"}
+                     "stig_content_found": {"files": [{"path": f"/opt/ansible-lab/{content_file}/{name}"}
                                                       for name in found]} if found is not None else {"skipped": True}}
         for name in ("stig_content_names", "stig_content_is_folder", "stig_content_profile_problem", "stig_content_problem"):
             variables[name] = render(task["vars"][name], **variables)
@@ -331,15 +336,15 @@ class ExceptionsFileTests(unittest.TestCase):
 
     def source(self, **variables):
         facts = scan_task("Note whether this scan uses a local SCAP content file or an exceptions file")
-        return render(facts["ansible.builtin.set_fact"]["stig_tailoring_source"], playbook_dir="/opt/ansible-lab/playbooks",
+        return render(facts["ansible.builtin.set_fact"]["stig_tailoring_source"], ansible_search_path=["/opt/ansible-lab/playbooks/tasks"],
                       **{"stig_content_file": "", "stig_report_folder": "", "stig_tailoring_file": "", **variables})
 
     def test_the_named_file_wins_and_a_system_folder_has_a_default(self):
         self.assertEqual(self.source(stig_tailoring_file="content/site.xml", stig_report_folder="rhel/9"),
-                         "/opt/ansible-lab/playbooks/../content/site.xml")
+                         "/opt/ansible-lab/content/site.xml")
         self.assertEqual(self.source(stig_tailoring_file="/srv/site.xml"), "/srv/site.xml")
         self.assertEqual(self.source(stig_report_folder="rhel/9"),
-                         "/opt/ansible-lab/playbooks/../content/rhel/9/tailoring.xml")
+                         "/opt/ansible-lab/content/rhel/9/tailoring.xml")
         # The default fits the vendor's content, so a DISA file scan needs the file named.
         self.assertEqual(self.source(stig_report_folder="rhel/9", stig_content_file="content/rhel/9"), "")
         # The shared playbooks run without a system folder.
@@ -363,7 +368,7 @@ class ExceptionsFileTests(unittest.TestCase):
         variables = {"stig_tailoring_read": read, "stig_local_content": local_content, "stig_profile_el": STIG_PROFILE,
                      "stig_usg_profile": usg_profile, "stig_content_profile": content_profile,
                      "ansible_facts": {"os_family": family}, "inventory_hostname": "lab-rhel",
-                     "stig_tailoring_source": "/opt/ansible-lab/playbooks/../content/rhel/9/tailoring.xml"}
+                     "stig_tailoring_source": "/opt/ansible-lab/content/rhel/9/tailoring.xml"}
         for name in ("stig_tailoring_seen", "stig_tailoring_base", "stig_tailoring_error", "stig_tailoring_id_ok",
                      "stig_tailoring_problem"):
             variables[name] = render(task["vars"][name], **variables)
@@ -437,7 +442,7 @@ class ExceptionsFileTests(unittest.TestCase):
     def test_every_run_names_the_file_its_hash_and_what_it_leaves_out(self):
         task = scan_task("Name the exceptions file and what it leaves out")
         variables = {"inventory_hostname": "lab-rhel", "stig_tailoring": self.DESCRIBED,
-                     "stig_tailoring_source": "/opt/ansible-lab/playbooks/../content/rhel/9/tailoring.xml"}
+                     "stig_tailoring_source": "/opt/ansible-lab/content/rhel/9/tailoring.xml"}
         def message(described):
             variables["stig_tailoring"] = described
             for name in ("stig_tailoring_left_out", "stig_tailoring_refined", "stig_tailoring_refined_note"):
@@ -465,15 +470,15 @@ class ExceptionsFileTests(unittest.TestCase):
                       message(refined))
 
     def commands(self, tailored, local_content=False, controller=False):
-        variables = {"stig_tailored": tailored, "stig_tailoring_remote": "/var/log/stig-practice/S/tailoring.xml" if tailored else "",
+        variables = {"stig_tailored": tailored, "stig_tailoring_remote": "/var/log/stig-scans/S/tailoring.xml" if tailored else "",
                      "stig_tailoring": self.DESCRIBED, "stig_local_content": local_content, "stig_profile_el": STIG_PROFILE,
                      "stig_content_profile": "xccdf_mil.disa.stig_profile_MAC-1_Classified", "stig_usg_profile": "disa_stig",
-                     "stig_fetch_remote_resources": False, "stig_remote_dir": "/var/log/stig-practice/S", "stig_phase": "audit",
+                     "stig_fetch_remote_resources": False, "stig_remote_dir": "/var/log/stig-scans/S", "stig_phase": "audit",
                      "stig_datastream": "/usr/share/xml/scap/ssg/content/ssg-rhel9-ds.xml"}
         chosen = scan_task("Choose the profile this run scans with")["ansible.builtin.set_fact"]
         variables["stig_scan_profile"] = render(chosen["stig_scan_profile"], **variables)
         self.assertEqual(render(chosen["stig_tailoring_remote"], **variables), variables["stig_tailoring_remote"])
-        apply = tasks("playbooks/stig-apply.yml")[0]["tasks"]
+        apply = tasks("playbooks/stig/apply.yml")[0]["tasks"]
         # The Ubuntu fix builds its command from two task variables; a target that is not the controller
         # gets the plain usg command.
         usg_fix = named(apply, "Apply the vendor remediation on Ubuntu")
@@ -488,7 +493,7 @@ class ExceptionsFileTests(unittest.TestCase):
 
     def test_without_an_exceptions_file_the_commands_are_the_earlier_ones(self):
         commands = self.commands(False)
-        stream, folder = "/usr/share/xml/scap/ssg/content/ssg-rhel9-ds.xml", "/var/log/stig-practice/S"
+        stream, folder = "/usr/share/xml/scap/ssg/content/ssg-rhel9-ds.xml", "/var/log/stig-scans/S"
         self.assertEqual(commands["el"], ["oscap", "xccdf", "eval", "--profile", STIG_PROFILE, "--results",
                                           f"{folder}/audit.xml", "--report", f"{folder}/audit.html", stream])
         self.assertEqual(commands["usg"], ["usg", "audit", "disa_stig", "--results-file", f"{folder}/audit.xml",
@@ -504,7 +509,7 @@ class ExceptionsFileTests(unittest.TestCase):
         # usg works with umask 077 and leaves the SSH client's files for root only, which ends ssh for the
         # semaphore account. The fix and the repair are one command: no later task could connect.
         for tailored, tail in ((False, ["usg", "fix", "disa_stig"]),
-                               (True, ["usg", "fix", "--tailoring-file", "/var/log/stig-practice/S/tailoring.xml"])):
+                               (True, ["usg", "fix", "--tailoring-file", "/var/log/stig-scans/S/tailoring.xml"])):
             argv = self.commands(tailored, controller=True)["usg_fix"]
             self.assertEqual(argv[:2] + argv[3:], ["/bin/sh", "-c", "usg-fix"] + tail)
         script = argv[2]
@@ -525,14 +530,14 @@ class ExceptionsFileTests(unittest.TestCase):
                                     capture_output=True, text=True, timeout=30,
                                     env={"PATH": f"{binaries}{os.pathsep}/usr/bin:/bin"})
             self.assertEqual((result.returncode, result.stdout, result.stderr),
-                             (3, "usg fix --tailoring-file /var/log/stig-practice/S/tailoring.xml\n", ""))
+                             (3, "usg fix --tailoring-file /var/log/stig-scans/S/tailoring.xml\n", ""))
             modes = {path.name: oct(path.stat().st_mode & 0o777) for path in folder.iterdir()}
             self.assertEqual(modes, {"00-cipher-list.conf": "0o644", "00-mac-list.conf": "0o644",
                                      "50-site.conf": "0o644", "notes.txt": "0o600"})
 
     def test_with_one_every_scan_and_fix_uses_the_file_and_its_profile(self):
         commands = self.commands(True)
-        remote, tailored = "/var/log/stig-practice/S/tailoring.xml", STIG_PROFILE + "_site"
+        remote, tailored = "/var/log/stig-scans/S/tailoring.xml", STIG_PROFILE + "_site"
         # oscap: the vendor's documented pair, --tailoring-file with the file's profile as --profile.
         for name in ("el", "el_fix"):
             with self.subTest(command=name):
@@ -553,9 +558,9 @@ class ExceptionsFileTests(unittest.TestCase):
         self.assertEqual(copy["ansible.builtin.copy"], {"src": "{{ stig_tailoring_source }}", "dest": "{{ stig_tailoring_remote }}",
                                                         "owner": "root", "group": "root", "mode": "0600"})
         summarize = scan_task("Summarize the fetched XCCDF result on the controller")
-        variables = {"playbook_dir": "/opt/ansible-lab/playbooks", "stig_fetch_dir": "/srv/u/stig-reports/rhel/9/S",
+        variables = {"ansible_search_path": ["/opt/ansible-lab/playbooks/tasks"], "stig_fetch_dir": "/srv/u/stig-reports/rhel/9/S",
                      "inventory_hostname": "lab-rhel", "stig_phase": "before", "stig_tailoring_source": "/opt/t.xml"}
-        base = ["/usr/bin/python3", "/opt/ansible-lab/playbooks/../scripts/summarize_xccdf.py",
+        base = ["/usr/bin/python3", "/opt/ansible-lab/scripts/summarize_xccdf.py",
                 "/srv/u/stig-reports/rhel/9/S/lab-rhel/before.xml", "--findings",
                 "/srv/u/stig-reports/rhel/9/S/lab-rhel/before-findings.csv"]
         argv = summarize["ansible.builtin.command"]["argv"]
@@ -566,7 +571,7 @@ class ExceptionsFileTests(unittest.TestCase):
         for playbook in STIG_PLAYBOOKS:
             with self.subTest(playbook=playbook):
                 self.assertEqual(tasks(playbook)[0]["vars"]["stig_tailoring_file"], "")
-        names = [task["name"] for task in tasks("playbooks/stig-apply.yml")[0]["tasks"]]
+        names = [task["name"] for task in tasks("playbooks/stig/apply.yml")[0]["tasks"]]
         # The scan before the fixes checks the file, chooses its profile and copies it to the target.
         self.assertLess(names.index("Record the posture before remediation"),
                         names.index("Apply the vendor remediation on Enterprise Linux"))
@@ -647,14 +652,15 @@ class PerSystemPlaybookTests(unittest.TestCase):
         systems = load("seed-semaphore").STIG_SYSTEMS
         found = sorted(str(p.relative_to(ROOT / "playbooks" / "stig")) for p in (ROOT / "playbooks/stig").rglob("*")
                        if p.is_file())
-        self.assertEqual(found, sorted(f"{folder}/{kind}.yml" for _l, folder, _g, _f in systems
-                                       for kind in ("apply", "audit")))
+        # The two shared playbooks, and one pair of thin ones per system and version.
+        self.assertEqual(found, sorted(["apply.yml", "audit.yml"] + [f"{folder}/{kind}.yml" for _l, folder, _g, _f in systems
+                                                                    for kind in ("apply", "audit")]))
         scopes = set()
         for _label, folder, _group, _file in systems:
-            for kind, shared in (("audit", "stig-audit.yml"), ("apply", "stig-apply.yml")):
+            for kind, shared in (("audit", "audit.yml"), ("apply", "apply.yml")):
                 with self.subTest(playbook=f"{folder}/{kind}.yml"):
                     (entry,) = tasks(f"playbooks/stig/{folder}/{kind}.yml")
-                    self.assertEqual(entry["ansible.builtin.import_playbook"], f"../../../{shared}")
+                    self.assertEqual(entry["ansible.builtin.import_playbook"], f"../../{shared}")
                     self.assertEqual(entry["vars"]["stig_report_folder"], folder)
                     scopes.add(entry["vars"]["stig_os_scope"])
         self.assertEqual(scopes, set(self.SAMPLE_FACTS))
@@ -677,10 +683,10 @@ class PerSystemPlaybookTests(unittest.TestCase):
                     for label, folder, _group, _file in seeded}
         self.assertEqual({key: (value["label"], value["folder"]) for key, value in systems.items()}, wrappers)
         for playbook in STIG_PLAYBOOKS:
-            self.assertEqual(tasks(playbook)[0]["vars_files"], ["vars/stig_systems.yml"])
+            self.assertEqual(tasks(playbook)[0]["vars_files"], ["../vars/stig_systems.yml"])
 
     def test_an_audit_with_no_host_of_its_system_stops_with_an_explanation(self):
-        audit = tasks("playbooks/stig-audit.yml")[0]["pre_tasks"]
+        audit = tasks("playbooks/stig/audit.yml")[0]["pre_tasks"]
         stop = named(audit, "Stop when no host in the run has the system this playbook audits")
         self.assertIn("select('equalto', stig_os_scope)", " ".join(stop["when"]))
         names = [t["name"] for t in audit]
@@ -688,10 +694,10 @@ class PerSystemPlaybookTests(unittest.TestCase):
                                                         if t.get("ansible.builtin.meta") == "end_host"))
 
     def test_audit_skips_and_apply_refuses_another_system(self):
-        audit = tasks("playbooks/stig-audit.yml")[0]["pre_tasks"]
+        audit = tasks("playbooks/stig/audit.yml")[0]["pre_tasks"]
         end = next(t for t in audit if t.get("ansible.builtin.meta") == "end_host")
         self.assertEqual(end["when"], "stig_os_scope | length > 0 and stig_os_key != stig_os_scope")
-        apply = tasks("playbooks/stig-apply.yml")[0]["pre_tasks"]
+        apply = tasks("playbooks/stig/apply.yml")[0]["pre_tasks"]
         refusal = named(apply, "Refuse a host that another system's playbook covers")
         condition = refusal["ansible.builtin.assert"]["that"][0]
         for scope, key, accepted in (("", "Rocky-9", True), ("RedHat-9", "RedHat-9", True),
@@ -742,7 +748,7 @@ class FactCacheTests(unittest.TestCase):
 
     def test_no_run_once_task_runs_before_the_hosts_have_facts(self):
         checked = 0
-        for playbook in sorted((ROOT / "playbooks").glob("*.yml")):
+        for playbook in FEATURE_PLAYBOOKS:
             for play in yaml.safe_load(playbook.read_text()):
                 gathered = play.get("gather_facts", True)
                 for task in walk(play.get("pre_tasks", []) + play.get("tasks", [])):
@@ -758,8 +764,8 @@ class PrivilegeTests(unittest.TestCase):
     """Only the preflight's two reads, and tasks on the controller, run without sudo."""
 
     PROBES = ("Gather operating-system facts", "Verify the operating system's package bindings are ready")
-    SUDO_PLAYBOOKS = ("playbooks/baseline.yml", "playbooks/users.yml", "playbooks/webserver.yml",
-                      "playbooks/patch.yml", "playbooks/reboot.yml") + STIG_PLAYBOOKS
+    SUDO_PLAYBOOKS = ("playbooks/baseline/baseline.yml", "playbooks/examples/users.yml", "playbooks/examples/webserver.yml",
+                      "playbooks/patching/patch.yml", "playbooks/operations/reboot.yml") + STIG_PLAYBOOKS
     # Actions that run on the controller without opening a connection to the host.
     CONTROLLER_ACTIONS = {"assert", "debug", "fail", "include_vars", "meta", "set_fact"}
 
@@ -772,8 +778,8 @@ class PrivilegeTests(unittest.TestCase):
     def test_stig_runs_use_no_sudo_before_choosing_their_hosts(self):
         # A host of another system is skipped or refused at the decision, before any sudo password
         # reaches it; a wrong one counts toward faillock on a STIG-hardened host.
-        for playbook, decision in (("playbooks/stig-audit.yml", "Leave hosts of other systems to their own playbook"),
-                                   ("playbooks/stig-apply.yml", "Refuse a host that another system's playbook covers")):
+        for playbook, decision in (("playbooks/stig/audit.yml", "Leave hosts of other systems to their own playbook"),
+                                   ("playbooks/stig/apply.yml", "Refuse a host that another system's playbook covers")):
             play = tasks(playbook)[0]
             self.assertIs(play["gather_facts"], False)
             names = [t["name"] for t in play["pre_tasks"]]
@@ -810,7 +816,7 @@ class PrivilegeTests(unittest.TestCase):
 
     def test_the_health_report_never_asks_for_sudo(self):
         # It runs right after Ping, before Semaphore holds a sudo password.
-        play = tasks("playbooks/report.yml")[0]
+        play = tasks("playbooks/operations/report.yml")[0]
         self.assertIs(play["become"], False)
         for task in walk(play["pre_tasks"] + play["tasks"]):
             with self.subTest(task=task["name"]):
@@ -866,7 +872,7 @@ class ReadOnlyOperationsTests(unittest.TestCase):
     CONTROLLER = {f"ansible.builtin.{action}" for action in PrivilegeTests.CONTROLLER_ACTIONS}
 
     def test_every_task_only_reads_and_reports_no_change_even_in_check_mode(self):
-        play = tasks("playbooks/report.yml")[0]
+        play = tasks("playbooks/operations/report.yml")[0]
         probes_that_may_fail = set()
         for task in walk(play["pre_tasks"] + play["tasks"]):
             module = next(key for key in task if key.startswith("ansible.builtin."))
@@ -884,7 +890,7 @@ class ReadOnlyOperationsTests(unittest.TestCase):
         self.assertEqual(commands - probes_that_may_fail, {"Measure the root file system"})
 
     def report(self, facts, **registered):
-        play = tasks("playbooks/report.yml")[0]
+        play = tasks("playbooks/operations/report.yml")[0]
         variables = dict(inventory_hostname=facts.pop("host"), ansible_facts=facts, **registered)
         summary = named(play["tasks"], "Summarize each host")["ansible.builtin.debug"]["msg"]
         verdict = named(play["tasks"], "Say whether each host needs attention")["ansible.builtin.debug"]["msg"]
@@ -975,7 +981,7 @@ class RebootTests(unittest.TestCase):
     """reboot.yml reboots exactly one acknowledged host, and only outside check mode."""
 
     def play(self):
-        return tasks("playbooks/reboot.yml")[0]
+        return tasks("playbooks/operations/reboot.yml")[0]
 
     def test_the_seeded_answer_is_the_one_the_playbook_accepts(self):
         expression = self.play()["vars"]["reboot_confirm"]
@@ -1097,7 +1103,7 @@ class PatchControllerTests(unittest.TestCase):
     """A patch run that reaches the controller it comes from never reboots it."""
 
     def block(self):
-        [play] = yaml.safe_load((ROOT / "playbooks" / "patch.yml").read_text())
+        [play] = yaml.safe_load((ROOT / "playbooks" / "patching" / "patch.yml").read_text())
         return play, named(play["tasks"], "Detect and optionally handle a reboot after real patching")["block"]
 
     def test_the_reboot_is_skipped_for_the_controller_itself(self):
@@ -1117,8 +1123,8 @@ class PatchControllerTests(unittest.TestCase):
     @unittest.skipUnless(Templar, "needs ansible-core, as CI installs it")
     def test_needrestart_is_suspended_only_on_the_controller_itself(self):
         # After a library update Ubuntu's needrestart restarts Semaphore, which would end the run halfway.
-        for playbook, task_name, fact in (("patch.yml", "Upgrade Ubuntu packages without removals", "lab_is_controller"),
-                                          ("stig-apply.yml", "Apply the vendor remediation on Ubuntu", "stig_is_controller")):
+        for playbook, task_name, fact in (("patching/patch.yml", "Upgrade Ubuntu packages without removals", "lab_is_controller"),
+                                          ("stig/apply.yml", "Apply the vendor remediation on Ubuntu", "stig_is_controller")):
             with self.subTest(playbook=playbook):
                 [play] = yaml.safe_load((ROOT / "playbooks" / playbook).read_text())
                 task = named(play["tasks"], task_name)
@@ -1177,7 +1183,7 @@ class StigApplyControllerTests(unittest.TestCase):
     """A STIG apply whose one target is the controller it comes from never reboots it."""
 
     def tasks(self):
-        [play] = yaml.safe_load((ROOT / "playbooks" / "stig-apply.yml").read_text())
+        [play] = yaml.safe_load((ROOT / "playbooks" / "stig" / "apply.yml").read_text())
         return play, play["tasks"]
 
     def test_the_reboot_is_skipped_for_the_controller_itself(self):
@@ -1291,9 +1297,11 @@ class PreflightPathTests(unittest.TestCase):
 
     def loaded(self, facts):
         task = named(tasks("playbooks/tasks/preflight.yml"), "Load the reviewed names for this OS family")
-        template = jinja2.Environment(undefined=jinja2.StrictUndefined).from_string(
-            task["ansible.builtin.include_vars"]["file"])
-        return template.render(playbook_dir="/lab/playbooks", ansible_facts=facts)
+        environment = jinja2.Environment(undefined=jinja2.StrictUndefined)
+        environment.filters["dirname"] = os.path.dirname
+        template = environment.from_string(task["ansible.builtin.include_vars"]["file"])
+        # The first folder Ansible searches is the task file's own, whatever folder the playbook is in.
+        return template.render(ansible_search_path=["/lab/playbooks/tasks", "/lab/playbooks/baseline"], ansible_facts=facts)
 
     def test_each_supported_system_loads_its_own_family_file(self):
         for system in self.SYSTEMS:
@@ -1371,19 +1379,36 @@ class ReportedFactsTests(unittest.TestCase):
         (self.work / "host_vars" / "lab-alma.yml").write_text("ansible_host: alma.example.test\n")
         (self.work / "collections").mkdir()
 
-    def ping(self, **facts):
+    def ping(self, playbook=None, **facts):
         (self.work / "facts.json").write_text(json.dumps(dict(self.UBUNTU, **facts)))
         environment = dict(os.environ, ANSIBLE_CONFIG=str(ROOT / "ansible.cfg"),
                            ANSIBLE_COLLECTIONS_PATH=str(self.work / "collections"),
                            ANSIBLE_COLLECTIONS_SCAN_SYS_PATH="False")
         return subprocess.run(["ansible-playbook", "-i", str(self.work / "inventory.ini"),
-                               str(ROOT / "playbooks" / "ping.yml"), "--limit", "lab-ubuntu"],
+                               str(playbook or ROOT / "playbooks" / "baseline" / "ping.yml"), "--limit", "lab-ubuntu"],
                               capture_output=True, text=True, timeout=180, cwd=self.work, env=environment)
 
     def test_a_target_that_reports_its_system_passes(self):
         result = self.ping()
         self.assertEqual(result.returncode, 0, result.stdout[-3000:] + result.stderr[-2000:])
         self.assertIn("lab-ubuntu (ubuntu.example.test) runs Ubuntu 24.04.", result.stdout)
+
+    def test_the_shared_checks_find_their_files_from_a_playbook_in_any_folder(self):
+        # The thin file at the earlier path, and playbooks of a reader's own: directly in playbooks/, as
+        # releases before v1.12.0 had theirs, in playbooks/site/, and one folder deeper.
+        tree = self.work / "lab" / "playbooks"
+        shutil.copytree(ROOT / "playbooks", tree)
+        own = (ROOT / "playbooks" / "baseline" / "ping.yml").read_text()
+        (tree / "my-flat.yml").write_text(own.replace("../tasks/preflight.yml", "tasks/preflight.yml"))
+        (tree / "site" / "mine.yml").write_text(own)
+        (tree / "site" / "deeper").mkdir()
+        (tree / "site" / "deeper" / "mine.yml").write_text(own.replace("../tasks/preflight.yml", "../../tasks/preflight.yml"))
+        for playbook in ("ping.yml", "baseline/ping.yml", "my-flat.yml", "site/mine.yml", "site/deeper/mine.yml"):
+            with self.subTest(playbook=playbook):
+                result = self.ping(playbook=tree / playbook)
+                self.assertEqual(result.returncode, 0, result.stdout[-3000:] + result.stderr[-2000:])
+                self.assertIn("TASK [Load the reviewed names for this OS family]", result.stdout)
+                self.assertIn("lab-ubuntu (ubuntu.example.test) runs Ubuntu 24.04.", result.stdout)
 
     def test_a_crafted_os_family_stops_before_any_file_is_loaded(self):
         crafted = os.path.relpath(self.work / "host_vars" / "lab-alma", ROOT / "playbooks" / "vars")
@@ -1448,8 +1473,8 @@ class ControllerPathTests(unittest.TestCase):
     def test_only_the_preflight_lets_a_fact_choose_a_file(self):
         named_by_target, checked = set(), set()
         # The per-system STIG playbooks only import the shared ones.
-        for pattern in ("playbooks/*.yml", "onboard/existing/*.yml", "examples/semaphore/*.yml"):
-            for path in sorted(ROOT.glob(pattern)):
+        for pattern in ("playbooks/*/*.yml", "onboard/existing/*.yml", "examples/semaphore/*.yml"):
+            for path in sorted(path for path in ROOT.glob(pattern) if path.parent.name not in ("tasks", "vars")):
                 for play in yaml.safe_load(path.read_text()):
                     # A play on the controller itself has no target.
                     if play["hosts"] == "localhost":
@@ -1478,7 +1503,7 @@ class LabFolderTests(unittest.TestCase):
                 self.assertRegex(source, r"(?m)^controller_seed_lab$")
         called = set()
         for playbook in (ROOT / "playbooks").rglob("*.yml"):
-            called |= set(re.findall(r"\.\./scripts/([\w.-]+)", playbook.read_text()))
+            called |= set(re.findall(r"/scripts/([\w.-]+\.py)", playbook.read_text()))
         self.assertIn("summarize_xccdf.py", called)
         for script in called:
             with self.subTest(script=script):

@@ -56,20 +56,20 @@ class FakeSemaphore:
         self.key_saved = self.inventory_saved = lambda item: None
         self.user = {"id": 1, "username": "admin", "admin": True}
         self.role, self.token, self.session = "owner", None, None
-        self.projects = [{"id": 1, "name": "Ansible Practice"}]
-        self.repositories = [{"id": 3, "name": "Local lab folder", "git_url": LAB}]
-        self.inventory = {"id": 4, "name": "Lab inventory file", "project_id": 1, "type": "file",
+        self.projects = [{"id": 1, "name": "Ansible Automation"}]
+        self.repositories = [{"id": 3, "name": "Local playbooks", "git_url": LAB}]
+        self.inventory = {"id": 4, "name": "Inventory file", "project_id": 1, "type": "file",
                           "inventory": "inventories/lab.ini", "repository_id": 3, "ssh_key_id": 2,
                           "become_key_id": None, "template_id": None}
         self.keys = {1: {"id": 1, "name": "None", "type": "none", "project_id": 1},
-                     2: {"id": 2, "name": "Practice target SSH", "type": "ssh", "project_id": 1}}
+                     2: {"id": 2, "name": "Target SSH key", "type": "ssh", "project_id": 1}}
         self.secrets = {2: {"login": "svc_ansible", "private_key": "-"}}
 
     def new_id(self):
         self.next_id += 1
         return self.next_id
 
-    def add_key(self, name="Lab sudo", key_type="login_password", login="", password=PASSWORD):
+    def add_key(self, name="Target sudo password", key_type="login_password", login="", password=PASSWORD):
         key_id = self.new_id()
         self.keys[key_id] = {"id": key_id, "name": name, "type": key_type, "project_id": 1}
         if password is not None:
@@ -174,7 +174,7 @@ class LabSudoTests(unittest.TestCase):
 
     def run_tool(self, replace=False, password=PASSWORD):
         """One run; returns the SystemExit message or None. Every message is checked for the password."""
-        found = seed.resolve(self.fake, "Ansible Practice", LAB, None, self.fake.user)
+        found = seed.resolve(self.fake, "Ansible Automation", LAB, None, self.fake.user)
         run = lab_sudo.Run(seed, self.fake, found, say=self.said.append)
         try:
             self.assertEqual(run.configure(replace, self.password(password)), 0)
@@ -191,7 +191,7 @@ class LabSudoTests(unittest.TestCase):
         return message
 
     def lab_sudo_key(self):
-        [key_id] = [key_id for key_id, key in self.fake.keys.items() if key["name"] == "Lab sudo"]
+        [key_id] = [key_id for key_id, key in self.fake.keys.items() if key["name"] == "Target sudo password"]
         return key_id
 
     def assertNothingChanged(self, message, *phrases):
@@ -204,7 +204,7 @@ class LabSudoTests(unittest.TestCase):
         self.assertIsNone(self.run_tool())
         key_id = self.lab_sudo_key()
         self.assertEqual(self.fake.writes(), [
-            ("POST", "/project/1/keys", {"name": "Lab sudo", "type": "login_password", "project_id": 1,
+            ("POST", "/project/1/keys", {"name": "Target sudo password", "type": "login_password", "project_id": 1,
                                          "login_password": {"login": "", "password": PASSWORD}}),
             ("PUT", "/project/1/inventory/4", self.fake.inventory),
         ])
@@ -213,8 +213,8 @@ class LabSudoTests(unittest.TestCase):
         self.assertEqual((self.fake.inventory["ssh_key_id"], self.fake.inventory["repository_id"]), (2, 3))
         self.assertEqual(self.asked, 1)
         self.assertEqual(self.said, [
-            f"Stored the targets' sudo password as the key 'Lab sudo' (ID {key_id}), with an empty Username, "
-            "and chose it as the Sudo Credentials of 'Lab inventory file'.",
+            f"Stored the targets' sudo password as the key 'Target sudo password' (ID {key_id}), with an empty Username, "
+            "and chose it as the Sudo Credentials of 'Inventory file'.",
             "Next: run the Baseline preview template. Every lab target needs this same sudo password for "
             "svc_ansible."])
 
@@ -224,10 +224,41 @@ class LabSudoTests(unittest.TestCase):
         self.said, self.asked = [], 0
         self.assertIsNone(self.run_tool())
         self.assertEqual((len(self.fake.writes()), self.asked), (writes, 0))
-        self.assertEqual(self.said[0], f"'Lab inventory file' already uses the key 'Lab sudo' (ID {key_id}) as its "
+        self.assertEqual(self.said[0], f"'Inventory file' already uses the key 'Target sudo password' (ID {key_id}) as its "
                                        "Sudo Credentials; nothing changed. To store a new password in it, run this "
                                        "again with --replace.")
         self.assertIn("--replace: it stores the password anew with an empty Username", self.said[1])
+
+    def test_a_key_with_its_name_of_an_earlier_release_is_renamed_and_keeps_its_password(self):
+        key_id = self.fake.add_key(name="Lab sudo")
+        self.fake.inventory["become_key_id"] = key_id
+        self.assertIsNone(self.run_tool())
+        self.assertEqual(self.fake.keys[key_id]["name"], "Target sudo password")
+        self.assertEqual(self.fake.secrets[key_id], {"login": "", "password": PASSWORD})
+        self.assertEqual(self.asked, 0)
+        self.assertEqual(self.said[0], f"Renamed the key 'Lab sudo' (ID {key_id}) to 'Target sudo password'; its "
+                                       "password is kept.")
+        self.assertIn(f"already uses the key 'Target sudo password' (ID {key_id})", self.said[1])
+        # The one write is the rename, and it asks Semaphore to keep the secret it holds.
+        self.assertEqual([(method, body["name"], body["override_secret"]) for method, _path, body in self.fake.writes()],
+                         [("PUT", "Target sudo password", False)])
+
+    def test_an_earlier_name_beside_a_key_of_today_is_left_as_it_is(self):
+        old = self.fake.add_key(name="Lab sudo")
+        new = self.fake.add_key()
+        self.fake.inventory["become_key_id"] = new
+        self.assertIsNone(self.run_tool())
+        self.assertEqual((self.fake.keys[old]["name"], self.fake.keys[new]["name"]), ("Lab sudo", "Target sudo password"))
+        self.assertEqual(self.fake.writes(), [])
+
+    def test_a_rename_semaphore_refuses_stops_with_what_to_do(self):
+        key_id = self.fake.add_key(name="Lab sudo")
+        self.fake.inventory["become_key_id"] = key_id
+        self.fake.refuse = lambda method, path: (400, "no") if method == "PUT" and "/keys/" in path else None
+        message = self.run_tool()
+        self.assertIn(f"Semaphore did not rename the key 'Lab sudo' (ID {key_id}) to 'Target sudo password'", message)
+        self.assertIn("Rename it in Key Store, then run this again. Nothing else was changed.", message)
+        self.assertEqual(self.fake.keys[key_id]["name"], "Lab sudo")
 
     def test_replace_stores_a_new_password_in_the_same_key(self):
         key_id = self.fake.add_key()
@@ -236,9 +267,9 @@ class LabSudoTests(unittest.TestCase):
         [(method, path, body)] = self.fake.writes()
         self.assertEqual((method, path), ("PUT", f"/project/1/keys/{key_id}"))
         self.assertEqual((body["id"], body["name"], body["type"], body["override_secret"], body["login_password"]),
-                         (key_id, "Lab sudo", "login_password", True, {"login": "", "password": NEW_PASSWORD}))
+                         (key_id, "Target sudo password", "login_password", True, {"login": "", "password": NEW_PASSWORD}))
         self.assertEqual(self.fake.secrets[key_id], {"login": "", "password": NEW_PASSWORD})
-        self.assertEqual(self.said[0], f"Stored the new password in the key 'Lab sudo' (ID {key_id}), with an "
+        self.assertEqual(self.said[0], f"Stored the new password in the key 'Target sudo password' (ID {key_id}), with an "
                                        "empty Username.")
 
     def test_an_existing_key_is_chosen_without_asking_for_the_password(self):
@@ -248,16 +279,16 @@ class LabSudoTests(unittest.TestCase):
         self.assertEqual([call[:2] for call in self.fake.writes()], [("PUT", "/project/1/inventory/4")])
         self.assertEqual(self.fake.inventory["become_key_id"], key_id)
         self.assertEqual(self.fake.secrets[key_id], {"login": "", "password": PASSWORD})
-        self.assertEqual(self.said[0], f"Chose the existing key 'Lab sudo' (ID {key_id}) as the Sudo Credentials of "
-                                       "'Lab inventory file'; the key itself was not changed.")
+        self.assertEqual(self.said[0], f"Chose the existing key 'Target sudo password' (ID {key_id}) as the Sudo Credentials of "
+                                       "'Inventory file'; the key itself was not changed.")
         self.assertIn("Semaphore never shows a key's Username", self.said[1])
 
     def test_replace_also_chooses_a_key_the_inventory_lacks(self):
         key_id = self.fake.add_key()
         self.assertIsNone(self.run_tool(replace=True, password=NEW_PASSWORD))
         self.assertEqual(self.fake.inventory["become_key_id"], key_id)
-        self.assertEqual(self.said[0], f"Stored the new password in the key 'Lab sudo' (ID {key_id}), with an "
-                                       "empty Username, and chose it as the Sudo Credentials of 'Lab inventory file'.")
+        self.assertEqual(self.said[0], f"Stored the new password in the key 'Target sudo password' (ID {key_id}), with an "
+                                       "empty Username, and chose it as the Sudo Credentials of 'Inventory file'.")
 
     def test_another_sudo_credential_on_the_inventory_is_refused_even_with_replace(self):
         other = self.fake.add_key(name="Vendor sudo")
@@ -265,7 +296,7 @@ class LabSudoTests(unittest.TestCase):
         for replace in (False, True):
             with self.subTest(replace=replace):
                 message = self.run_tool(replace=replace)
-                self.assertNothingChanged(message, f"'Lab inventory file' already uses the key 'Vendor sudo' (ID {other})")
+                self.assertNothingChanged(message, f"'Inventory file' already uses the key 'Vendor sudo' (ID {other})")
                 self.assertEqual(self.asked, 0)
         self.fake.add_key()
         self.assertNothingChanged(self.run_tool(replace=True), "Vendor sudo")
@@ -300,24 +331,24 @@ class LabSudoTests(unittest.TestCase):
 
     def test_several_keys_of_that_name_are_refused(self):
         first, second = self.fake.add_key(), self.fake.add_key()
-        self.assertNothingChanged(self.run_tool(), f"2 keys are named 'Lab sudo' (IDs {first}, {second})")
+        self.assertNothingChanged(self.run_tool(), f"2 keys are named 'Target sudo password' (IDs {first}, {second})")
 
     def test_a_refused_creation_changes_nothing(self):
         self.fake.refuse = lambda method, path: (400, "bad key") if method == "POST" else None
-        self.assertEqual(self.run_tool(), "Semaphore refused to create the key 'Lab sudo': POST /project/1/keys "
+        self.assertEqual(self.run_tool(), "Semaphore refused to create the key 'Target sudo password': POST /project/1/keys "
                                           "failed with HTTP 400: bad key. Nothing was changed.")
         self.assertEqual(self.fake.inventory["become_key_id"], None)
 
     def test_an_unanswered_creation_says_where_to_look(self):
         self.fake.silent = lambda method, path: method == "POST"
         message = self.run_tool()
-        self.assertIn("did not answer when asked to create the key 'Lab sudo'", message)
-        self.assertIn("'Lab inventory file' was not changed", message)
+        self.assertIn("did not answer when asked to create the key 'Target sudo password'", message)
+        self.assertIn("'Inventory file' was not changed", message)
         self.assertEqual([call[0] for call in self.fake.writes()], ["POST"])
 
     def test_a_key_stored_otherwise_than_asked_is_deleted_again(self):
         for change, problem in (({"type": "string"}, "its type is 'string'"),
-                                ({"name": "Lab sudo copy"}, "its name is 'Lab sudo copy'")):
+                                ({"name": "Target sudo password copy"}, "its name is 'Target sudo password copy'")):
             with self.subTest(change=change):
                 self.fake = FakeSemaphore()
                 self.fake.key_saved = lambda key: key.update(change)
@@ -339,15 +370,15 @@ class LabSudoTests(unittest.TestCase):
         key_id = self.lab_sudo_key()
         self.assertIn(f"Deleting it failed too (DELETE /project/1/keys/{key_id} failed with HTTP 500): delete key "
                       f"ID {key_id} in Key Store", message)
-        self.assertIn("'Lab inventory file' was not changed", message)
+        self.assertIn("'Inventory file' was not changed", message)
         self.assertEqual(self.fake.inventory["become_key_id"], None)
 
     def test_a_refused_choice_keeps_the_key_and_a_second_run_finishes(self):
         self.fake.refuse = lambda method, path: (400, "no") if (method, path) == ("PUT", "/project/1/inventory/4") else None
         message = self.run_tool()
         key_id = self.lab_sudo_key()
-        self.assertIn("Semaphore refused to choose 'Lab sudo' as the Sudo Credentials of 'Lab inventory file'", message)
-        self.assertIn(f"The inventory was not changed. The key 'Lab sudo' (ID {key_id}) was created and is kept; run "
+        self.assertIn("Semaphore refused to choose 'Target sudo password' as the Sudo Credentials of 'Inventory file'", message)
+        self.assertIn(f"The inventory was not changed. The key 'Target sudo password' (ID {key_id}) was created and is kept; run "
                       "this again to choose it without being asked for the password.", message)
         self.fake.refuse = lambda method, path: None
         self.asked = 0
@@ -359,8 +390,8 @@ class LabSudoTests(unittest.TestCase):
         key_id = self.fake.add_key()
         self.fake.inventory_saved = lambda inventory: inventory.update(ssh_key_id=None) if inventory["become_key_id"] else None
         message = self.run_tool()
-        self.assertIn("Semaphore did not save 'Lab inventory file' as asked (it differs in ssh_key_id); it was put back "
-                      f"as it was. The key 'Lab sudo' (ID {key_id}) was not changed.", message)
+        self.assertIn("Semaphore did not save 'Inventory file' as asked (it differs in ssh_key_id); it was put back "
+                      f"as it was. The key 'Target sudo password' (ID {key_id}) was not changed.", message)
         self.assertEqual(self.fake.inventory, before)
 
     def test_an_inventory_that_cannot_be_put_back_is_named(self):
@@ -375,7 +406,7 @@ class LabSudoTests(unittest.TestCase):
         self.fake.inventory["become_key_id"] = key_id
         self.fake.refuse = lambda method, path: (500, "") if method == "PUT" else None
         self.assertEqual(self.run_tool(replace=True, password=NEW_PASSWORD),
-                         f"Semaphore refused to store the new password in 'Lab sudo' (ID {key_id}): PUT "
+                         f"Semaphore refused to store the new password in 'Target sudo password' (ID {key_id}): PUT "
                          f"/project/1/keys/{key_id} failed with HTTP 500. Nothing was changed.")
         self.assertEqual(self.fake.secrets[key_id]["password"], PASSWORD)
         self.fake.refuse = lambda method, path: None
@@ -384,13 +415,13 @@ class LabSudoTests(unittest.TestCase):
                       self.run_tool(replace=True, password=NEW_PASSWORD))
         self.fake.silent = lambda method, path: False
         self.fake.key_saved = lambda key: self.fake.secrets.pop(key["id"])
-        self.assertIn(f"Semaphore did not confirm the new password of 'Lab sudo' (ID {key_id}): it holds no "
+        self.assertIn(f"Semaphore did not confirm the new password of 'Target sudo password' (ID {key_id}): it holds no "
                       "password.", self.run_tool(replace=True, password=NEW_PASSWORD))
 
     def test_a_login_that_may_not_change_the_project_stops_first(self):
         self.fake.user["admin"] = False
         self.fake.role = "task_runner"
-        found = seed.resolve(self.fake, "Ansible Practice", LAB, None, self.fake.user)
+        found = seed.resolve(self.fake, "Ansible Automation", LAB, None, self.fake.user)
         with self.assertRaises(SystemExit):
             seed.check_access(self.fake, self.fake.user, found)
         self.assertEqual(self.fake.writes(), [])
@@ -499,7 +530,7 @@ class MainTests(unittest.TestCase):
         with contextlib.ExitStack() as stack:
             for patch in (mock.patch.dict(os.environ, environment, clear=True),
                           mock.patch.object(lab_sudo.os, "geteuid", return_value=euid),
-                          mock.patch.object(lab_sudo, "MARKER", self.marker),
+                          mock.patch.object(lab_sudo, "MARKERS", (self.marker,)),
                           mock.patch.object(lab_sudo, "run_check", self.run_check),
                           mock.patch.object(lab_sudo, "load_seeder", return_value=seed),
                           mock.patch.object(seed, "Client", self.client),
@@ -518,10 +549,10 @@ class MainTests(unittest.TestCase):
     def test_a_password_on_standard_input_is_stored_and_chosen(self):
         result, output, errors = self.run_main("--password-stdin", stdin=f"{PASSWORD}\n")
         self.assertEqual((result, errors), (0, ""))
-        key_id = next(k for k, key in self.fake.keys.items() if key["name"] == "Lab sudo")
+        key_id = next(k for k, key in self.fake.keys.items() if key["name"] == "Target sudo password")
         self.assertEqual(self.fake.secrets[key_id], {"login": "", "password": PASSWORD})
         self.assertEqual(self.fake.inventory["become_key_id"], key_id)
-        self.assertIn("Stored the targets' sudo password as the key 'Lab sudo'", output)
+        self.assertIn("Stored the targets' sudo password as the key 'Target sudo password'", output)
 
     def test_checks_before_semaphore_is_contacted(self):
         result, _output, _errors = self.run_main("--password-stdin", stdin=f"{PASSWORD}\n", euid=1000)

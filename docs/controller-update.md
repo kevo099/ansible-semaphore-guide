@@ -3,7 +3,7 @@
 [Back to the guide](../README.md) · [Stage 1: install the controller](stage-1-controller.md)
 
 **Where: the controller, as its administrator.** A controller whose installer
-seeded the practice project can take a newer release of the guide without being
+seeded the guide's project can take a newer release of the guide without being
 reinstalled: any Enterprise Linux controller, and an Ubuntu controller installed
 from release `v1.5.0` on. An Ubuntu controller from an earlier release, or one
 built [by hand](manual-controller-ubuntu.md), has no seeded project, so the
@@ -39,9 +39,11 @@ uses those paths.
   `sudo bash scripts/add-target.sh --from-info`. That command also still works
   in the newer copy for one release, through the same kind of wrapper; the new
   path is `controller/add-target.sh`.
-- Nothing in the lab folder or in Semaphore moves. The lab folder keeps
-  `playbooks/`, `ansible.cfg` and `scripts/summarize_xccdf.py` where they
-  were, and the seeded templates keep running the same playbook paths.
+- That move of the tools changed nothing in the lab folder or in Semaphore:
+  the lab folder keeps `ansible.cfg` and `scripts/summarize_xccdf.py` where
+  they were. Release `v1.12.0` is the one that moves the playbooks and renames
+  what the installer seeded, as
+  [its section](#feature-names-tabs-and-folders) describes.
 - Earlier versions of this page cloned each release into a new folder, such as
   `~/guide-v1.8.0`. You can keep using that folder as the guide's folder, or
   clone again into `~/ansible-semaphore-guide`.
@@ -85,13 +87,18 @@ versions: yours, the guide's version you last installed, and the new one.
   changed, a file you changed that the release removes, a guide file you
   deleted that the release changed, or a file of yours at a path the release
   now uses. Compare them and decide; `--replace-edited` takes the release's
-  version, and the folder's Git history keeps yours.
+  version, and the folder's Git history keeps yours. For a playbook that the
+  release moved to its feature's folder, the message names the new path and
+  the `git show` command that prints your version: the seeded templates run
+  the new file, so make your change again there after the update.
 - Other files you added are never touched.
 
 The plan also lists the `content/` folders it would create for SCAP files you
 supply, the Semaphore variable groups, template tabs and templates it would
 add, the seeded templates it would put on a tab, and the seeded objects that
-this release replaces. It shows whether the readiness check passes before the
+this release replaces. On a controller of a release before `v1.12.0` it also
+lists the names it would change, the tabs it would renumber and the templates
+it would point at a new path. It shows whether the readiness check passes before the
 update. Its last lines name the Ansible runtime and Semaphore's SSH settings
 when those are older than this copy, as
 [their section](#do-update-the-ansible-runtime-and-semaphores-ssh-settings)
@@ -135,9 +142,11 @@ confirms each template it edits, putting it back if Semaphore changed any other
 setting. If it cannot confirm an edit, it leaves a `pending-template-ID.json`
 record there, and later runs stop until you have checked that template in the
 UI and deleted the record. It never changes Semaphore itself, the database,
-Ansible, the inventory, keys, a template's variable groups, or a tab you chose,
-and it deletes nothing unless you ask, as
-[the STIG tab section](#from-one-stig-tab-to-one-per-system) describes.
+Ansible, the machines in the inventory, a key's secret, a template's variable
+groups, or a tab you chose, and it deletes nothing unless you ask, as
+[the STIG tab section](#from-one-stig-tab-to-one-per-system) describes. The
+names and playbook paths that the update to `v1.12.0` changes are listed under
+[Feature names, tabs and folders](#feature-names-tabs-and-folders).
 
 Last, it checks that the lab folder is exactly as planned; if you edited a
 guide file meanwhile, it stops without touching the folder, and a second run
@@ -150,7 +159,7 @@ writes the files as the lab folder's owner, so the `semaphore` group can still
 read them, restores SELinux labels on Enterprise Linux, and commits them in the
 folder's Git history with `.guide-files.json`, the record of the guide's own
 versions that the next update compares with. A second run reports nothing to
-do.
+do, and the plan then ends with `Plan only. There is nothing to change.`
 
 `git revert HEAD` in the folder undoes that commit's files, not the Semaphore
 changes: the tabs and templates the update added stay and need those files,
@@ -160,6 +169,15 @@ stops and names the revert commit; to apply the update again, revert that
 commit with `git revert COMMIT` as the folder's owner and run the update. After
 a later update, the revert restores the previous record, so the next update
 plans the same changes again; check its plan before `--apply`.
+
+A revert of the update to `v1.12.0` also takes the playbooks' new folders out
+of the lab folder, while the seeded templates in Semaphore go on naming them
+and the renamed objects keep their new names. Those templates then fail with a
+playbook that is not there, while a template of yours on an earlier path
+runs. Get the files back as the paragraph above says: after the folder's
+first update by reverting the revert commit, otherwise by running the update
+again. The earlier names and paths of every object are in the root-only files
+under `/root/ansible-lab-update/` that the update saved first.
 
 ## Options and logins
 
@@ -178,13 +196,17 @@ project's owner or a manager, as
 [chapter 17](17-api-and-integrations.md#do-inspect-swagger-and-token-access)
 shows, pass it as `SEMAPHORE_API_TOKEN` with
 `sudo --preserve-env=SEMAPHORE_API_TOKEN`, and delete the token afterwards.
+Two renames of the update to `v1.12.0` need more than a manager's login:
+Semaphore lets only an administrator or the project's owner rename the project,
+and only an administrator rename a user. With another login the plan says which
+of those names it leaves, and updates everything else.
 
 ## The Operations tab
 
 A controller installed before the **Operations** tab existed gets it from the
 update: `--apply` adds the tab after your existing tabs, with its two
 templates, **Health report** and **Reboot one target**, and copies their
-playbooks, `playbooks/report.yml` and `playbooks/reboot.yml`, into the lab
+playbooks, `playbooks/operations/report.yml` and `playbooks/operations/reboot.yml`, into the lab
 folder. It changes nothing else: your other tabs keep their order, and no
 other template changes. The plan lists them under `Template tabs to add` and
 `Templates to add`. The new controller tools of the same release,
@@ -193,6 +215,73 @@ other template changes. The plan lists them under `Template tabs to add` and
 from the update; on a controller installed earlier, make the copy of the
 service key that Stage 3 uses yourself, as
 [Stage 1](stage-1-controller.md#do-save-the-service-key) shows.
+
+## Feature names, tabs and folders
+
+Release `v1.12.0` names what the installer seeds after its feature, gives each
+feature a tab, and keeps each feature's playbooks in a folder of their own. An
+update brings a controller of an earlier release to the same, in place:
+
+| Earlier | From `v1.12.0` |
+| --- | --- |
+| Project **Ansible Practice** | **Ansible Automation** |
+| Administrator **Lab Administrator**; its login stays `admin` | **Ansible Admin** |
+| Key **Practice target SSH** | **Target SSH key** |
+| Key **Lab sudo** | **Target sudo password** |
+| Repository **Local lab folder** | **Local playbooks** |
+| Inventory **Lab inventory file** | **Inventory file** |
+| Variable group **Practice defaults** | **Defaults** |
+| Tab **Lessons** | **Baseline**; **Users** and **Webserver** move to a new last tab, **Examples** |
+| `playbooks/ping.yml`, `playbooks/baseline.yml` | `playbooks/baseline/` |
+| `playbooks/patch.yml` | `playbooks/patching/patch.yml` |
+| `playbooks/report.yml`, `playbooks/reboot.yml` | `playbooks/operations/` |
+| `playbooks/stig-audit.yml`, `playbooks/stig-apply.yml` | `playbooks/stig/audit.yml`, `playbooks/stig/apply.yml` |
+| `playbooks/users.yml`, `playbooks/webserver.yml`, `playbooks/templates/` | `playbooks/examples/` |
+| Variable `lab_practice_users` of **Users** | `lab_example_users` |
+| STIG results on a target under `/var/log/stig-practice/` | `/var/log/stig-scans/` |
+
+- **Renames.** The plan lists each one under `To rename`. An object is renamed
+  only while it still has its earlier name, so one you renamed keeps yours.
+  The keys keep their secrets, the inventory keeps its sudo credential, and
+  the templates keep their task history. When something of yours already has
+  one of the new names, the plan reports it as a problem and nothing is
+  changed until you rename yours. The same holds when two variable groups or
+  two tabs have the earlier name, because the update cannot tell which one the
+  installer made. A project you renamed is found with `--project-id`.
+- **Tabs.** The two example templates move to **Examples** unless you gave
+  them another tab. Every tab also moves one place up, once: the earlier
+  releases put their first tab at the place of Semaphore's own **All** tab,
+  and a tab saved there would come before it.
+- **Paths.** The seeded templates are pointed at the new paths after the lab
+  folder holds them. For this release a thin playbook at each earlier path
+  runs the moved one, so a template of yours, or a command you typed, that
+  names an earlier path keeps working. The plan lists such templates under
+  `Templates of yours that name a playbook's earlier path`; change their
+  **Playbook Filename**, because the release after this one removes the thin
+  playbooks.
+- **Your own playbooks.** [`playbooks/site/`](settings.md#your-own-playbooks)
+  is the folder for them. One you keep directly in `playbooks/` goes on
+  working as it is.
+- **Values beside the playbooks.** Ansible reads `group_vars/` and
+  `host_vars/` beside the playbook that runs, and the guide's playbooks now run
+  one folder further down. If the lab folder has `playbooks/group_vars` or
+  `playbooks/host_vars`, the plan of this update stops and asks you to move it
+  to `inventories/`, where Ansible reads it for every playbook.
+- **On your targets.** Nothing changes until a template runs. The next
+  **Baseline apply** reports the login banner as changed, because its first
+  line now reads `Managed by Ansible:`. The next **Users** and **Webserver**
+  runs report the accounts' comment and the page's title as changed. STIG runs
+  write to `/var/log/stig-scans/`; the results of earlier runs stay in
+  `/var/log/stig-practice/` until you remove them. A variable group of yours
+  that sets `lab_practice_users` stops **Users** with a message that names the
+  new variable.
+
+What does not change: the lab folder `/opt/ansible-lab`, the `lab` inventory
+group, the `svc_ansible` account and what the onboarding put on your targets.
+The service key of a controller installed earlier keeps its comment,
+`ansible-practice`, where a new one has `ansible-automation`; the key is the
+same either way. Before it changes anything, the update saves the renamed
+objects and every template as they were under `/root/ansible-lab-update/`.
 
 ## From one STIG tab to one per system
 
@@ -333,15 +422,15 @@ and the run ends with `Prepared and in the inventory: ...`. The account's
 authorized keys become exactly the service key, so pass `--extra-key FILE` for
 a key of your own that must stay. Afterwards
 `sudo python3.12 controller/lab-sudo.py` reports that the lab inventory already
-uses your **Lab sudo** key, and **Ping** and **Baseline preview** pass as
+uses your **Target sudo password** key, and **Ping** and **Baseline preview** pass as
 before.
 
 ## Check
 
 The update ends with `Updated to RELEASE_TAG. The readiness check passed.`, or
 with the readiness checks that already failed before it. The **Task Templates**
-page shows the tabs **Lessons**, **Patching**, one **STIG ·** tab per system and
-**Operations** beside **All**, and **Ping** still succeeds. After
+page shows the tabs **Baseline**, **Patching**, one **STIG ·** tab per system,
+**Operations** and **Examples** beside **All**, and **Ping** still succeeds. After
 `update-runtime.sh --apply`, `/opt/ansible-venv/bin/ansible --version` names
 the pinned ansible-core, and its plan reports nothing to do. On a controller updated from
 `v1.6.x`, the old **STIG** tab stays until you remove it; older controllers

@@ -140,8 +140,8 @@ read the selected release's terms before redistributing content.
 
 ## Profiles usable with this guide
 
-The [audit playbook](../../playbooks/stig-audit.yml) and
-[apply playbook](../../playbooks/stig-apply.yml), and their per-system
+The [audit playbook](../../playbooks/stig/audit.yml) and
+[apply playbook](../../playbooks/stig/apply.yml), and their per-system
 wrappers under [`playbooks/stig/`](../../playbooks/stig/), accept the variables below.
 Set them as Ansible extra variables with `-e`, or in the Semaphore template's
 variable group JSON. Ordinary inventory variables do not override the defaults
@@ -235,17 +235,17 @@ choose RHEL CIS Level 1, AlmaLinux CIS Level 2 and Ubuntu CIS Level 1.
 
 ```bash
 cd /opt/ansible-lab
-/opt/ansible-venv/bin/ansible-playbook -i inventories/lab.ini playbooks/stig-audit.yml \
+/opt/ansible-venv/bin/ansible-playbook -i inventories/lab.ini playbooks/stig/audit.yml \
   --limit lab-rhel \
   --private-key ~/.ssh/ansible_lab -K \
   -e '{"stig_profile_el": "xccdf_org.ssgproject.content_profile_cis_server_l1"}'
 
-/opt/ansible-venv/bin/ansible-playbook -i inventories/lab.ini playbooks/stig-audit.yml \
+/opt/ansible-venv/bin/ansible-playbook -i inventories/lab.ini playbooks/stig/audit.yml \
   --limit lab-alma \
   --private-key ~/.ssh/ansible_lab -K \
   -e '{"stig_profile_el": "xccdf_org.ssgproject.content_profile_cis"}'
 
-/opt/ansible-venv/bin/ansible-playbook -i inventories/lab.ini playbooks/stig-audit.yml \
+/opt/ansible-venv/bin/ansible-playbook -i inventories/lab.ini playbooks/stig/audit.yml \
   --limit lab-ubuntu \
   --private-key ~/.ssh/ansible_lab -K \
   -e '{"stig_usg_profile": "cis_level1_server-v1.0.0"}'
@@ -259,7 +259,7 @@ the target's required network access. This flag does not change the local
 SCAP command below.
 
 For remediation, follow [chapter 9's seeded templates](../09-security-benchmarks.md#the-seeded-stig-templates).
-Keep the exact same profile for before and after scans. `stig-apply.yml` runs
+Keep the exact same profile for before and after scans. `stig/apply.yml` runs
 the vendor data stream's embedded fixes on EL and `usg fix` on Ubuntu. It
 requires one target, a recovery acknowledgment (`stig_confirm: true` as a JSON
 boolean from the CLI) and a separate `allow_reboot: true` decision for reboot.
@@ -314,7 +314,7 @@ SSG/USG profile selection. Match the content to the target: a benchmark for
 another product can return `notapplicable`, which does not demonstrate passing
 checks. In the run, the RHEL 9 DISA benchmark returned all 392 rules as not
 applicable on AlmaLinux 9.8. The tested DISA content contains no remediation fixes, and
-`stig-apply.yml` refuses local content.
+`stig/apply.yml` refuses local content.
 
 Seeded controllers include **RHEL 9 · STIG audit, DISA SCAP file** and
 **Ubuntu 24.04 · STIG audit, DISA SCAP file**, using the variable groups

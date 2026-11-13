@@ -490,6 +490,37 @@ echo CONTINUES
                       check)
 
 
+class WordingTests(unittest.TestCase):
+    """What the guide installs, seeds and runs is named after what it does, not as practice material."""
+
+    # The names of releases before v1.12.0, which the update still has to recognize.
+    EARLIER = ("Ansible Practice", "Practice target SSH", "Practice defaults", ".practice-project-seeded",
+               "lab_practice_users", "playbooks/templates/practice.html.j2")
+
+    def test_only_the_recorded_earlier_names_say_practice(self):
+        root = COMMON.parent.parent
+        checked = 0
+        for folder, patterns in (("controller", ("*.py", "*.sh", "templates/*")), ("playbooks", ("**/*.yml", "**/*.j2")),
+                                 ("onboard", ("**/*.sh", "**/*.yml", "**/*.yaml", "**/*.py"))):
+            for pattern in patterns:
+                for path in sorted((root / folder).glob(pattern)):
+                    text = path.read_text()
+                    for name in self.EARLIER:
+                        text = text.replace(name, "")
+                    checked += 1
+                    with self.subTest(file=str(path.relative_to(root))):
+                        self.assertNotRegex(text, r"(?i)practice")
+        self.assertGreater(checked, 40)
+
+    def test_the_installer_names_the_administrator_the_key_and_the_certificate_plainly(self):
+        folder = COMMON.parent
+        self.assertIn('"--login", "admin", "--name", "Ansible Admin",', (folder / "create-admin.py").read_text())
+        self.assertIn("-C ansible-automation -f /etc/semaphore/svc_ansible", COMMON.read_text())
+        self.assertIn("-subj '/CN=Semaphore controller'", (folder / "expose-semaphore.sh").read_text())
+        for unit in ("semaphore.service", "semaphore-el9.service"):
+            self.assertIn("Description=Semaphore UI for Ansible", (folder / "templates" / unit).read_text())
+
+
 class SharedDownloadTests(unittest.TestCase):
     def test_checksum_mismatch_deletes_download_before_extracting(self):
         # All commands that could touch /var/cache are replaced. The real
@@ -734,7 +765,7 @@ controller_seed_lab
                                                 "ubuntu", "enterprise_linux", "[lab:vars]",
                                                 "ansible_user=svc_ansible",
                                                 "ansible_python_interpreter=/usr/bin/python3"])
-                for relative in ("ansible.cfg", "playbooks/stig-audit.yml", "playbooks/stig-apply.yml",
+                for relative in ("ansible.cfg", "playbooks/stig/audit.yml", "playbooks/stig/apply.yml",
                                  "playbooks/tasks/stig_scan.yml", "scripts/summarize_xccdf.py"):
                     self.assertEqual((lab / relative).read_bytes(), (ROOT / relative).read_bytes())
                 for path in [lab, *lab.rglob("*")]:
