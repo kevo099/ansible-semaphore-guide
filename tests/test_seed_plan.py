@@ -157,8 +157,10 @@ class SeedPlanTests(unittest.TestCase):
                 self.assertEqual(disa[0]["survey_vars"], [])
                 values = json.loads(plan["environments"][f"DISA SCAP file · {label}"]["json"])
                 self.assertEqual(set(values), {"stig_content_file", "stig_content_profile"})
-                self.assertTrue(values["stig_content_file"].startswith(f"content/{folder}/U_"))
-                self.assertTrue(values["stig_content_file"].endswith("_Benchmark.xml"))
+                # The system's own folder: the playbook scans with the one benchmark it holds,
+                # so the seeded value does not go stale with DISA's next release.
+                self.assertEqual(values["stig_content_file"], f"content/{folder}")
+                self.assertIn("patterns: '*_Benchmark.xml'", scan)
                 self.assertRegex(values["stig_content_profile"], profile_pattern)
                 self.assertNotIn("REPLACE_WITH", json.dumps(values))
 

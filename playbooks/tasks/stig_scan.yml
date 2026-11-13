@@ -3,16 +3,26 @@
 # operating-system vendor's scanner and STIG content; the guide adds no rules of
 # its own. With stig_content_file, stig-audit.yml scans with a SCAP data stream
 # you supply instead, such as a DISA SCAP benchmark, using OpenSCAP on either family.
+# An exceptions file, which XCCDF calls a tailoring file, leaves out the rules it
+# unselects from the scan and from the fixes; every run names it and counts them.
 # Expects: stig_phase, stig_profile_el, stig_usg_profile,
 # stig_fetch_remote_resources, stig_remote_dir, stig_fetch_dir,
-# stig_content_file, stig_content_profile.
-- name: Note whether this scan uses a local SCAP content file
+# stig_content_file, stig_content_profile, stig_tailoring_file, stig_report_folder.
+- name: Note whether this scan uses a local SCAP content file or an exceptions file
   ansible.builtin.set_fact:
     stig_local_content: "{{ stig_content_file | default('') | length > 0 }}"
     # A relative path is inside the lab folder, next to playbooks/.
     stig_content_source: >-
       {{ stig_content_file if stig_content_file | default('') is abs
          else playbook_dir ~ '/../' ~ stig_content_file | default('') }}
+    # Without stig_tailoring_file, a per-system playbook uses tailoring.xml in its
+    # system's content folder when that file exists; it fits the vendor's content only.
+    stig_tailoring_source: >-
+      {{ (stig_tailoring_file if stig_tailoring_file is abs else playbook_dir ~ '/../' ~ stig_tailoring_file)
+         if stig_tailoring_file | default('') | length > 0
+         else (playbook_dir ~ '/../content/' ~ stig_report_folder ~ '/tailoring.xml'
+               if stig_report_folder | default('') | length > 0 and stig_content_file | default('') | length == 0
+               else '') }}
 
 - name: Check the local content file and its profile on the controller
   when: stig_local_content
@@ -24,23 +34,169 @@
       delegate_to: localhost
       become: false
 
+    # A folder stands for the one DISA benchmark in it, so a newer release
+    # needs no change to the template: replace the file and run again.
+    - name: List the DISA benchmarks in a content folder on the controller
+      ansible.builtin.find:
+        paths: "{{ stig_content_source }}"
+        patterns: '*_Benchmark.xml'
+        file_type: file
+      register: stig_content_found
+      delegate_to: localhost
+      become: false
+      when: stig_content_stat.stat.isdir | default(false)
+
     - name: Refuse a missing file, a placeholder or an incomplete profile ID
       ansible.builtin.assert:
         that:
           - "'REPLACE_WITH' not in stig_content_file ~ stig_content_profile | default('')"
           - stig_content_stat.stat.exists
-          - stig_content_stat.stat.isreg | default(false)
-          - stig_content_file is match('.*[.]xml$')
+          - stig_content_stat.stat.isreg | default(false) or stig_content_names | length == 1
+          - stig_content_stat.stat.isdir | default(false) or stig_content_file is match('.*[.]xml$')
           - stig_content_profile | default('') is match('^xccdf_[A-Za-z0-9_.-]+_profile_[A-Za-z0-9_.-]+$')
         fail_msg: >-
-          {{ '' if stig_content_stat.stat.isreg | default(false) else 'There is no file '
-          ~ stig_content_file ~ ' in the lab folder yet. ' }}Copy an XML SCAP data
-          stream into the lab folder, such as DISA's benchmark at
-          content/rhel/9/U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.xml, then set
-          stig_content_file to its path and stig_content_profile to a full profile ID
-          that file lists (oscap info FILE), for example
-          xccdf_mil.disa.stig_profile_MAC-1_Classified. Nothing was scanned.
+          {{ stig_content_problem }}Copy an XML SCAP data stream into the lab folder,
+          such as DISA's benchmark U_RHEL_9_V2R10_STIG_SCAP_1-3_Benchmark.xml into
+          content/rhel/9/, then set stig_content_file to that folder or to the file,
+          and stig_content_profile to a full profile ID that file lists (oscap info
+          FILE), for example xccdf_mil.disa.stig_profile_MAC-1_Classified. Nothing
+          was scanned.
         quiet: true
+      vars:
+        stig_content_names: >-
+          {{ stig_content_found.files | default([]) | map(attribute='path') | map('basename') | sort | list }}
+        stig_content_is_folder: "{{ stig_content_stat.stat.isdir | default(false) }}"
+        stig_content_profile_problem: >-
+          {{ '' if stig_content_profile | default('') is match('^xccdf_[A-Za-z0-9_.-]+_profile_[A-Za-z0-9_.-]+$')
+             else 'stig_content_profile is not a full profile ID. ' }}
+        stig_content_problem: >-
+          {{ ('The folder ' ~ stig_content_file ~ ' holds '
+              ~ ('no DISA benchmark, a file whose name ends in _Benchmark.xml. '
+                 if stig_content_names | length == 0
+                 else stig_content_names | length ~ ' DISA benchmarks (' ~ stig_content_names | join(', ')
+                      ~ '); keep the one to scan with. '))
+             if stig_content_is_folder and stig_content_names | length != 1
+             else (stig_content_profile_problem
+                   if stig_content_is_folder or stig_content_stat.stat.isreg | default(false)
+                   else 'There is no file ' ~ stig_content_file ~ ' in the lab folder yet. ') }}
+
+    - name: Scan with the one benchmark the content folder holds
+      ansible.builtin.set_fact:
+        stig_content_source: "{{ stig_content_found.files[0].path }}"
+      when: stig_content_stat.stat.isdir | default(false)
+
+- name: Look for an exceptions file on the controller
+  ansible.builtin.stat:
+    path: "{{ stig_tailoring_source }}"
+  register: stig_tailoring_stat
+  delegate_to: localhost
+  become: false
+  when: stig_tailoring_source | length > 0
+
+- name: Note whether this scan uses an exceptions file
+  ansible.builtin.set_fact:
+    stig_tailored: >-
+      {{ stig_tailoring_file | default('') | length > 0
+         or (stig_tailoring_stat.stat | default({})).exists | default(false) }}
+
+- name: Check the exceptions file on the controller
+  when: stig_tailored
+  block:
+    - name: Read the exceptions file on the controller
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - "{{ playbook_dir }}/../scripts/summarize_xccdf.py"
+          - --tailoring
+          - "{{ stig_tailoring_source }}"
+      register: stig_tailoring_read
+      changed_when: false
+      failed_when: false
+      delegate_to: localhost
+      become: false
+
+    # The file's profile must extend the profile this run would scan with, so that
+    # an exceptions file cannot quietly replace the baseline with another one.
+    - name: Refuse an exceptions file that cannot be read or extends another profile
+      ansible.builtin.assert:
+        that:
+          - stig_tailoring_read.rc == 0
+          - stig_tailoring_read.stdout.startswith('{')
+          - stig_tailoring_id_ok
+          - stig_tailoring_base | length > 0
+          - stig_tailoring_seen.extends == stig_tailoring_base
+        fail_msg: >-
+          The exceptions file {{ stig_tailoring_source | basename }} cannot be used on
+          {{ inventory_hostname }}. {{ stig_tailoring_problem }} It must be an XCCDF
+          tailoring file with one profile that extends the profile this run uses;
+          chapter 9 shows how to make one with the vendor's own tool. Nothing was
+          scanned or changed.
+        quiet: true
+      vars:
+        stig_tailoring_error: >-
+          {{ stig_tailoring_read.stderr | default('') | trim or stig_tailoring_read.msg | default('') }}
+        stig_tailoring_id_ok: >-
+          {{ stig_tailoring_seen.profile_id is match('^xccdf_[A-Za-z0-9_.-]+_profile_[A-Za-z0-9_.-]+$') }}
+        stig_tailoring_problem: >-
+          {{ (stig_tailoring_error ~ ('' if stig_tailoring_error.endswith('.') else '.'))
+             if stig_tailoring_seen.profile_id | length == 0
+             else ('Its profile ID ' ~ stig_tailoring_seen.profile_id ~ ' is not a full XCCDF profile ID.'
+                   if not stig_tailoring_id_ok
+                   else ('This run uses the Ubuntu Security Guide profile ' ~ stig_usg_profile
+                         ~ ', and an exceptions file is only checked against its STIG profile, disa_stig.'
+                         if stig_tailoring_base | length == 0
+                         else ('Its profile ' ~ stig_tailoring_seen.profile_id ~ ' extends '
+                               ~ stig_tailoring_seen.extends ~ ', and this run scans with '
+                               ~ stig_tailoring_base ~ '.'))) }}
+        stig_tailoring_seen: >-
+          {{ (stig_tailoring_read.stdout | from_json)
+             if stig_tailoring_read.rc == 0 and stig_tailoring_read.stdout.startswith('{')
+             else {'profile_id': '', 'extends': ''} }}
+        # Ubuntu's usg takes the profile from the file instead of a name, so the file must
+        # extend the STIG profile, which usg calls disa_stig, stig or stig-v1r1. With any
+        # other usg profile the base is unknown and the file is refused.
+        stig_tailoring_base: >-
+          {{ stig_content_profile if stig_local_content
+             else (stig_profile_el if ansible_facts['os_family'] == 'RedHat'
+                   else ('xccdf_org.ssgproject.content_profile_stig'
+                         if stig_usg_profile is match('^(disa_stig|stig|stig-v[0-9]+r[0-9]+)$') else '')) }}
+
+    - name: Keep what the exceptions file says for the scan and its report
+      ansible.builtin.set_fact:
+        stig_tailoring: "{{ stig_tailoring_read.stdout | from_json }}"
+
+    - name: Name the exceptions file and what it leaves out
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }}: exceptions file {{ stig_tailoring_source | basename }}
+          (SHA-256 {{ stig_tailoring.sha256 }}) extends {{ stig_tailoring.extends }},
+          leaves out {{ stig_tailoring.left_out_count }} rule(s) or group(s), sets
+          {{ stig_tailoring.values_set }} value(s) and refines
+          {{ stig_tailoring_refined | length }} rule(s).{{ stig_tailoring_left_out }}{{ stig_tailoring_refined_note }}
+          What it leaves out is neither scanned nor fixed in this run; record who
+          accepted each exception.
+      vars:
+        # An XCCDF ID is xccdf_NAMESPACE_rule_NAME; only that prefix is cut, so a
+        # name that itself contains _rule_ or _group_ stays whole.
+        stig_tailoring_left_out: >-
+          {{ (' Left out: ' ~ stig_tailoring.left_out[:40] | map('regex_replace', '^xccdf_[^_]+_(rule|group)_', '') | join(', ')
+              ~ (', and ' ~ (stig_tailoring.left_out_count - 40) ~ ' more.' if stig_tailoring.left_out_count > 40 else '.'))
+             if stig_tailoring.left_out_count > 0 else '' }}
+        stig_tailoring_refined: "{{ stig_tailoring.rules_refined | default([]) }}"
+        stig_tailoring_refined_note: >-
+          {{ (' Refined, with another role, severity or weight than the profile gives: '
+              ~ stig_tailoring_refined[:40] | map('regex_replace', '^xccdf_[^_]+_(rule|group)_', '') | join(', ')
+              ~ (', and ' ~ (stig_tailoring_refined | length - 40) ~ ' more.' if stig_tailoring_refined | length > 40 else '.'))
+             if stig_tailoring_refined | length > 0 else '' }}
+
+# The profile and the tailoring option for every oscap command of this run;
+# stig-apply.yml uses the same two for its remediation.
+- name: Choose the profile this run scans with
+  ansible.builtin.set_fact:
+    stig_scan_profile: >-
+      {{ stig_tailoring.profile_id if stig_tailored
+         else (stig_content_profile if stig_local_content else stig_profile_el) }}
+    stig_tailoring_remote: "{{ stig_remote_dir ~ '/tailoring.xml' if stig_tailored else '' }}"
 
 - name: Install the vendor SCAP scanner and content on Enterprise Linux
   ansible.builtin.dnf:
@@ -110,21 +266,26 @@
     mode: '0600'
   when: stig_local_content
 
+- name: Copy the exceptions file to the target
+  ansible.builtin.copy:
+    src: "{{ stig_tailoring_source }}"
+    dest: "{{ stig_tailoring_remote }}"
+    owner: root
+    group: root
+    mode: '0600'
+  when: stig_tailored
+
 # The content's own platform checks decide applicability: a benchmark written
 # for another system reports its rules as notapplicable instead of failing them.
 - name: Scan against the profile in the local content file
   ansible.builtin.command:
-    argv:
-      - oscap
-      - xccdf
-      - eval
-      - --profile
-      - "{{ stig_content_profile }}"
-      - --results
-      - "{{ stig_remote_dir }}/{{ stig_phase }}.xml"
-      - --report
-      - "{{ stig_remote_dir }}/{{ stig_phase }}.html"
-      - "{{ stig_remote_dir }}/content.xml"
+    argv: >-
+      {{ ['oscap', 'xccdf', 'eval']
+         + (['--tailoring-file', stig_tailoring_remote] if stig_tailored else [])
+         + ['--profile', stig_scan_profile,
+            '--results', stig_remote_dir ~ '/' ~ stig_phase ~ '.xml',
+            '--report', stig_remote_dir ~ '/' ~ stig_phase ~ '.html',
+            stig_remote_dir ~ '/content.xml'] }}
   register: stig_scan_local
   changed_when: false
   failed_when: stig_scan_local.rc not in [0, 2]
@@ -136,7 +297,8 @@
     argv: >-
       {{ ['oscap', 'xccdf', 'eval']
          + (['--fetch-remote-resources'] if stig_fetch_remote_resources else [])
-         + ['--profile', stig_profile_el,
+         + (['--tailoring-file', stig_tailoring_remote] if stig_tailored else [])
+         + ['--profile', stig_scan_profile,
             '--results', stig_remote_dir ~ '/' ~ stig_phase ~ '.xml',
             '--report', stig_remote_dir ~ '/' ~ stig_phase ~ '.html',
             stig_datastream] }}
@@ -147,16 +309,14 @@
     - ansible_facts['os_family'] == 'RedHat'
     - not stig_local_content
 
+# With a tailoring file, usg takes the profile from the file instead of a name.
 - name: Scan Ubuntu with the Ubuntu Security Guide STIG profile
   ansible.builtin.command:
-    argv:
-      - usg
-      - audit
-      - "{{ stig_usg_profile }}"
-      - --results-file
-      - "{{ stig_remote_dir }}/{{ stig_phase }}.xml"
-      - --html-file
-      - "{{ stig_remote_dir }}/{{ stig_phase }}.html"
+    argv: >-
+      {{ ['usg', 'audit']
+         + (['--tailoring-file', stig_tailoring_remote] if stig_tailored else [stig_usg_profile])
+         + ['--results-file', stig_remote_dir ~ '/' ~ stig_phase ~ '.xml',
+            '--html-file', stig_remote_dir ~ '/' ~ stig_phase ~ '.html'] }}
   register: stig_scan_usg
   changed_when: false
   failed_when: false
@@ -198,12 +358,15 @@
     - xml
     - html
 
+# The summarizer also writes every rule that still needs a reader to a CSV file
+# next to the fetched report, with its category, STIG ID and rule ID.
 - name: Summarize the fetched XCCDF result on the controller
   ansible.builtin.command:
-    argv:
-      - /usr/bin/python3
-      - "{{ playbook_dir }}/../scripts/summarize_xccdf.py"
-      - "{{ stig_fetch_dir }}/{{ inventory_hostname }}/{{ stig_phase }}.xml"
+    argv: >-
+      {{ ['/usr/bin/python3', playbook_dir ~ '/../scripts/summarize_xccdf.py',
+          stig_fetch_dir ~ '/' ~ inventory_hostname ~ '/' ~ stig_phase ~ '.xml',
+          '--findings', stig_fetch_dir ~ '/' ~ inventory_hostname ~ '/' ~ stig_phase ~ '-findings.csv']
+         + (['--tailoring', stig_tailoring_source] if stig_tailored else []) }}
   register: stig_summary
   changed_when: false
   failed_when: false
@@ -218,8 +381,48 @@
     msg: >-
       {{ (stig_summary.stdout | from_json)
          if (stig_summary.rc in [0, 2] and stig_summary.stdout.startswith('{'))
-         else 'Summary unavailable; read the HTML report. '
+         else 'Summary unavailable; read the HTML report. ' ~ stig_summary_older
               ~ (stig_summary.stderr or stig_summary.msg | default('')) }}
+  vars:
+    stig_summary_older: >-
+      {{ "The lab folder's scripts/summarize_xccdf.py is older than this playbook; take the guide's copy. "
+         if 'unrecognized arguments' in stig_summary.stderr | default('') else '' }}
+
+# The content says which STIG release it follows; the vendor's packaged profile
+# is usually one or more releases behind the one DISA publishes.
+- name: Say which STIG release and content the scan measured for phase {{ stig_phase }}
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}: {{ stig_report.content.line }}{{ stig_content_copied }}{{ stig_exceptions_used }}.
+      Compare the release with the one DISA lists for this system before you report results.
+  vars:
+    stig_report: "{{ stig_summary.stdout | from_json }}"
+    stig_content_copied: "{{ ', copied from ' ~ stig_content_source | basename if stig_local_content else '' }}"
+    stig_exceptions_used: >-
+      {{ '; with exceptions file ' ~ stig_tailoring_source | basename ~ ', which leaves out '
+         ~ stig_tailoring.left_out_count ~ ' rule(s) or group(s)' if stig_tailored else '; no exceptions file' }}
+  when:
+    - stig_summary.rc in [0, 2]
+    - stig_summary.stdout.startswith('{')
+    - (stig_summary.stdout | from_json)['content'] is defined
+
+- name: List the failing rules by severity category for phase {{ stig_phase }}
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}: failing rules by DISA category: CAT I (high) {{ stig_failed['CAT I'] }},
+      CAT II (medium) {{ stig_failed['CAT II'] }}, CAT III (low) {{ stig_failed['CAT III'] }},
+      without a category {{ stig_failed['unrated'] }}.{{ stig_failed_first }}
+      Every failing, unchecked or errored rule is in
+      {{ stig_report.findings_file | default('the HTML report') }} with its category, STIG ID and rule ID.
+  vars:
+    stig_report: "{{ stig_summary.stdout | from_json }}"
+    stig_failed: "{{ stig_report.failed_by_category }}"
+    stig_failed_first: >-
+      {{ ' CAT I: ' ~ stig_report.failed_cat_i_ids | join(', ') ~ '.' if stig_report.failed_cat_i_ids else '' }}
+  when:
+    - stig_summary.rc in [0, 2]
+    - stig_summary.stdout.startswith('{')
+    - (stig_summary.stdout | from_json)['failed_by_category'] is defined
 
 - name: Warn about scanner errors or unknown outcomes for phase {{ stig_phase }}
   ansible.builtin.debug:

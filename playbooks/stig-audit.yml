@@ -20,6 +20,11 @@
     # benchmark in the lab folder's content/ directory, and one of its profile IDs.
     stig_content_file: ''
     stig_content_profile: ''
+    # Optional: an exceptions file, which XCCDF calls a tailoring file, in the lab
+    # folder. Its profile extends the one this run scans with and unselects the rules
+    # you have an accepted exception for. Without this variable, a per-system playbook
+    # uses content/<system>/<version>/tailoring.xml when that file exists.
+    stig_tailoring_file: ''
     # stig_stamp is set once for every host of the run; see pre_tasks.
     stig_remote_dir: "/var/log/stig-practice/{{ stig_stamp }}"
     stig_fetch_dir: >-

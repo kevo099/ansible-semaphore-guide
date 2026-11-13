@@ -208,7 +208,9 @@ scanned with a SCAP file of your own, move it into its system's folder, for
 example with
 `mv /opt/ansible-lab/content/U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.xml /opt/ansible-lab/content/rhel/9/`
 as the folder's owner, where the variable group **DISA SCAP file · RHEL 9**
-expects DISA's RHEL 9 V2R9 benchmark, or edit that group's path. Once you have
+expects DISA's RHEL 9 benchmark, or edit that group's path. A group seeded
+before this release names the V2R9 file; one seeded now names the folder
+`content/rhel/9`, and the playbook scans with the one benchmark there. Once you have
 checked the new tabs, delete the old objects with:
 
 ```bash

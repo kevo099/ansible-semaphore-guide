@@ -66,15 +66,16 @@ ONE_TARGET_PER_RUN = {"limit": [], "allow_override_limit": True}
 # One STIG tab per operating system and version, matching the playbook folders
 # playbooks/stig/<system>/<version>/. Each audit runs on the system's inventory
 # group, and the playbook skips hosts there that run another system. DISA
-# publishes SCAP benchmarks for RHEL 9 and Ubuntu 24.04; their prefilled paths
-# name the release chapter 9 tested, under the lab folder's content/ folder.
+# publishes SCAP benchmarks for RHEL 9 and Ubuntu 24.04. Their prefilled path is
+# the system's folder under the lab folder's content/ folder: the playbook scans
+# with the one *_Benchmark.xml file there, so a newer release needs no edit.
 DISA_PROFILE = "xccdf_mil.disa.stig_profile_MAC-1_Classified"
 STIG_SYSTEMS = [
-    # label, playbook folder, inventory group, DISA SCAP benchmark in the lab folder
-    ("RHEL 9", "rhel/9", "enterprise_linux", "content/rhel/9/U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.xml"),
+    # label, playbook folder, inventory group, the folder for DISA's SCAP benchmark in the lab folder
+    ("RHEL 9", "rhel/9", "enterprise_linux", "content/rhel/9"),
     ("AlmaLinux 9", "almalinux/9", "enterprise_linux", None),
     ("Rocky Linux 9", "rocky/9", "enterprise_linux", None),
-    ("Ubuntu 24.04", "ubuntu/24.04", "ubuntu", "content/ubuntu/24.04/U_CAN_Ubuntu_24-04_LTS_V1R5_STIG_SCAP_1-3_Benchmark.xml"),
+    ("Ubuntu 24.04", "ubuntu/24.04", "ubuntu", "content/ubuntu/24.04"),
 ]
 
 
@@ -120,8 +121,8 @@ LESSONS = [
 VARIABLE_GROUPS = {
     "Practice defaults": {},
     "Allow required reboot": {"allow_reboot": True},
-    # Copy the benchmark to this path in the lab folder, or edit the path for a
-    # newer release; the playbook stops with an explanation while it is missing.
+    # Copy DISA's benchmark into this folder of the lab folder; the playbook stops
+    # with an explanation while the folder holds none, or more than one.
     **{disa_group(label): {"stig_content_file": disa_file, "stig_content_profile": DISA_PROFILE}
        for label, _folder, _group, disa_file in STIG_SYSTEMS if disa_file},
 }
