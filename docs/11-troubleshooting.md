@@ -83,12 +83,29 @@ Use `sshd` as the journal unit on Enterprise Linux. If access is broken, perform
 checks through the guest console. Compare the result with the pre-hardening
 record, including crypto policy and which host keys are currently offered.
 
+### The controller after its own hardening
+
+On a controller hardened to the DISA STIG, these come from `fapolicyd` or from
+`umask 077`, not from an edit of yours. Chapter 9,
+[Harden the controller itself](09-security-benchmarks.md#harden-the-controller-itself),
+has the four rules and the two commands that end them.
+
+| Symptom, as the administrator | Cause |
+| --- | --- |
+| `git clone` ends with `cannot copy ... fsmonitor-watchman.sample: Operation not permitted` | `fapolicyd` denies one of Git's own sample hooks; clone with `git clone --template=`. |
+| `git status` lists scripts you did not touch, `git checkout` or `git pull` refuses, `update-controller.sh` reports that Git is not allowed to read a file | `fapolicyd` denies scripts that no package installed. |
+| `Operation not permitted` from `python3 scripts/summarize_xccdf.py` or `/opt/ansible-venv/bin/ansible` | The same. |
+| The installer stops at once and prints four rules | The same, caught before anything changed. |
+| A template for a playbook you just created fails with `Permission denied` | `umask 077` made the file `-rw-------`. |
+| Semaphore does not start after `allow_filesystem_mark = 1`: `Failed to execute /usr/local/bin/semaphore` | `fapolicyd` now watches the service and the rules are missing. |
+
 ### Application allowlisting and temporary modules
 
 Ansible may fail when an application allowlisting policy rejects a transferred
 temporary Python module. SSH pipelining can avoid that transfer-and-execute
-path; the supplied `ansible.cfg` enables it. Validate sudo/TTY compatibility and
-preserve the host's intended allowlisting policy.
+path; the supplied `ansible.cfg` enables it, for the targets and for tasks that
+run on the controller. Validate sudo/TTY compatibility and preserve the host's
+intended allowlisting policy.
 
 For native RHEL SSG playbook execution, a root-owned private directory such as
 `/var/tmp/ansible-benchmark` can be selected with `ANSIBLE_REMOTE_TMP`. Inspect

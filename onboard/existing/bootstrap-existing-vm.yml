@@ -249,7 +249,7 @@
             dest: "{{ ssh_dropin }}"
             owner: root
             group: root
-            mode: "0644"
+            mode: "0600"
             backup: true
           register: bootstrap_dropin
 
@@ -352,7 +352,7 @@
             remote_src: true
             owner: root
             group: root
-            mode: "0644"
+            mode: "0600"
           when: bootstrap_dropin.backup_file is defined
 
         - name: Remove the drop-in this run created

@@ -7,7 +7,8 @@ umask 077
 usage() {
   cat <<'USAGE'
 Usage: sudo bash controller/install-controller-el9.sh [--plan | --apply [--editor USER] [--lab-dir DIR]
-                                                   [--expose https|http [--address IP_OR_NAME]]]
+                                                   [--expose https|http [--address IP_OR_NAME]]
+                                                   [--fapolicyd-ready]]
 
 Creates a native Semaphore 2.19.12 / PostgreSQL 16 / Ansible 2.21.4 controller
 on a fresh RHEL, AlmaLinux or Rocky Linux 9.4 or later x86_64 VM, then seeds
@@ -27,6 +28,10 @@ not create VMs or targets.
                   With --expose, the IP address or DNS name you browse to, which the certificate
                   and the printed URL name. Default: the address of this VM's default route,
                   which on a cloud VM behind NAT, as on Azure, is a private one.
+  --fapolicyd-ready
+                  Skip the check that stops the installation where fapolicyd is active
+                  without this guide's four rules. For a site that allowed the same
+                  paths another way; see chapter 9, "Harden the controller itself".
 
 The default is a read-only plan. --apply requires root and refuses existing
 Semaphore, PostgreSQL, lab-folder or /opt/ansible-venv state. It installs
@@ -96,6 +101,7 @@ fi
 controller_validate_lab
 controller_require_fresh_state /var/lib/pgsql/data/PG_VERSION
 controller_check_sources semaphore-el9.service
+controller_check_fapolicyd
 
 # 2. Packages that create nothing the preflight refuses, then the pinned Semaphore archive.
 #    A failed download or checksum leaves nothing that blocks a rerun.

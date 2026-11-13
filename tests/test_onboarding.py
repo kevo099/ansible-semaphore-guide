@@ -573,9 +573,25 @@ class OnboardScriptTests(AddTargetInfoMixin, unittest.TestCase):
                     self.assertEqual(logged[-1], GAVE_UP)
                     self.assertNotIn(install, logged)
 
+    def test_the_ssh_drop_in_is_for_root_only_on_every_path(self):
+        # Only root reads sshd's configuration, and the DISA STIG fails a drop-in that others can read.
+        script = (ROOT / "onboard" / "existing" / "onboard-linux.sh").read_text()
+        self.assertIn('install -o root -g root -m 0600 "$work/dropin" "$ssh_dropin"', script)
+        self.assertIn('chmod 0600 "$ssh_dropin"', script)
+        self.assertNotIn('0644 "$ssh_dropin"', script)
+        playbook = (ROOT / "onboard" / "existing" / "bootstrap-existing-vm.yml").read_text()
+        self.assertEqual(playbook.count('dest: "{{ ssh_dropin }}"'), 2)
+        for block in playbook.split('dest: "{{ ssh_dropin }}"')[1:]:
+            self.assertIn('mode: "0600"', block.split("- name:")[0])
+        cloud_init = (ROOT / "onboard" / "new-vm" / "cloud-init.yaml").read_text()
+        entry = cloud_init.split("- path: /etc/ssh/sshd_config.d/70-ansible-lab.conf")[1].split("- path:")[0]
+        self.assertIn('permissions: "0600"', entry)
+        manual = (ROOT / "docs" / "manual-access.md").read_text()
+        self.assertIn("sudo chmod 0600 /etc/ssh/sshd_config.d/70-ansible-lab.conf\nsudo /usr/sbin/sshd -t", manual)
+
     def test_the_checks_come_before_the_drop_in_is_applied(self):
         # The groups are read before the drop-in is written, and every check before the reload.
-        steps = ('groups=$(id -nG "$account")', 'install -o root -g root -m 0644 "$work/dropin"',
+        steps = ('groups=$(id -nG "$account")', 'install -o root -g root -m 0600 "$work/dropin"',
                  "problem=$(ssh_problem)", "if ! apply_ssh")
         order = [ONBOARD.index(step) for step in steps]
         self.assertEqual(order, sorted(order))

@@ -145,8 +145,11 @@ usage() { :; }
 SUDO_USER=sudoeditor
 controller_parse_args "$@"
 printf '%s\\n' "$mode" "$editor" "$lab_dir" "$expose" "$expose_address"
+[[ $fapolicyd_ready == no ]] || printf 'fapolicyd-ready\\n'
 '''
         for arguments, expected in (((), ["--plan", "sudoeditor", "/opt/ansible-lab", "", ""]),
+                                    (("--apply", "--fapolicyd-ready"),
+                                     ["--apply", "sudoeditor", "/opt/ansible-lab", "", "", "fapolicyd-ready"]),
                                     (("--apply", "--editor", "labeditor", "--lab-dir", "/srv/lab",
                                       "--expose", "https"), ["--apply", "labeditor", "/srv/lab", "https", ""]),
                                     (("--address", "controller.example.test", "--apply", "--expose", "http"),
@@ -220,6 +223,104 @@ printf 'LAB=%s\\n' "$lab_dir"
                     else:
                         self.assertTrue(path.is_dir())
                         path.rmdir()
+
+
+class FapolicydPreflightTests(unittest.TestCase):
+    """Where fapolicyd is active, as after the DISA STIG, the installer stops before it changes anything."""
+
+    STOCK = ["-> %languages=text/x-python,text/x-perl",
+             "1. allow perm=any uid=0 : dir=/var/tmp/",
+             "2. allow perm=any uid=0 trust=1 : all",
+             "3. deny_audit perm=any pattern=ld_so : all",
+             "4. deny_audit perm=any all : ftype=application/x-bad-elf",
+             "5. allow perm=open all : ftype=application/x-sharedlib trust=1",
+             "6. deny_audit perm=open all : ftype=application/x-sharedlib",
+             "7. allow perm=execute all : trust=1",
+             "8. deny_audit perm=any all : ftype=%languages",
+             "9. deny_audit perm=execute all : all",
+             "10. allow perm=open all : all"]
+    OURS = ["allow perm=any all : path=/usr/local/bin/semaphore",
+            "allow perm=any all : dir=/opt/ansible-venv/",
+            "allow perm=open all : dir=/srv/lab/ ftype=%languages",
+            "allow perm=open all : dir=/srv/guides/ansible-semaphore-guide/ ftype=%languages"]
+
+    def check(self, loaded, *arguments, active=True, cli=True, permissive=False):
+        body = '''
+usage() { :; }
+rules=$1; active=$2; cli=$3; fapolicyd_conf=$4; shift 4
+SUDO_USER=admin
+repo_dir=/srv/guides/ansible-semaphore-guide
+systemctl() { [[ "$*" == "is-active --quiet fapolicyd" && $active == yes ]]; }
+if [[ $cli == yes ]]; then fapolicyd-cli() { [[ "$1" == --list ]] && cat "$rules"; }; fi
+controller_parse_args --apply --lab-dir /srv/lab "$@"
+controller_check_fapolicyd
+echo CONTINUES
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            rules = Path(directory) / "rules"
+            rules.write_text("\n".join(loaded) + "\n")
+            conf = Path(directory) / "fapolicyd.conf"
+            conf.write_text(f"permissive = {1 if permissive else 0}\nallow_filesystem_mark = 0\n")
+            # A PATH without fapolicyd-cli, so that only the stand-in function can supply it.
+            return subprocess.run(["/bin/bash", "-c", 'set -euo pipefail; source "$1"; shift; ' + body, "controller-test",
+                                   str(COMMON), str(rules), "yes" if active else "no", "yes" if cli else "no",
+                                   str(conf), *arguments],
+                                  capture_output=True, text=True, timeout=10, env={"PATH": "/usr/bin:/bin"})
+
+    def numbered(self, rules, first):
+        return [f"{first + offset}. {rule}" for offset, rule in enumerate(rules)]
+
+    def test_a_machine_without_the_rules_is_refused_with_the_rules_for_its_own_paths(self):
+        result = self.check(self.STOCK)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertNotIn("CONTINUES", result.stdout)
+        self.assertIn("nothing was changed.", result.stdout)
+        self.assertIn("/etc/fapolicyd/rules.d/35-ansible-semaphore-guide.rules", result.stdout)
+        # The four lines stand alone, ready to copy, with the lab folder and the clone of this run.
+        lines = result.stdout.splitlines()
+        start = lines.index(self.OURS[0])
+        self.assertEqual(lines[start:start + 4], self.OURS)
+        self.assertIn("  sudo fagenrules --load", lines)
+        self.assertIn("--fapolicyd-ready", result.stdout)
+        self.assertEqual(result.stderr, "")
+
+    def test_the_rules_before_the_shared_library_rule_let_the_installer_go_on(self):
+        loaded = self.STOCK[:4] + self.numbered(self.OURS, 4) + self.STOCK[4:]
+        result = self.check(loaded)
+        self.assertEqual((result.returncode, result.stdout.strip()), (0, "CONTINUES"), result.stderr)
+
+    def test_rules_loaded_too_late_or_only_in_part_are_refused(self):
+        late = self.STOCK[:7] + self.numbered(self.OURS, 7) + self.STOCK[7:]
+        partial = self.STOCK[:4] + self.numbered(self.OURS[:3], 4) + self.STOCK[4:]
+        other_lab = self.STOCK[:4] + self.numbered([rule.replace("/srv/lab/", "/opt/ansible-lab/") for rule in self.OURS], 4) \
+            + self.STOCK[4:]
+        for name, loaded in (("late", late), ("partial", partial), ("another lab folder", other_lab)):
+            with self.subTest(name):
+                result = self.check(loaded)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("The number matters", result.stdout)
+
+    def test_no_fapolicyd_an_idle_or_a_permissive_one_and_the_option_all_go_on(self):
+        for name, arguments in (("not installed", {"cli": False}), ("not active", {"active": False}),
+                                ("permissive", {"permissive": True})):
+            with self.subTest(name):
+                result = self.check(self.STOCK, **arguments)
+                self.assertEqual((result.returncode, result.stdout.strip()), (0, "CONTINUES"), result.stderr)
+        result = self.check(self.STOCK, "--fapolicyd-ready")
+        self.assertEqual((result.returncode, result.stdout.strip()), (0, "CONTINUES"), result.stderr)
+
+    def test_both_installers_check_before_the_first_package(self):
+        for script, first_change in (("install-controller-el9.sh", "dnf -y install"), ("install-controller.sh", "apt-get")):
+            with self.subTest(script=script):
+                text = (COMMON.parent / script).read_text()
+                self.assertEqual(text.count("\ncontroller_check_fapolicyd\n"), 1)
+                self.assertLess(text.index("\ncontroller_require_fresh_state"), text.index("\ncontroller_check_fapolicyd\n"))
+                self.assertLess(text.index("\ncontroller_check_fapolicyd\n"), text.index(first_change, text.index("\nPLAN\n")))
+                self.assertIn("--fapolicyd-ready", text)
+
+    def test_the_lab_folder_is_made_a_repository_without_gits_hook_samples(self):
+        # One of Git's sample hooks is a Perl script that fapolicyd denies to every account but root.
+        self.assertIn('git -C "$lab_dir" init -q -b main --template=\n', COMMON.read_text())
 
 
 class SharedDownloadTests(unittest.TestCase):

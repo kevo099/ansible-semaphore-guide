@@ -401,11 +401,12 @@ fi
 if cmp -s "$work/dropin" "$ssh_dropin"; then
   ssh_state=unchanged
 else
-  install -o root -g root -m 0644 "$work/dropin" "$ssh_dropin"
+  install -o root -g root -m 0600 "$work/dropin" "$ssh_dropin"
   ssh_state=written
 fi
+# Only root reads sshd's configuration; the DISA STIG asks for 0600 on its drop-ins.
 chown root:root "$ssh_dropin"
-chmod 0644 "$ssh_dropin"
+chmod 0600 "$ssh_dropin"
 
 restore_dropin() {
   if [ -e "$work/dropin.before" ]; then cp -p "$work/dropin.before" "$ssh_dropin"; else rm -f "$ssh_dropin"; fi

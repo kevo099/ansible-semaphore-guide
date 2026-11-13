@@ -7,7 +7,8 @@ umask 077
 usage() {
   cat <<'USAGE'
 Usage: sudo bash controller/install-controller.sh [--plan | --apply [--editor USER] [--lab-dir DIR]
-                                               [--expose https|http [--address IP_OR_NAME]]]
+                                               [--expose https|http [--address IP_OR_NAME]]
+                                               [--fapolicyd-ready]]
 
 Creates a native Semaphore 2.19.12 / PostgreSQL 16 / Ansible 2.21.4 controller
 on a fresh Ubuntu 24.04 amd64 VM, then seeds Semaphore with a project that runs
@@ -26,6 +27,10 @@ targets.
                   With --expose, the IP address or DNS name you browse to, which the certificate
                   and the printed URL name. Default: the address of this VM's default route,
                   which on a cloud VM behind NAT, as on Azure, is a private one.
+  --fapolicyd-ready
+                  Skip the check that stops the installation where fapolicyd is active
+                  without this guide's four rules. For a site that allowed the same
+                  paths another way; see chapter 9, "Harden the controller itself".
 
 The default is a read-only plan. --apply requires root and refuses existing
 Semaphore, PostgreSQL, lab-folder or /opt/ansible-venv state. It installs
@@ -85,6 +90,7 @@ source /etc/os-release
 controller_validate_lab
 controller_require_fresh_state /etc/postgresql /var/lib/postgresql
 controller_check_sources semaphore.service
+controller_check_fapolicyd
 
 # 2. Packages that create nothing the preflight refuses, then the pinned Semaphore archive.
 #    A failed download or checksum leaves nothing that blocks a rerun. apt-get waits up

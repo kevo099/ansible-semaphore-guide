@@ -644,6 +644,95 @@ content, such as a newer SCAP Security Guide release's data stream or a CIS
 profile's; [the security baseline catalog](appendices/security-baselines.md)
 lists the profile IDs by platform.
 
+## Harden the controller itself
+
+The controller holds the automation key and the sudo password of every
+target, so where the STIG applies, it applies to the controller first. This
+section was run on a RHEL 9.8 controller with the vendor's `stig` profile in
+November 2026 ([record](validation/2026-11-hardened-controller.md)). An Ubuntu
+controller was not hardened in that run.
+
+Both orders work:
+
+- **Install first, harden later.** Run **RHEL 9 · STIG apply** with the
+  controller's own inventory name in **Limit**. The fixes are applied and the
+  reboot is left to you, as [the templates](#the-seeded-stig-templates)
+  describe; restart it from its own terminal. Semaphore and its jobs keep
+  running afterwards. Your own work as the administrator needs the two steps
+  below.
+- **Harden first, install later,** as on a hardened image. Clone the guide
+  with `git clone --template=` and the address of Stage 1: on a hardened
+  system Git may not copy one of its own sample hooks, and a plain
+  `git clone` ends with `cannot copy ... fsmonitor-watchman.sample:
+  Operation not permitted`. The installer then stops before it changes
+  anything and prints the four rules below with your paths. Add them, load
+  them and run the installer again.
+
+What the STIG sets, and what it means for this guide:
+
+| The STIG sets | What you notice on the controller | What to do |
+| --- | --- | --- |
+| `fapolicyd`, which lets every account but root open and run only scripts and programs that a package installed | As the administrator, `git status` in the guide's folder or the lab folder lists scripts as modified, `git checkout` and `git pull` refuse, `update-controller.sh` reports a problem and changes nothing, and `python3 scripts/summarize_xccdf.py` and `/opt/ansible-venv/bin/ansible` end with `Operation not permitted`. Jobs in Semaphore keep running. | Add the four rules. |
+| `umask 077` for every login | A playbook you create in the lab folder is `-rw-------`, and its template fails with `Permission denied`. The guide's own tools set the modes of what they write. | Make the file readable by its group, or give the lab folder a default ACL once. |
+| A sudo password at every command, and no `NOPASSWD` rule | The guide's tools ask more often. | Nothing. |
+| The `FIPS:STIG` crypto policy | Ed25519 keys are refused; the guide's RSA keys work, as [above](#the-seeded-stig-templates). | Nothing. |
+| A shell that closes after ten idle minutes, and a login banner | An idle terminal ends. | Nothing. |
+
+**Where: the controller, as its administrator.** The four `fapolicyd` rules
+name Semaphore's binary, the Ansible runtime, the lab folder and the guide's
+folder. The file's number matters: the runtime holds shared libraries, so its
+rule has to come before `fapolicyd`'s own rules for those, which start at 40.
+
+```bash
+sudo install -o root -g fapolicyd -m 0644 /dev/stdin /etc/fapolicyd/rules.d/35-ansible-semaphore-guide.rules <<RULES
+allow perm=any all : path=/usr/local/bin/semaphore
+allow perm=any all : dir=/opt/ansible-venv/
+allow perm=open all : dir=/opt/ansible-lab/ ftype=%languages
+allow perm=open all : dir=$HOME/ansible-semaphore-guide/ ftype=%languages
+RULES
+sudo fagenrules --load
+```
+
+`fapolicyd` takes a few seconds to load them. The first two lines allow what
+the installer put there, which no package owns; only root can write to either
+path. The last two let you and Git read the scripts in the two folders, which
+also lets an interpreter run them; only you can write there. A rule allows
+whatever is at its path, so keep those owners as they are. `fapolicyd`'s trust
+files, with `fapolicyd-cli --file add`, are the other standard way and worked
+in the run for the first two paths on an installed controller; they cannot be
+written before the files exist, so they do not help the installer. Either way
+this is a change to the system's allowlist: record it and have it approved
+like any other exception.
+
+**Why jobs kept running without the rules.** The Semaphore service runs in its
+own mount namespace, and RHEL 9's `fapolicyd` does not watch other namespaces
+unless `allow_filesystem_mark = 1` is set in `/etc/fapolicyd/fapolicyd.conf`.
+The STIG profile leaves it at 0. With 1 and without the rules, Semaphore did
+not start: `Failed to execute /usr/local/bin/semaphore: Operation not
+permitted`. With the rules it started, and Ping, Baseline preview, the health
+report and the STIG audits passed; the audits needed this release's
+`ansible.cfg`, which sends the modules of tasks that run on the controller
+through a pipe as well. Add the rules even where jobs work without them.
+
+**Your own files under `umask 077`.** Make a new playbook readable by the
+`semaphore` group, or set a default ACL once, after which new files in the lab
+folder are created `-rw-r-----` whatever the umask:
+
+```bash
+chmod g+r /opt/ansible-lab/playbooks/my-playbook.yml
+setfacl -R -d -m g::rX /opt/ansible-lab
+```
+
+**Check:** `git status --short` prints nothing in both folders,
+`sudo python3.12 controller/check-controller.py` passes, and **Ping** and
+**RHEL 9 · STIG audit** succeed. On the controller hardened after its
+installation the audit left 13 failing rules, among them the boot loader's
+password and administrator name and FIPS mode in CAT I, which are yours to
+decide. A controller installed on a hardened machine failed one more,
+`RHEL-09-411035`: PostgreSQL's package gives its `postgres` account a login
+shell. Where the vendor's fixes followed the installation, that rule did not
+fail and the controller ran.
+
 ## Concept
 
 The deliverable is a reproducible configuration with evidence and understood

@@ -14,6 +14,7 @@ controller_parse_args() {
   lab_dir=/opt/ansible-lab
   expose=
   expose_address=
+  fapolicyd_ready=no
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --help|-h) usage; exit 0 ;;
@@ -25,6 +26,7 @@ controller_parse_args() {
       --expose) [[ $# -ge 2 && ( "$2" == https || "$2" == http ) ]] || { usage; exit 2; }; expose="$2"; shift ;;
       # expose-semaphore.sh checks the value; it names the certificate and the printed URL.
       --address) [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || { usage; exit 2; }; expose_address="$2"; shift ;;
+      --fapolicyd-ready) fapolicyd_ready=yes ;;
       *) usage; exit 2 ;;
     esac
     shift
@@ -76,6 +78,66 @@ controller_require_fresh_state() {
     echo 'The semaphore account already exists; refusing to reuse it.'
     exit 1
   fi
+}
+
+# The four fapolicyd rules a controller of this guide needs, with this run's paths.
+controller_fapolicyd_rules() {
+  printf '%s\n' \
+    'allow perm=any all : path=/usr/local/bin/semaphore' \
+    'allow perm=any all : dir=/opt/ansible-venv/' \
+    "allow perm=open all : dir=$lab_dir/ ftype=%languages" \
+    "allow perm=open all : dir=$repo_dir/ ftype=%languages"
+}
+
+# The DISA STIG turns on fapolicyd, which denies programs that no package installed:
+# here Semaphore's binary and the Ansible runtime. It also keeps an administrator and
+# Git from reading the guide's scripts. Without rules for them this installation would
+# stop halfway, at Semaphore's first run, and the installer cannot be run a second time.
+# So it stops here, before it changes anything, and prints the rules to add.
+# --fapolicyd-ready skips the check for a site that allowed the same paths another way.
+controller_check_fapolicyd() {
+  [[ "$fapolicyd_ready" == no ]] || return 0
+  command -v fapolicyd-cli >/dev/null 2>&1 || return 0
+  systemctl is-active --quiet fapolicyd || return 0
+  # With permissive = 1 fapolicyd only logs what it would deny.
+  if grep -Eq '^[[:space:]]*permissive[[:space:]]*=[[:space:]]*1' \
+       "${fapolicyd_conf:-/etc/fapolicyd/fapolicyd.conf}" 2>/dev/null; then
+    return 0
+  fi
+  local loaded rule library ours missing=0
+  loaded=$(fapolicyd-cli --list 2>/dev/null) || loaded=
+  while IFS= read -r rule; do
+    grep -qF -- "$rule" <<<"$loaded" || missing=1
+  done < <(controller_fapolicyd_rules)
+  # The runtime holds shared libraries, so its rule has to come before fapolicyd's own
+  # rule that denies the ones no package installed.
+  # grep finds nothing where a rule is missing; that must not end the installer here.
+  library=$(grep -n 'deny.*ftype=application/x-sharedlib' <<<"$loaded" | head -n 1 | cut -d: -f1) || true
+  ours=$(grep -nF -- 'dir=/opt/ansible-venv/' <<<"$loaded" | head -n 1 | cut -d: -f1) || true
+  if (( missing == 0 )) && [[ -z "$library" || ( -n "$ours" && "$ours" -lt "$library" ) ]]; then
+    return 0
+  fi
+  cat <<MESSAGE
+fapolicyd is active on this machine, as on a system hardened to the DISA STIG. It
+denies programs that no package installed, which here are Semaphore's binary and
+the Ansible runtime, and it keeps your account and Git from reading the guide's
+scripts. This installation would stop halfway and could not be run again, so
+nothing was changed.
+
+As root, put these four lines in
+/etc/fapolicyd/rules.d/35-ansible-semaphore-guide.rules. The number matters: they
+have to come before fapolicyd's own rules for shared libraries.
+
+$(controller_fapolicyd_rules)
+
+Then load them and run this installer again:
+
+  sudo fagenrules --load
+
+docs/09-security-benchmarks.md, "Harden the controller itself", explains each
+line. If your site allowed the same paths another way, pass --fapolicyd-ready.
+MESSAGE
+  exit 1
 }
 
 controller_check_sources() {
@@ -231,7 +293,9 @@ INVENTORY
   # target addresses and Vault files out of the folder's history from the first commit.
   printf '%s\n' 'inventories/' 'host_vars/' 'group_vars/' > "$lab_dir/.gitignore"
   chown -R "$editor:semaphore" "$lab_dir"
-  runuser -u "$editor" -- git -C "$lab_dir" init -q -b main
+  # No hook samples from Git's templates: the folder needs none, and where fapolicyd is
+  # active an account other than root may not read one of them, which stops git init.
+  runuser -u "$editor" -- git -C "$lab_dir" init -q -b main --template=
   runuser -u "$editor" -- git -C "$lab_dir" -c user.name=ansible-practice -c user.email=ansible-practice@example.test \
     add -A
   runuser -u "$editor" -- git -C "$lab_dir" -c user.name=ansible-practice -c user.email=ansible-practice@example.test \

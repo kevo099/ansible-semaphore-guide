@@ -187,6 +187,7 @@ Match User svc_ansible
     KbdInteractiveAuthentication no
 Match all
 EOF
+sudo chmod 0600 /etc/ssh/sshd_config.d/70-ansible-lab.conf
 sudo /usr/sbin/sshd -t
 ```
 

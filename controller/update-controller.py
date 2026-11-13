@@ -357,6 +357,15 @@ def lab_plan(lab, repo, files, replace_edited):
     # or what an update wrote before it was killed.
     unfinished = any(entry[3:] == MANIFEST for entry in entries)
     for entry in entries:
+        # Where fapolicyd is active, as on a system hardened to the DISA STIG, Git is
+        # denied a script that no package installed and then lists it as modified.
+        if entry[:2] == " M" and b"Operation not permitted" in lab.git("diff", "--quiet", "--", entry[3:],
+                                                                      check=False).stderr:
+            problems.append(f"Git is not allowed to read {entry[3:]} in the lab folder (Operation not permitted). "
+                            "On a hardened system fapolicyd denies scripts that no package installed; add this "
+                            "guide's rules, which docs/09-security-benchmarks.md lists under 'Harden the "
+                            "controller itself', then run this again")
+            continue
         problems.append(f"uncommitted change to a guide file: {entry} ("
                         + (f"an update wrote it and stopped before its commit; commit the files it wrote, "
                            f"{MANIFEST} included" if unfinished else

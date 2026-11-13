@@ -976,6 +976,29 @@ class LabFolderTests(unittest.TestCase):
                                       "edit; discard what an interrupted update wrote, with git checkout -- FILE, "
                                       "or by deleting a file Git does not track)")
 
+    def test_a_file_git_may_not_read_is_blamed_on_fapolicyd_not_on_an_edit(self):
+        # On a hardened controller Git, run as the folder's owner, is denied a script and lists it as modified.
+        script = "scripts/summarize_xccdf.py"
+        (self.lab_root / script).write_text("an edit\n")
+        real_git = self.lab.git
+
+        def denied(*arguments, check=True):
+            result = real_git(*arguments, check=check)
+            if arguments[:2] == ("diff", "--quiet") and arguments[-1] == script:
+                result.stderr = (b'error: open("scripts/summarize_xccdf.py"): Operation not permitted\n'
+                                 b"fatal: cannot hash scripts/summarize_xccdf.py\n")
+            return result
+
+        with mock.patch.object(self.lab, "git", denied):
+            _plan, _expected, problems, _source = self.plan()
+        self.assertEqual(problems[0], f"Git is not allowed to read {script} in the lab folder (Operation not "
+                                      "permitted). On a hardened system fapolicyd denies scripts that no package "
+                                      "installed; add this guide's rules, which docs/09-security-benchmarks.md lists "
+                                      "under 'Harden the controller itself', then run this again")
+        # A file Git can read is still an uncommitted change.
+        _plan, _expected, problems, _source = self.plan()
+        self.assertTrue(problems[0].startswith(f"uncommitted change to a guide file:  M {script}"), problems)
+
     def test_a_write_that_stops_part_way_puts_back_what_it_wrote(self):
         (self.guide / "ansible.cfg").write_text("new cfg\n")
         real_write = LabFolder.write

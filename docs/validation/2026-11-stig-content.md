@@ -133,10 +133,13 @@ scan, and its last message said
 The controller was then restarted from its terminal with
 `sudo systemctl reboot`. It came back with Semaphore, PostgreSQL, `fapolicyd`
 and `usbguard` active and SELinux enforcing; the fixes had set the `FIPS:STIG`
-crypto policy. `fapolicyd` ran with `permissive = 0` and the audit log held no
-denial from it since the start. **Ping** then passed on both machines,
-**RHEL 9 · STIG audit** again reported 12 failing rules with the same two in
-CAT I, and the DISA scan ran as listed above.
+crypto policy. `fapolicyd` ran with `permissive = 0`. **Ping** then passed on
+both machines, **RHEL 9 · STIG audit** again reported 12 failing rules with
+the same two in CAT I, and the DISA scan ran as listed above. The audit log
+held no denial from `fapolicyd`, which a later run showed to prove little:
+`fapolicyd` does not watch the Semaphore service by default, and it denied the
+administrator's own Git and Python commands without an audit record. The
+[hardened-controller record](2026-11-hardened-controller.md) has that run.
 
 ### What the run changed
 
@@ -250,10 +253,10 @@ The tests added for this change cover:
   exceptions file on Ubuntu only.
 - **An Ubuntu controller with these changes.** The controller of this run was
   RHEL 9.8; the Ubuntu controller is covered by the offline tests only.
-- **A hardened controller beyond these jobs.** After its own STIG fixes and a
-  restart, the RHEL controller ran Ping and the STIG audits. The update tools,
+- **A hardened controller beyond these jobs,** in this run. The update tools,
   the onboarding command and an installation on a machine that is already
-  hardened were not run there.
+  hardened ran the same day; see the
+  [hardened-controller record](2026-11-hardened-controller.md).
 - **The changes after the review on a machine.** They ran under real Ansible
   on a workstation, as said above, and not from Semaphore against a target.
 - **An exceptions file that changes a value or refines a rule.** Every file of

@@ -92,6 +92,12 @@ git clone https://github.com/kevo099/ansible-semaphore-guide.git ~/ansible-semap
 cd ~/ansible-semaphore-guide
 ```
 
+On a machine that is already hardened to the DISA STIG, add `--template=`
+after `git clone`, and expect the installer to stop once with four `fapolicyd`
+rules to add; chapter 9,
+[Harden the controller itself](09-security-benchmarks.md#harden-the-controller-itself),
+explains both.
+
 `~/ansible-semaphore-guide` is **the guide's folder**. Every command in this
 guide that starts with `controller/` runs from it: the installer,
 `onboard-target.sh`, `add-target.sh`, `lab-sudo.py`, `remove-target.sh`,

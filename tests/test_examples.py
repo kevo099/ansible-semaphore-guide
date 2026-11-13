@@ -152,6 +152,18 @@ class AssessmentTests(unittest.TestCase):
             xccdf.summarize(self.result([("rule", "success")]))
 
 
+class LabConfigurationTests(unittest.TestCase):
+    def test_controller_side_tasks_take_their_module_through_a_pipe_too(self):
+        # [ssh_connection] covers the targets. A task delegated to localhost uses the local
+        # connection, which writes its module under ~/.ansible/tmp unless pipelining is on
+        # for every connection; fapolicyd denies that file where it watches the service.
+        import configparser
+        config = configparser.ConfigParser()
+        config.read(ROOT / "ansible.cfg")
+        self.assertEqual(config["connection"]["pipelining"], "True")
+        self.assertEqual(config["ssh_connection"]["pipelining"], "True")
+
+
 class AssessmentContentTests(unittest.TestCase):
     """What the summary says about the content, the failing rules and an exceptions file.
 
