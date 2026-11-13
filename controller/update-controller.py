@@ -102,6 +102,20 @@ class Unsafe(Exception):
     """A path in the lab folder is a link, the wrong kind of file, or changed meanwhile."""
 
 
+# Run as the lab folder's owner. Where fapolicyd is active, as on a system hardened to
+# the DISA STIG, opening a script that no package installed ends with EPERM for every
+# account but root. Asking Git would depend on its version: before 2.46 "git diff
+# --quiet" does not open the file. The message text would depend on the locale.
+REFUSED_STATUS = 77
+REFUSED_PROBE = f"""import errno, sys
+try:
+    with open(sys.argv[1], "rb") as handle:
+        handle.read(1)
+except OSError as error:
+    sys.exit({REFUSED_STATUS} if error.errno == errno.EPERM else 0)
+"""
+
+
 class LabFolder:
     """Reads and writes below one folder without ever following a symbolic link."""
 
@@ -288,6 +302,12 @@ class LabFolder:
                              f"{result.stderr.decode(errors='replace').strip()}")
         return result
 
+    def refused(self, relative):
+        """True where the folder's owner is refused the file itself: EPERM, which no file mode gives."""
+        result = subprocess.run(self.git_prefix + [sys.executable, "-I", "-c", REFUSED_PROBE,
+                                                   str(self.root / relative)], capture_output=True)
+        return result.returncode == REFUSED_STATUS
+
     def seed_commit(self):
         # Every local branch: publishing only the current files, as the Git migration
         # appendix shows, leaves the installer's commit on the branch local-history.
@@ -359,8 +379,7 @@ def lab_plan(lab, repo, files, replace_edited):
     for entry in entries:
         # Where fapolicyd is active, as on a system hardened to the DISA STIG, Git is
         # denied a script that no package installed and then lists it as modified.
-        if entry[:2] == " M" and b"Operation not permitted" in lab.git("diff", "--quiet", "--", entry[3:],
-                                                                      check=False).stderr:
+        if entry[:2] == " M" and lab.refused(entry[3:]):
             problems.append(f"Git is not allowed to read {entry[3:]} in the lab folder (Operation not permitted). "
                             "On a hardened system fapolicyd denies scripts that no package installed; add this "
                             "guide's rules, which docs/09-security-benchmarks.md lists under 'Harden the "

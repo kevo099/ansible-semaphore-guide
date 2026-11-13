@@ -96,7 +96,8 @@ On a machine that is already hardened to the DISA STIG, add `--template=`
 after `git clone`, and expect the installer to stop once with four `fapolicyd`
 rules to add; chapter 9,
 [Harden the controller itself](09-security-benchmarks.md#harden-the-controller-itself),
-explains both.
+explains both. Until those rules are loaded your account may not open the
+guide's Python files, so read them in step 2 below with `sudo less`.
 
 `~/ansible-semaphore-guide` is **the guide's folder**. Every command in this
 guide that starts with `controller/` runs from it: the installer,
@@ -146,6 +147,7 @@ Both installers take the same options, all optional:
 | `--lab-dir DIR` | `/opt/ansible-lab` | Absolute path of the lab folder. Refused: `/`, and paths under `/home`, `/root`, `/run/user`, `/tmp`, `/var/tmp` and `/var/lib/semaphore`, which the hardened service cannot read. The nearest existing parent folder must let other accounts through, as `/opt` and `/srv` do. |
 | `--expose https` or `--expose http` | None: the UI listens on loopback only | Also publish the UI on the controller's address; see [the optional section below](#optional-publish-the-ui-on-the-controllers-address). |
 | `--address IP_OR_NAME` | The IPv4 address of the controller's default route | Only together with `--expose`: the address or DNS name you browse to, which the certificate and the printed URL name. |
+| `--fapolicyd-ready` | The installer stops where `fapolicyd` is active without this guide's four rules | Skip that check, for a site that allowed the same paths another way; see chapter 9, [Harden the controller itself](09-security-benchmarks.md#harden-the-controller-itself). |
 
 For example, a lab folder under `/srv` and HTTPS on the controller's address:
 

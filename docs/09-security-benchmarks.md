@@ -664,9 +664,12 @@ Both orders work:
   with `git clone --template=` and the address of Stage 1: on a hardened
   system Git may not copy one of its own sample hooks, and a plain
   `git clone` ends with `cannot copy ... fsmonitor-watchman.sample:
-  Operation not permitted`. The installer then stops before it changes
-  anything and prints the four rules below with your paths. Add them, load
-  them and run the installer again.
+  Operation not permitted`. `git init` fails the same way and takes the same
+  option, as for chapter 7's `git init --bare`. The installer then stops
+  before it changes anything and prints the four rules below with your
+  paths. Add them, load them and run the installer again. Until they are
+  loaded your own account may not open the guide's Python files; read them
+  with `sudo less`.
 
 What the STIG sets, and what it means for this guide:
 
@@ -684,14 +687,20 @@ folder. The file's number matters: the runtime holds shared libraries, so its
 rule has to come before `fapolicyd`'s own rules for those, which start at 40.
 
 ```bash
+guide=$(realpath ~/ansible-semaphore-guide)
 sudo install -o root -g fapolicyd -m 0644 /dev/stdin /etc/fapolicyd/rules.d/35-ansible-semaphore-guide.rules <<RULES
 allow perm=any all : path=/usr/local/bin/semaphore
 allow perm=any all : dir=/opt/ansible-venv/
 allow perm=open all : dir=/opt/ansible-lab/ ftype=%languages
-allow perm=open all : dir=$HOME/ansible-semaphore-guide/ ftype=%languages
+allow perm=open all : dir=$guide/ ftype=%languages
 RULES
 sudo fagenrules --load
 ```
+
+`fapolicyd` compares the path that a symbolic link leads to, which is why
+`realpath` names the guide's folder; write a lab folder elsewhere than
+`/opt/ansible-lab` the same way. A rule cannot name a path with a space in it
+as these lines are written, and the installer refuses such a folder.
 
 `fapolicyd` takes a few seconds to load them. The first two lines allow what
 the installer put there, which no package owns; only root can write to either
@@ -700,9 +709,13 @@ also lets an interpreter run them; only you can write there. A rule allows
 whatever is at its path, so keep those owners as they are. `fapolicyd`'s trust
 files, with `fapolicyd-cli --file add`, are the other standard way and worked
 in the run for the first two paths on an installed controller; they cannot be
-written before the files exist, so they do not help the installer. Either way
-this is a change to the system's allowlist: record it and have it approved
-like any other exception.
+written before the files exist, so they do not help the installer. The
+installer looks for the four lines as they are written here, each before
+`fapolicyd`'s own rule that would deny it, and then reads one of the guide's
+scripts as your account to see that `fapolicyd` has loaded them. Where your
+site allowed the same paths another way, `--fapolicyd-ready` skips that check.
+Either way this is a change to the system's allowlist: record it and have it
+approved like any other exception.
 
 **Why jobs kept running without the rules.** The Semaphore service runs in its
 own mount namespace, and RHEL 9's `fapolicyd` does not watch other namespaces
@@ -712,7 +725,11 @@ not start: `Failed to execute /usr/local/bin/semaphore: Operation not
 permitted`. With the rules it started, and Ping, Baseline preview, the health
 report and the STIG audits passed; the audits needed this release's
 `ansible.cfg`, which sends the modules of tasks that run on the controller
-through a pipe as well. Add the rules even where jobs work without them.
+through a pipe as well. Add the rules even where jobs work without them. They
+cover this guide's project, which Semaphore reads from the lab folder. A
+project that Semaphore clones from a Git server is copied under
+`/var/lib/semaphore/tmp/`, which none of the four lines names; that case was
+not run.
 
 **Your own files under `umask 077`.** Make a new playbook readable by the
 `semaphore` group, or set a default ACL once, after which new files in the lab

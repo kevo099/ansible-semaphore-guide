@@ -976,28 +976,40 @@ class LabFolderTests(unittest.TestCase):
                                       "edit; discard what an interrupted update wrote, with git checkout -- FILE, "
                                       "or by deleting a file Git does not track)")
 
-    def test_a_file_git_may_not_read_is_blamed_on_fapolicyd_not_on_an_edit(self):
-        # On a hardened controller Git, run as the folder's owner, is denied a script and lists it as modified.
+    def test_a_file_its_owner_is_refused_is_blamed_on_fapolicyd_not_on_an_edit(self):
+        # On a hardened controller fapolicyd refuses the folder's owner a script that no package installed
+        # (EPERM), and Git, run as that owner, lists the script as modified.
         script = "scripts/summarize_xccdf.py"
         (self.lab_root / script).write_text("an edit\n")
-        real_git = self.lab.git
-
-        def denied(*arguments, check=True):
-            result = real_git(*arguments, check=check)
-            if arguments[:2] == ("diff", "--quiet") and arguments[-1] == script:
-                result.stderr = (b'error: open("scripts/summarize_xccdf.py"): Operation not permitted\n'
-                                 b"fatal: cannot hash scripts/summarize_xccdf.py\n")
-            return result
-
-        with mock.patch.object(self.lab, "git", denied):
+        # Stands in for "runuser -u OWNER --": it runs the tool's own read with open() refused for that one
+        # script, as the kernel refuses it there, and every other command unchanged.
+        owner = self.guide.parent / "as-the-owner.py"
+        owner.write_text("import builtins, errno, os, sys\n"
+                         "command = sys.argv[1:]\n"
+                         f"if '-c' in command and command[-1].endswith({script!r}):\n"
+                         "    def refuse(*arguments, **options):\n"
+                         "        raise PermissionError(errno.EPERM, 'Operation not permitted')\n"
+                         "    builtins.open = refuse\n"
+                         "    sys.argv = ['-c', command[-1]]\n"
+                         "    exec(command[command.index('-c') + 1])\n"
+                         "else:\n"
+                         "    os.execvp(command[0], command)\n")
+        with mock.patch.object(self.lab, "git_prefix", [sys.executable, str(owner)]):
+            self.assertTrue(self.lab.refused(script))
+            self.assertFalse(self.lab.refused("ansible.cfg"))
             _plan, _expected, problems, _source = self.plan()
         self.assertEqual(problems[0], f"Git is not allowed to read {script} in the lab folder (Operation not "
                                       "permitted). On a hardened system fapolicyd denies scripts that no package "
                                       "installed; add this guide's rules, which docs/09-security-benchmarks.md lists "
                                       "under 'Harden the controller itself', then run this again")
-        # A file Git can read is still an uncommitted change.
+        # A file its owner can read is still an uncommitted change, and so is one a file mode keeps it from.
+        self.assertFalse(self.lab.refused(script))
         _plan, _expected, problems, _source = self.plan()
         self.assertTrue(problems[0].startswith(f"uncommitted change to a guide file:  M {script}"), problems)
+        if os.geteuid() != 0:
+            (self.lab_root / script).chmod(0)
+            self.assertFalse(self.lab.refused(script))
+        self.assertFalse(self.lab.refused("scripts/absent.py"))
 
     def test_a_write_that_stops_part_way_puts_back_what_it_wrote(self):
         (self.guide / "ansible.cfg").write_text("new cfg\n")

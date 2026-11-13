@@ -92,10 +92,12 @@ has the four rules and the two commands that end them.
 
 | Symptom, as the administrator | Cause |
 | --- | --- |
-| `git clone` ends with `cannot copy ... fsmonitor-watchman.sample: Operation not permitted` | `fapolicyd` denies one of Git's own sample hooks; clone with `git clone --template=`. |
+| `git clone` or `git init` ends with `cannot copy ... fsmonitor-watchman.sample: Operation not permitted` | `fapolicyd` denies one of Git's own sample hooks; add `--template=` after `git clone` or `git init`. |
 | `git status` lists scripts you did not touch, `git checkout` or `git pull` refuses, `update-controller.sh` reports that Git is not allowed to read a file | `fapolicyd` denies scripts that no package installed. |
 | `Operation not permitted` from `python3 scripts/summarize_xccdf.py` or `/opt/ansible-venv/bin/ansible` | The same. |
 | The installer stops at once and prints four rules | The same, caught before anything changed. |
+| The installer stops at once: the rules are written, but the running `fapolicyd` does not apply them yet | The rules were written and not loaded, or loaded seconds ago; run `sudo fagenrules --load`, wait a few seconds and run the installer again. |
+| The installer stops at once: a rule cannot name a path with a space in it | The lab folder or the guide's folder has a space in its path; move it. |
 | A template for a playbook you just created fails with `Permission denied` | `umask 077` made the file `-rw-------`. |
 | Semaphore does not start after `allow_filesystem_mark = 1`: `Failed to execute /usr/local/bin/semaphore` | `fapolicyd` now watches the service and the rules are missing. |
 
@@ -104,8 +106,10 @@ has the four rules and the two commands that end them.
 Ansible may fail when an application allowlisting policy rejects a transferred
 temporary Python module. SSH pipelining can avoid that transfer-and-execute
 path; the supplied `ansible.cfg` enables it, for the targets and for tasks that
-run on the controller. Validate sudo/TTY compatibility and preserve the host's
-intended allowlisting policy.
+run on the controller. A task with `async` still writes its module to a file.
+A task of your own that runs on the controller with `become` gets no terminal,
+as over SSH. Validate sudo/TTY compatibility and preserve the host's intended
+allowlisting policy.
 
 For native RHEL SSG playbook execution, a root-owned private directory such as
 `/var/tmp/ansible-benchmark` can be selected with `ANSIBLE_REMOTE_TMP`. Inspect

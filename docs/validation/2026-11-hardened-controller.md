@@ -7,8 +7,9 @@ the vendor's `stig` profile, in both orders: installed first and hardened
 afterwards, and installed on a machine that was hardened first. The first
 order worked for Semaphore's jobs and broke the administrator's own work with
 Git and the update tool. The second order failed halfway through the
-installer as it was. This record says what ran, what broke, what was changed
-and what remains unverified.
+installer as it was. An independent review of the changes followed, and a
+fifth round ran its fixes on a machine hardened again. This record says what
+ran, what broke, what was changed and what remains unverified.
 
 ## Where
 
@@ -127,15 +128,67 @@ beyond round 1's nine were `RHEL-09-255115`, the drop-in above, and
 shell. In the [morning's run](2026-11-stig-content.md), where the fixes
 followed the installation, that rule did not fail and the controller ran.
 
+## Review and round 5
+
+An independent review of the changes found no fault that blocked their use and
+seven smaller ones. What was changed for them:
+
+- **The installer's check compares whole rules, and the place of all four.**
+  It took a rule for present where a longer one contained its text, and it
+  compared only the runtime's line with the shared-library rule. Now each of
+  the four has to be in the list exactly, before the first of `fapolicyd`'s
+  own rules that denies a shared library, a script or everything.
+- **It asks the running `fapolicyd` as well.** `fapolicyd-cli --list` prints
+  the compiled file, so rules written with `fagenrules` and not loaded passed
+  the check, and the installation would have stopped halfway. The installer
+  now reads one of the guide's scripts as the editor and stops with a message
+  of its own while that is refused.
+- **The guide's folder is named by the path its links lead to,** in the
+  installer's message and in chapter 9, because `fapolicyd` compares resolved
+  paths. A lab folder or guide's folder with a space in its path is refused
+  with a message of its own: a rule written this way cannot name it.
+- **The update tool no longer asks Git why a file is unreadable.** Its message
+  depended on `git diff --quiet` opening the file, which Git does only from
+  2.46 on, and on English error text. It now opens the file as the lab
+  folder's owner and tests for `EPERM`.
+- **The docs name `--fapolicyd-ready`,** `git init --template=`, reading the
+  helpers with `sudo less` before the rules exist, the limit of the four rules
+  to this guide's project, and what `pipelining` leaves out.
+
+Round 5 ran on `rhel9-vendor01`, hardened again from its snapshot with
+`oscap --remediate` (252 rules fixed) and restarted, as the controller and its
+own target. `allow_filesystem_mark` stayed at 0.
+
+| Step in round 5 | Result |
+| --- | --- |
+| `head -1 controller/lab-sudo.py` as the administrator, then with `sudo` | `Operation not permitted`; with `sudo`, the file's first line. |
+| The installer without the rules, from the guide's folder and through a symbolic link to it | Stopped both times with the four rules, the guide's folder under its real path. Exit status 1; no package installed, no file created. |
+| Chapter 9's block as printed, with `guide=$(realpath ~/ansible-semaphore-guide)`, then `sudo fagenrules` without `--load` | The file held the four lines with the folder's real path, `root fapolicyd 644`. `fapolicyd-cli --list` showed them, and `head` on a guide script was still refused. |
+| The installer in that state | Stopped: `The four fapolicyd rules are written, but the running fapolicyd does not apply them yet`. Exit status 1; nothing installed. |
+| `sudo fagenrules --load`, five seconds, the installer again | `fagenrules` reported `No change` and loaded the rules all the same; `git status` was clean; `Controller installed and seeded`. |
+| `onboard-target.sh` for the controller itself, `lab-sudo.py`, `check-controller.py` | Passed; 15 checks true. |
+| `update-controller.sh` with the rules | A plan without a problem; 26 files current. |
+| The rule file moved away, `fagenrules --load`, `update-controller.sh` | `head` on the lab folder's script was refused, while `git status` stayed clean and the plan had no problem: Git opens a file only when the times it recorded no longer match. |
+| The same after `sudo touch` on the lab folder's script | `git status` listed ` M scripts/summarize_xccdf.py`. The update tool: `Problem: Git is not allowed to read scripts/summarize_xccdf.py in the lab folder (Operation not permitted)`, with the pointer to chapter 9; exit status 1. |
+| The rule file back, `fagenrules --load` | `git status` clean in both folders; a plan without a problem. |
+| **Ping**, **Baseline preview**, **Health report**, **RHEL 9 · STIG audit** | Passed. The audit: 14 failing rules, CAT I 3, CAT II 10, CAT III 1. |
+
+The list that `fapolicyd-cli --list` printed in this round, 19 rules with the
+four of this guide as rules 6 to 9, is what the offline tests of the
+installer's check now start from.
+
 ## Offline checks
 
-`python3 scripts/validate.py` and the 467 offline tests pass. The tests added
-here cover the installer's check with no rules, with the rules in place, with
-rules loaded after the shared-library rule, with a part of them, with another
-lab folder, without `fapolicyd`, with an idle or permissive one and with the
+`python3 scripts/validate.py` and the 473 offline tests pass. The tests added
+here cover the installer's check with no rules, with the rules in place and
+in other spacing, with each rule missing, with a rule that only resembles one
+of the four, with each rule after the rule that denies it, with a list that
+cannot be read, with rules that are not loaded yet, with a folder that has a
+space in its path, with a guide's folder behind a link, with another lab
+folder, without `fapolicyd`, with an idle or permissive one and with the
 option; its place before the first package in both installers; `git init`
-without templates; the update tool's message; the `ansible.cfg` setting; and
-the drop-in's mode on all four paths.
+without templates; the update tool's read as the folder's owner and its
+message; the `ansible.cfg` setting; and the drop-in's mode on all four paths.
 
 ## Not established
 
@@ -145,14 +198,20 @@ the drop-in's mode on all four paths.
 - **AlmaLinux and Rocky Linux controllers.** Not run.
 - **The `0600` drop-in on the bootstrap playbook's and the cloud-init file's
   path.** It ran through `onboard-linux.sh` only.
-- **The rules as chapter 9 prints them, with `$HOME`.** They were typed with
-  the administrator's home written out.
+- **The review's fixes with a second target.** Round 5 had the controller as
+  its only target, and `allow_filesystem_mark` at 0.
+- **A folder with a space in its path, a home folder that is itself a link,
+  and rules in another order.** They ran in the offline tests, on the rule
+  list of round 5. On the machine, a link to the guide's folder was tried.
+- **A controller with Git before 2.46.** The update tool's read does not use
+  Git; the machine had Git 2.52.0.
+- **A project that Semaphore clones from a Git server,** with
+  `allow_filesystem_mark = 1`. Its copy is under `/var/lib/semaphore/tmp/`,
+  which the four rules do not name.
 - **`--fapolicyd-ready` with trust entries on a new machine.** The option ran
   in the offline tests only; trust entries cannot be written before the files
   exist.
 - **`update-runtime.sh --apply` with a real change** on a hardened controller.
-- **The update tool's new message on a machine.** With the rules in place Git
-  could read every file, so the message ran in the offline tests only.
 - **STIG apply against a controller that is already hardened,** and this
   release's guard on such a machine.
 - **FIPS mode.** The machines had the `FIPS:STIG` crypto policy and

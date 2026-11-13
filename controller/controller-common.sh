@@ -81,12 +81,14 @@ controller_require_fresh_state() {
 }
 
 # The four fapolicyd rules a controller of this guide needs, with this run's paths.
+# fapolicyd compares the path a symbolic link leads to, so the guide's folder is named
+# by that path; controller_validate_lab did the same for the lab folder.
 controller_fapolicyd_rules() {
   printf '%s\n' \
     'allow perm=any all : path=/usr/local/bin/semaphore' \
     'allow perm=any all : dir=/opt/ansible-venv/' \
     "allow perm=open all : dir=$lab_dir/ ftype=%languages" \
-    "allow perm=open all : dir=$repo_dir/ ftype=%languages"
+    "allow perm=open all : dir=$(realpath -m -- "$repo_dir")/ ftype=%languages"
 }
 
 # The DISA STIG turns on fapolicyd, which denies programs that no package installed:
@@ -104,20 +106,40 @@ controller_check_fapolicyd() {
        "${fapolicyd_conf:-/etc/fapolicyd/fapolicyd.conf}" 2>/dev/null; then
     return 0
   fi
-  local loaded rule library ours missing=0
-  loaded=$(fapolicyd-cli --list 2>/dev/null) || loaded=
-  while IFS= read -r rule; do
-    grep -qF -- "$rule" <<<"$loaded" || missing=1
-  done < <(controller_fapolicyd_rules)
-  # The runtime holds shared libraries, so its rule has to come before fapolicyd's own
-  # rule that denies the ones no package installed.
-  # grep finds nothing where a rule is missing; that must not end the installer here.
-  library=$(grep -n 'deny.*ftype=application/x-sharedlib' <<<"$loaded" | head -n 1 | cut -d: -f1) || true
-  ours=$(grep -nF -- 'dir=/opt/ansible-venv/' <<<"$loaded" | head -n 1 | cut -d: -f1) || true
-  if (( missing == 0 )) && [[ -z "$library" || ( -n "$ours" && "$ours" -lt "$library" ) ]]; then
-    return 0
+  local guide loaded rule number last=0 missing=0 deny probe
+  guide=$(realpath -m -- "$repo_dir")
+  # fapolicyd splits a rule at its spaces, so these lines cannot name such a path.
+  if [[ "$lab_dir$guide" =~ [[:space:]] ]]; then
+    cat <<MESSAGE
+fapolicyd is active on this machine, as on a system hardened to the DISA STIG, and
+this installation needs fapolicyd rules that name the lab folder and the guide's
+folder. A rule written the way this guide writes them cannot name a path with a
+space in it:
+
+  $lab_dir
+  $guide
+
+Move the guide's folder, or choose another --lab-dir, and run this installer
+again. Nothing was changed. If your site wrote its own rules for these paths,
+pass --fapolicyd-ready.
+MESSAGE
+    exit 1
   fi
-  cat <<MESSAGE
+  # fapolicyd-cli --list prints the compiled rules as "N. rule". Whole rules are
+  # compared, so that a longer path or an added condition does not pass for ours.
+  loaded=$(fapolicyd-cli --list 2>/dev/null \
+             | sed -E 's/^[[:space:]]*[0-9]+\.[[:space:]]*//; s/[[:space:]]+/ /g; s/ $//') || loaded=
+  while IFS= read -r rule; do
+    # grep finds nothing where a rule is missing; that must not end the installer here.
+    number=$(grep -nxF -- "$rule" <<<"$loaded" | head -n 1 | cut -d: -f1) || true
+    if [[ -z "$number" ]]; then missing=1; elif (( number > last )); then last=$number; fi
+  done < <(controller_fapolicyd_rules)
+  # Each of the four has to come before fapolicyd's own rules that deny what it
+  # allows: shared libraries, scripts and programs that no package installed.
+  deny=$(grep -nE '^deny[_a-z]* perm=[a-z]+ all : (ftype=application/x-sharedlib|ftype=%languages|all)$' <<<"$loaded" \
+           | head -n 1 | cut -d: -f1) || true
+  if (( missing == 1 )) || [[ -n "$deny" && "$last" -gt "$deny" ]]; then
+    cat <<MESSAGE
 fapolicyd is active on this machine, as on a system hardened to the DISA STIG. It
 denies programs that no package installed, which here are Semaphore's binary and
 the Ansible runtime, and it keeps your account and Git from reading the guide's
@@ -137,7 +159,24 @@ Then load them and run this installer again:
 docs/09-security-benchmarks.md, "Harden the controller itself", explains each
 line. If your site allowed the same paths another way, pass --fapolicyd-ready.
 MESSAGE
-  exit 1
+    exit 1
+  fi
+  # The lines can be in the compiled file and not yet in the running fapolicyd:
+  # fagenrules without --load, or the seconds a reload takes. So ask fapolicyd itself,
+  # with a read it refuses the editor until the last of the four rules is loaded.
+  probe=$(LC_ALL=C runuser -u "$editor" -- head -c 1 -- "$repo_dir/scripts/summarize_xccdf.py" 2>&1 >/dev/null) || true
+  if [[ "$probe" == *'Operation not permitted'* ]]; then
+    cat <<MESSAGE
+The four fapolicyd rules are written, but the running fapolicyd does not apply
+them yet: it still refuses $editor a script in the guide's folder. Load them,
+wait a few seconds and run this installer again:
+
+  sudo fagenrules --load
+
+Nothing was changed.
+MESSAGE
+    exit 1
+  fi
 }
 
 controller_check_sources() {
