@@ -319,10 +319,26 @@ sudo bash controller/update-controller.sh --apply
 ```
 
 Read the plan that the first `update-controller.sh` prints before you run the
-second.
+second. When its last lines say the Ansible runtime or Semaphore's SSH
+settings are older too, which happens on a controller installed before
+`v1.8.0`, update those while no task runs:
 
-**Check:** it ends with `Updated to RELEASE_TAG. The readiness check passed.`,
-and **Ping** still succeeds.
+```bash
+sudo bash controller/update-runtime.sh
+sudo bash controller/update-runtime.sh --apply
+```
+
+To bring machines you added with an earlier release to today's account
+standard, under the names they already have:
+
+```bash
+bash controller/onboard-target.sh ADMIN@VM_ADDRESS ADMIN@OTHER_ADDRESS --keep-password
+```
+
+**Check:** the update ends with `Updated to RELEASE_TAG. The readiness check
+passed.`, the runtime update with `Updated. The readiness check passed.`, the
+onboarding with `Already present as NAME` for each machine, and **Ping** still
+succeeds.
 
 **Undo or next:** `git revert HEAD` in the lab folder undoes the files, not
 the Semaphore changes, as

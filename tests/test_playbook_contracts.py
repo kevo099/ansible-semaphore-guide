@@ -140,7 +140,8 @@ class SummaryReportTests(unittest.TestCase):
 
     def report(self, summary):
         task = named(tasks("playbooks/tasks/stig_scan.yml"), "Report the scan outcome counts")
-        return native(task["ansible.builtin.debug"]["msg"], stig_summary=summary)
+        older = native(task["vars"]["stig_summary_older"], stig_summary=summary)
+        return native(task["ansible.builtin.debug"]["msg"], stig_summary=summary, stig_summary_older=older)
 
     def warns(self, summary):
         task = named(tasks("playbooks/tasks/stig_scan.yml"), "Warn about scanner errors or unknown outcomes")
@@ -167,7 +168,19 @@ class SummaryReportTests(unittest.TestCase):
                 result = self.report(summary)
                 self.assertTrue(result.startswith("Summary unavailable"))
                 self.assertIn(summary["stderr"], result)
+                self.assertNotIn("older than this playbook", result)
                 self.assertFalse(self.warns(summary))
+
+    def test_an_earlier_copy_of_the_script_is_named_as_the_cause(self):
+        # A lab folder that kept its own, earlier summarize_xccdf.py: argparse refuses the options it does not know.
+        earlier = {"rc": 2, "stdout": "", "msg": "non-zero return code",
+                   "stderr": "usage: summarize_xccdf.py [-h] [--result-id RESULT_ID] xml\n"
+                             "summarize_xccdf.py: error: unrecognized arguments: --findings /x/audit-findings.csv"}
+        result = self.report(earlier)
+        self.assertTrue(result.startswith("Summary unavailable; read the HTML report. The lab folder's "
+                                          "scripts/summarize_xccdf.py is older than this playbook; take the guide's copy. "
+                                          "usage: summarize_xccdf.py"), result)
+        self.assertFalse(self.warns(earlier))
 
 
 class MissingResultsTests(unittest.TestCase):
@@ -207,6 +220,413 @@ class MissingResultsTests(unittest.TestCase):
         skipped = self.message({"changed": False, "skipped": True, "skip_reason": "Conditional result was False"})
         self.assertEqual(skipped, "The vendor scanner produced no results on lab-ubuntu. "
                                   "Rerun with -v to see the scanner output.")
+
+
+def render(expression, **variables):
+    """Render a playbook expression with the Ansible filters and tests the STIG tasks use."""
+    environment = NativeEnvironment(undefined=jinja2.StrictUndefined)
+    environment.filters.update({
+        "from_json": json.loads, "basename": os.path.basename,
+        "regex_replace": lambda value, pattern, replacement: re.sub(pattern, replacement, value)})
+    environment.tests.update({"match": lambda value, pattern: re.match(pattern, value) is not None,
+                              "abs": os.path.isabs})
+    return environment.from_string(expression).render(**variables)
+
+
+SCAN = "playbooks/tasks/stig_scan.yml"
+STIG_PROFILE = "xccdf_org.ssgproject.content_profile_stig"
+
+
+def scan_task(prefix):
+    return next(task for task in walk(tasks(SCAN)) if task.get("name", "").startswith(prefix))
+
+
+class StigMessageTests(unittest.TestCase):
+    def test_no_message_carries_a_folded_line_break(self):
+        """In a folded YAML scalar a more-indented line keeps its line break, which would show in the job output."""
+        def strings(node, key=""):
+            if isinstance(node, dict):
+                for name, value in node.items():
+                    yield from strings(value, name)
+            elif isinstance(node, list):
+                for value in node:
+                    yield from strings(value, key)
+            elif isinstance(node, str) and key in ("msg", "fail_msg"):
+                yield node
+
+        for path in (SCAN, *STIG_PLAYBOOKS):
+            for text in strings(tasks(path)):
+                outside = re.sub(r"\{\{.*?\}\}", "", text.strip(), flags=re.S)
+                with self.subTest(path=path, text=text[:50]):
+                    self.assertNotIn("\n", outside)
+
+
+class ContentFolderTests(unittest.TestCase):
+    """stig_content_file may name the system's content folder, which then holds exactly one DISA benchmark."""
+
+    PROFILE = "xccdf_mil.disa.stig_profile_MAC-1_Classified"
+
+    def verdict(self, content_file, stat, found=None, profile=PROFILE):
+        task = scan_task("Refuse a missing file, a placeholder or an incomplete profile ID")
+        variables = {"stig_content_file": content_file, "stig_content_profile": profile, "stig_content_stat": {"stat": stat},
+                     "stig_content_found": {"files": [{"path": f"/opt/ansible-lab/playbooks/../{content_file}/{name}"}
+                                                      for name in found]} if found is not None else {"skipped": True}}
+        for name in ("stig_content_names", "stig_content_is_folder", "stig_content_profile_problem", "stig_content_problem"):
+            variables[name] = render(task["vars"][name], **variables)
+        accepted = all(render(condition if "{{" in condition else "{{ " + condition + " }}", **variables)
+                       for condition in task["ansible.builtin.assert"]["that"])
+        return accepted, render(task["ansible.builtin.assert"]["fail_msg"], **variables)
+
+    def test_a_file_is_accepted_as_before(self):
+        accepted, _message = self.verdict("content/rhel/9/U_RHEL_9_V2R10_STIG_SCAP_1-3_Benchmark.xml",
+                                          {"exists": True, "isreg": True, "isdir": False})
+        self.assertTrue(accepted)
+        accepted, message = self.verdict("content/rhel/9/missing.xml", {"exists": False})
+        self.assertFalse(accepted)
+        self.assertTrue(message.startswith("There is no file content/rhel/9/missing.xml in the lab folder yet. Copy an XML"))
+
+    def test_a_folder_stands_for_the_one_benchmark_in_it(self):
+        folder = {"exists": True, "isreg": False, "isdir": True}
+        accepted, _message = self.verdict("content/rhel/9", folder, ["U_RHEL_9_V2R10_STIG_SCAP_1-3_Benchmark.xml"])
+        self.assertTrue(accepted)
+        accepted, message = self.verdict("content/rhel/9", folder, [])
+        self.assertFalse(accepted)
+        self.assertTrue(message.startswith("The folder content/rhel/9 holds no DISA benchmark, "
+                                           "a file whose name ends in _Benchmark.xml. Copy an XML"))
+        accepted, message = self.verdict("content/rhel/9", folder, ["U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.xml",
+                                                                   "U_RHEL_9_V2R10_STIG_SCAP_1-3_Benchmark.xml"])
+        self.assertFalse(accepted)
+        self.assertIn("holds 2 DISA benchmarks (U_RHEL_9_V2R10_STIG_SCAP_1-3_Benchmark.xml, "
+                      "U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.xml); keep the one to scan with. Copy an XML", message)
+
+    def test_a_short_profile_id_is_named_as_the_problem_not_the_folder(self):
+        folder = {"exists": True, "isreg": False, "isdir": True}
+        for content_file, stat, found in (("content/rhel/9", folder, ["U_RHEL_9_V2R10_STIG_SCAP_1-3_Benchmark.xml"]),
+                                          ("content/rhel/9/U_RHEL_9_V2R10_STIG_SCAP_1-3_Benchmark.xml",
+                                           {"exists": True, "isreg": True, "isdir": False}, None)):
+            with self.subTest(content_file=content_file):
+                accepted, message = self.verdict(content_file, stat, found, profile="MAC-1_Classified")
+                self.assertFalse(accepted)
+                self.assertTrue(message.startswith("stig_content_profile is not a full profile ID. Copy an XML"), message)
+                self.assertNotIn("holds", message)
+
+    def test_the_folder_is_searched_on_the_controller_for_disa_names_only(self):
+        task = scan_task("List the DISA benchmarks in a content folder on the controller")
+        self.assertEqual((task["delegate_to"], task["become"]), ("localhost", False))
+        self.assertEqual(task["ansible.builtin.find"]["patterns"], "*_Benchmark.xml")
+        self.assertEqual(task["when"], "stig_content_stat.stat.isdir | default(false)")
+        chosen = scan_task("Scan with the one benchmark the content folder holds")
+        self.assertEqual(chosen["when"], task["when"])
+        self.assertEqual(chosen["ansible.builtin.set_fact"], {"stig_content_source": "{{ stig_content_found.files[0].path }}"})
+
+
+class ExceptionsFileTests(unittest.TestCase):
+    """An exceptions (XCCDF tailoring) file leaves rules out of the scan and of the fixes, and every run says so."""
+
+    DESCRIBED = {"tailoring_id": "xccdf_site_tailoring_default", "benchmark": "/usr/share/xml/scap/ssg/content/ssg-rhel9-ds.xml",
+                 "profile_id": STIG_PROFILE + "_site", "extends": STIG_PROFILE, "title": "Site exceptions",
+                 "left_out": ["xccdf_org.ssgproject.content_rule_grub2_password",
+                              "xccdf_org.ssgproject.content_group_partitions"],
+                 "left_out_count": 2, "selected_count": 0, "values_set": 1, "sha256": "ab" * 32}
+
+    def source(self, **variables):
+        facts = scan_task("Note whether this scan uses a local SCAP content file or an exceptions file")
+        return render(facts["ansible.builtin.set_fact"]["stig_tailoring_source"], playbook_dir="/opt/ansible-lab/playbooks",
+                      **{"stig_content_file": "", "stig_report_folder": "", "stig_tailoring_file": "", **variables})
+
+    def test_the_named_file_wins_and_a_system_folder_has_a_default(self):
+        self.assertEqual(self.source(stig_tailoring_file="content/site.xml", stig_report_folder="rhel/9"),
+                         "/opt/ansible-lab/playbooks/../content/site.xml")
+        self.assertEqual(self.source(stig_tailoring_file="/srv/site.xml"), "/srv/site.xml")
+        self.assertEqual(self.source(stig_report_folder="rhel/9"),
+                         "/opt/ansible-lab/playbooks/../content/rhel/9/tailoring.xml")
+        # The default fits the vendor's content, so a DISA file scan needs the file named.
+        self.assertEqual(self.source(stig_report_folder="rhel/9", stig_content_file="content/rhel/9"), "")
+        # The shared playbooks run without a system folder.
+        self.assertEqual(self.source(), "")
+
+    def test_a_default_file_is_used_only_when_it_exists(self):
+        look = scan_task("Look for an exceptions file on the controller")
+        self.assertEqual((look["delegate_to"], look["become"], look["when"]),
+                         ("localhost", False, "stig_tailoring_source | length > 0"))
+        expression = scan_task("Note whether this scan uses an exceptions file")["ansible.builtin.set_fact"]["stig_tailored"]
+        for named_file, stat, expected in (("content/site.xml", {"stat": {"exists": False}}, True),
+                                           ("", {"stat": {"exists": True}}, True),
+                                           ("", {"stat": {"exists": False}}, False),
+                                           ("", {"skipped": True}, False)):
+            with self.subTest(named_file=named_file, stat=stat):
+                self.assertIs(render(expression, stig_tailoring_file=named_file, stig_tailoring_stat=stat), expected)
+
+    def verdict(self, read, family="RedHat", local_content=False, usg_profile="disa_stig",
+                content_profile="xccdf_mil.disa.stig_profile_MAC-1_Classified"):
+        task = scan_task("Refuse an exceptions file that cannot be read or extends another profile")
+        variables = {"stig_tailoring_read": read, "stig_local_content": local_content, "stig_profile_el": STIG_PROFILE,
+                     "stig_usg_profile": usg_profile, "stig_content_profile": content_profile,
+                     "ansible_facts": {"os_family": family}, "inventory_hostname": "lab-rhel",
+                     "stig_tailoring_source": "/opt/ansible-lab/playbooks/../content/rhel/9/tailoring.xml"}
+        for name in ("stig_tailoring_seen", "stig_tailoring_base", "stig_tailoring_error", "stig_tailoring_id_ok",
+                     "stig_tailoring_problem"):
+            variables[name] = render(task["vars"][name], **variables)
+        # Ansible evaluates the conditions in order and stops at the first false one.
+        accepted = all(render("{{ " + condition + " }}", **variables) for condition in task["ansible.builtin.assert"]["that"])
+        return accepted, render(task["ansible.builtin.assert"]["fail_msg"], **variables)
+
+    def read(self, **changes):
+        return {"rc": 0, "stdout": json.dumps(dict(self.DESCRIBED, **changes)), "stderr": ""}
+
+    def test_a_file_that_extends_the_runs_profile_is_accepted(self):
+        self.assertTrue(self.verdict(self.read())[0])
+        # Ubuntu's usg calls its STIG profile disa_stig, stig or stig-v1r1; all three are the same profile ID.
+        for usg_profile in ("disa_stig", "stig", "stig-v1r1"):
+            with self.subTest(usg_profile=usg_profile):
+                self.assertTrue(self.verdict(self.read(), family="Debian", usg_profile=usg_profile)[0])
+        # With a DISA file, the base is the profile chosen for that file.
+        disa = self.read(extends="xccdf_mil.disa.stig_profile_MAC-1_Classified",
+                         profile_id="xccdf_mil.disa.stig_profile_MAC-1_Classified_site")
+        self.assertTrue(self.verdict(disa, local_content=True)[0])
+
+    def test_a_file_for_another_profile_cannot_replace_the_baseline(self):
+        other = "xccdf_org.ssgproject.content_profile_cis"
+        for arguments in ({"family": "RedHat"}, {"family": "Debian"}, {"family": "RedHat", "local_content": True}):
+            with self.subTest(**arguments):
+                accepted, message = self.verdict(self.read(extends=other), **arguments)
+                self.assertFalse(accepted)
+                self.assertIn(f"Its profile {STIG_PROFILE}_site extends {other}, and this run scans with ", message)
+                self.assertIn("Nothing was scanned or changed.", message)
+
+    def test_on_ubuntu_a_file_is_checked_against_the_stig_profile_or_refused(self):
+        # usg takes the profile from the file, so a file must never decide the baseline by itself.
+        cis = "xccdf_org.ssgproject.content_profile_cis_level1_server"
+        # A file for another baseline under any of the STIG profile's names.
+        for usg_profile in ("disa_stig", "stig", "stig-v1r1"):
+            with self.subTest(usg_profile=usg_profile):
+                accepted, message = self.verdict(self.read(extends=cis), family="Debian", usg_profile=usg_profile)
+                self.assertFalse(accepted)
+                self.assertIn(f"extends {cis}, and this run scans with {STIG_PROFILE}.", message)
+        # Another usg profile: the base is unknown, so neither a STIG file nor a matching one is used.
+        for extends in (STIG_PROFILE, cis):
+            with self.subTest(extends=extends):
+                accepted, message = self.verdict(self.read(extends=extends), family="Debian",
+                                                 usg_profile="cis_level1_server-v1.0.0")
+                self.assertFalse(accepted)
+                self.assertIn("This run uses the Ubuntu Security Guide profile cis_level1_server-v1.0.0, and an exceptions "
+                              "file is only checked against its STIG profile, disa_stig. It must be", message)
+
+    def test_a_profile_id_that_is_no_xccdf_id_is_named_as_the_problem(self):
+        accepted, message = self.verdict(self.read(profile_id="site_exceptions"))
+        self.assertFalse(accepted)
+        self.assertIn("Its profile ID site_exceptions is not a full XCCDF profile ID. It must be", message)
+        self.assertNotIn("this run scans with", message)
+
+    def test_an_unreadable_file_is_refused_with_the_readers_words(self):
+        error = "Cannot read the tailoring file: Expected one Profile in the tailoring file, found 2\n"
+        accepted, message = self.verdict({"rc": 1, "stdout": "", "stderr": error})
+        self.assertFalse(accepted)
+        closing = (" It must be an XCCDF tailoring file with one profile that extends the profile this run uses; "
+                   "chapter 9 shows how to make one with the vendor's own tool. Nothing was scanned or changed.")
+        self.assertEqual(message, "The exceptions file tailoring.xml cannot be used on lab-rhel. " + error.strip() + "." + closing)
+        # The reader's sentence ends once: an error that brings its own period gets no second one.
+        missing = "Cannot read the tailoring file: [Errno 2] No such file or directory: '/opt/ansible-lab/content/none.xml'"
+        for stderr in (missing, missing + ".\n"):
+            _accepted, message = self.verdict({"rc": 1, "stdout": "", "stderr": stderr})
+            self.assertIn("none.xml'." + closing, message)
+            self.assertNotIn("..", message.replace("playbooks/../", ""))
+        # A profile ID that could not be an oscap argument is refused as well.
+        self.assertFalse(self.verdict(self.read(profile_id="stig; reboot"))[0])
+
+    def test_every_run_names_the_file_its_hash_and_what_it_leaves_out(self):
+        task = scan_task("Name the exceptions file and what it leaves out")
+        variables = {"inventory_hostname": "lab-rhel", "stig_tailoring": self.DESCRIBED,
+                     "stig_tailoring_source": "/opt/ansible-lab/playbooks/../content/rhel/9/tailoring.xml"}
+        def message(described):
+            variables["stig_tailoring"] = described
+            for name in ("stig_tailoring_left_out", "stig_tailoring_refined", "stig_tailoring_refined_note"):
+                variables[name] = render(task["vars"][name], **variables)
+            return render(task["ansible.builtin.debug"]["msg"], **variables)
+
+        self.assertEqual(message(self.DESCRIBED),
+                         f"lab-rhel: exceptions file tailoring.xml (SHA-256 {'ab' * 32}) extends {STIG_PROFILE}, "
+                         "leaves out 2 rule(s) or group(s), sets 1 value(s) and refines 0 rule(s). Left out: "
+                         "grub2_password, partitions. What it leaves out is neither scanned nor fixed in this run; "
+                         "record who accepted each exception.")
+        many = dict(self.DESCRIBED, left_out=[f"xccdf_org.ssgproject.content_rule_r{n}" for n in range(45)], left_out_count=45)
+        self.assertIn("r39, and 5 more. What it leaves out", message(many))
+        # Only the benchmark's prefix is cut: a name that contains _rule_ or _group_ stays whole.
+        odd = dict(self.DESCRIBED, left_out_count=3,
+                   left_out=["xccdf_org.ssgproject.content_rule_group_unique_id",
+                             "xccdf_org.ssgproject.content_rule_gid_passwd_group_same",
+                             "xccdf_mil.disa.stig_rule_SV-258155r1045300_rule"])
+        self.assertIn("Left out: group_unique_id, gid_passwd_group_same, SV-258155r1045300_rule. What", message(odd))
+        # A rule whose role, severity or weight the file changes is named too.
+        refined = dict(self.DESCRIBED, rules_refined=["xccdf_org.ssgproject.content_rule_sshd_set_idle_timeout"],
+                       rules_refined_count=1)
+        self.assertIn("sets 1 value(s) and refines 1 rule(s). Left out: grub2_password, partitions. Refined, with another "
+                      "role, severity or weight than the profile gives: sshd_set_idle_timeout. What it leaves out",
+                      message(refined))
+
+    def commands(self, tailored, local_content=False, controller=False):
+        variables = {"stig_tailored": tailored, "stig_tailoring_remote": "/var/log/stig-practice/S/tailoring.xml" if tailored else "",
+                     "stig_tailoring": self.DESCRIBED, "stig_local_content": local_content, "stig_profile_el": STIG_PROFILE,
+                     "stig_content_profile": "xccdf_mil.disa.stig_profile_MAC-1_Classified", "stig_usg_profile": "disa_stig",
+                     "stig_fetch_remote_resources": False, "stig_remote_dir": "/var/log/stig-practice/S", "stig_phase": "audit",
+                     "stig_datastream": "/usr/share/xml/scap/ssg/content/ssg-rhel9-ds.xml"}
+        chosen = scan_task("Choose the profile this run scans with")["ansible.builtin.set_fact"]
+        variables["stig_scan_profile"] = render(chosen["stig_scan_profile"], **variables)
+        self.assertEqual(render(chosen["stig_tailoring_remote"], **variables), variables["stig_tailoring_remote"])
+        apply = tasks("playbooks/stig-apply.yml")[0]["tasks"]
+        # The Ubuntu fix builds its command from two task variables; a target that is not the controller
+        # gets the plain usg command.
+        usg_fix = named(apply, "Apply the vendor remediation on Ubuntu")
+        variables.update(stig_is_controller=controller, stig_keep_ssh_client=usg_fix["vars"]["stig_keep_ssh_client"],
+                         stig_usg_fix=render(usg_fix["vars"]["stig_usg_fix"], **variables))
+        return {name: render(task["ansible.builtin.command"]["argv"], **variables) for name, task in (
+            ("el", scan_task("Scan Enterprise Linux against the vendor STIG profile")),
+            ("usg", scan_task("Scan Ubuntu with the Ubuntu Security Guide STIG profile")),
+            ("local", scan_task("Scan against the profile in the local content file")),
+            ("el_fix", named(apply, "Apply the vendor remediation on Enterprise Linux")),
+            ("usg_fix", named(apply, "Apply the vendor remediation on Ubuntu")))}
+
+    def test_without_an_exceptions_file_the_commands_are_the_earlier_ones(self):
+        commands = self.commands(False)
+        stream, folder = "/usr/share/xml/scap/ssg/content/ssg-rhel9-ds.xml", "/var/log/stig-practice/S"
+        self.assertEqual(commands["el"], ["oscap", "xccdf", "eval", "--profile", STIG_PROFILE, "--results",
+                                          f"{folder}/audit.xml", "--report", f"{folder}/audit.html", stream])
+        self.assertEqual(commands["usg"], ["usg", "audit", "disa_stig", "--results-file", f"{folder}/audit.xml",
+                                           "--html-file", f"{folder}/audit.html"])
+        self.assertEqual(commands["el_fix"], ["oscap", "xccdf", "eval", "--remediate", "--profile", STIG_PROFILE, "--results",
+                                              f"{folder}/remediate.xml", "--report", f"{folder}/remediate.html", stream])
+        self.assertEqual(commands["usg_fix"], ["usg", "fix", "disa_stig"])
+        self.assertEqual(self.commands(False, local_content=True)["local"],
+                         ["oscap", "xccdf", "eval", "--profile", "xccdf_mil.disa.stig_profile_MAC-1_Classified", "--results",
+                          f"{folder}/audit.xml", "--report", f"{folder}/audit.html", f"{folder}/content.xml"])
+
+    def test_on_its_own_controller_the_ubuntu_fix_gives_the_ssh_client_its_files_back(self):
+        # usg works with umask 077 and leaves the SSH client's files for root only, which ends ssh for the
+        # semaphore account. The fix and the repair are one command: no later task could connect.
+        for tailored, tail in ((False, ["usg", "fix", "disa_stig"]),
+                               (True, ["usg", "fix", "--tailoring-file", "/var/log/stig-practice/S/tailoring.xml"])):
+            argv = self.commands(tailored, controller=True)["usg_fix"]
+            self.assertEqual(argv[:2] + argv[3:], ["/bin/sh", "-c", "usg-fix"] + tail)
+        script = argv[2]
+        self.assertIn("/etc/ssh/ssh_config.d", script)
+        with tempfile.TemporaryDirectory() as work:
+            folder, binaries = Path(work, "ssh_config.d"), Path(work, "bin")
+            folder.mkdir()
+            binaries.mkdir()
+            (folder / "50-site.conf").write_text("Host *\n")
+            (folder / "50-site.conf").chmod(0o644)
+            (folder / "notes.txt").write_text("not a configuration file\n")
+            (folder / "notes.txt").chmod(0o600)
+            # A stand-in usg: it writes its files as usg does and ends with a status of its own.
+            (binaries / "usg").write_text(f"#!/bin/sh\necho \"usg $*\"\numask 077\necho 'Host *' > {folder}/00-cipher-list.conf\n"
+                                          f"echo 'Host *' > {folder}/00-mac-list.conf\nexit 3\n")
+            (binaries / "usg").chmod(0o755)
+            result = subprocess.run(["/bin/sh", "-c", script.replace("/etc/ssh/ssh_config.d", str(folder)), *argv[3:]],
+                                    capture_output=True, text=True, timeout=30,
+                                    env={"PATH": f"{binaries}{os.pathsep}/usr/bin:/bin"})
+            self.assertEqual((result.returncode, result.stdout, result.stderr),
+                             (3, "usg fix --tailoring-file /var/log/stig-practice/S/tailoring.xml\n", ""))
+            modes = {path.name: oct(path.stat().st_mode & 0o777) for path in folder.iterdir()}
+            self.assertEqual(modes, {"00-cipher-list.conf": "0o644", "00-mac-list.conf": "0o644",
+                                     "50-site.conf": "0o644", "notes.txt": "0o600"})
+
+    def test_with_one_every_scan_and_fix_uses_the_file_and_its_profile(self):
+        commands = self.commands(True)
+        remote, tailored = "/var/log/stig-practice/S/tailoring.xml", STIG_PROFILE + "_site"
+        # oscap: the vendor's documented pair, --tailoring-file with the file's profile as --profile.
+        for name in ("el", "el_fix"):
+            with self.subTest(command=name):
+                argv = commands[name]
+                self.assertEqual(argv[argv.index("--tailoring-file") + 1], remote)
+                self.assertEqual(argv[argv.index("--profile") + 1], tailored)
+                self.assertNotIn(STIG_PROFILE, argv)
+        # usg: the file instead of a profile name, as Canonical documents it.
+        self.assertEqual(commands["usg"][:4], ["usg", "audit", "--tailoring-file", remote])
+        self.assertNotIn("disa_stig", commands["usg"])
+        self.assertEqual(commands["usg_fix"], ["usg", "fix", "--tailoring-file", remote])
+        local = self.commands(True, local_content=True)["local"]
+        self.assertEqual(local[3:7], ["--tailoring-file", remote, "--profile", tailored])
+
+    def test_the_file_reaches_the_target_root_only_and_the_summary_reads_the_controllers_copy(self):
+        copy = scan_task("Copy the exceptions file to the target")
+        self.assertEqual(copy["when"], "stig_tailored")
+        self.assertEqual(copy["ansible.builtin.copy"], {"src": "{{ stig_tailoring_source }}", "dest": "{{ stig_tailoring_remote }}",
+                                                        "owner": "root", "group": "root", "mode": "0600"})
+        summarize = scan_task("Summarize the fetched XCCDF result on the controller")
+        variables = {"playbook_dir": "/opt/ansible-lab/playbooks", "stig_fetch_dir": "/srv/u/stig-reports/rhel/9/S",
+                     "inventory_hostname": "lab-rhel", "stig_phase": "before", "stig_tailoring_source": "/opt/t.xml"}
+        base = ["/usr/bin/python3", "/opt/ansible-lab/playbooks/../scripts/summarize_xccdf.py",
+                "/srv/u/stig-reports/rhel/9/S/lab-rhel/before.xml", "--findings",
+                "/srv/u/stig-reports/rhel/9/S/lab-rhel/before-findings.csv"]
+        argv = summarize["ansible.builtin.command"]["argv"]
+        self.assertEqual(render(argv, stig_tailored=False, **variables), base)
+        self.assertEqual(render(argv, stig_tailored=True, **variables), base + ["--tailoring", "/opt/t.xml"])
+
+    def test_both_playbooks_take_the_variable_and_apply_fixes_after_the_first_scan(self):
+        for playbook in STIG_PLAYBOOKS:
+            with self.subTest(playbook=playbook):
+                self.assertEqual(tasks(playbook)[0]["vars"]["stig_tailoring_file"], "")
+        names = [task["name"] for task in tasks("playbooks/stig-apply.yml")[0]["tasks"]]
+        # The scan before the fixes checks the file, chooses its profile and copies it to the target.
+        self.assertLess(names.index("Record the posture before remediation"),
+                        names.index("Apply the vendor remediation on Enterprise Linux"))
+
+
+class ReleaseAndFindingsLineTests(unittest.TestCase):
+    """Each scan says which STIG release its content follows and lists the failing rules by category."""
+
+    SUMMARY = {"content": {"line": "STIG release V2R9: profile 'DISA STIG for Red Hat Enterprise Linux 9' in 'Guide' 0.1.82, "
+                                   "file /usr/share/xml/scap/ssg/content/ssg-rhel9-ds.xml, scanner cpe:/a:redhat:openscap:1.3.14"},
+               "failed_by_category": {"CAT I": 2, "CAT II": 9, "CAT III": 3, "unrated": 1},
+               "failed_cat_i": ["RHEL-09-212010 (grub2_password): Set Boot Loader Password in grub2",
+                                "RHEL-09-671010 (sysctl_crypto_fips_enabled): Set kernel parameter"],
+               "failed_cat_i_ids": ["RHEL-09-212010", "RHEL-09-671010"],
+               "findings_file": "/srv/u/stig-reports/rhel/9/S/lab-rhel/audit-findings.csv",
+               "has_scanner_errors_or_unknowns": False}
+
+    def line(self, prefix, summary=None, **variables):
+        task = scan_task(prefix)
+        stdout = json.dumps(self.SUMMARY if summary is None else summary)
+        variables = {"inventory_hostname": "lab-rhel", "stig_summary": {"rc": 0, "stdout": stdout}, "stig_local_content": False,
+                     "stig_tailored": False, **variables}
+        if not all(render("{{ " + condition + " }}", **variables) for condition in task["when"]):
+            return False, ""
+        for name, expression in task["vars"].items():
+            variables[name] = render(expression, **variables)
+        return True, render(task["ansible.builtin.debug"]["msg"], **variables)
+
+    def test_the_release_line_names_content_and_exceptions(self):
+        shown, text = self.line("Say which STIG release and content the scan measured")
+        self.assertTrue(shown)
+        self.assertEqual(text, "lab-rhel: " + self.SUMMARY["content"]["line"] + "; no exceptions file. Compare the release "
+                               "with the one DISA lists for this system before you report results.")
+        _shown, text = self.line("Say which STIG release and content the scan measured", stig_tailored=True,
+                                 stig_tailoring={"left_out_count": 3}, stig_tailoring_source="/opt/lab/content/rhel/9/tailoring.xml")
+        self.assertIn("; with exceptions file tailoring.xml, which leaves out 3 rule(s) or group(s). Compare", text)
+        _shown, text = self.line("Say which STIG release and content the scan measured", stig_local_content=True,
+                                 stig_content_source="/opt/lab/content/rhel/9/U_RHEL_9_V2R10_STIG_SCAP_1-3_Benchmark.xml")
+        self.assertIn("1.3.14, copied from U_RHEL_9_V2R10_STIG_SCAP_1-3_Benchmark.xml; no exceptions file.", text)
+
+    def test_the_failing_rules_line_counts_categories_and_names_cat_i(self):
+        shown, text = self.line("List the failing rules by severity category")
+        self.assertTrue(shown)
+        self.assertEqual(text, "lab-rhel: failing rules by DISA category: CAT I (high) 2, CAT II (medium) 9, CAT III (low) 3, "
+                               "without a category 1. CAT I: RHEL-09-212010, RHEL-09-671010. Every failing, unchecked or "
+                               "errored rule is in /srv/u/stig-reports/rhel/9/S/lab-rhel/audit-findings.csv with its "
+                               "category, STIG ID and rule ID.")
+        clean = dict(self.SUMMARY, failed_by_category={"CAT I": 0, "CAT II": 0, "CAT III": 0, "unrated": 0},
+                     failed_cat_i=[], failed_cat_i_ids=[])
+        self.assertIn("without a category 0. Every failing", self.line("List the failing rules by severity category", clean)[1])
+
+    def test_a_summary_without_the_new_keys_shows_neither_line(self):
+        # A summary that lacks the release and the categories still reports its counts, without the two lines.
+        earlier = {"outcome_instances": {"pass": 1}, "has_scanner_errors_or_unknowns": False}
+        for prefix in ("Say which STIG release and content the scan measured", "List the failing rules by severity category"):
+            with self.subTest(task=prefix):
+                self.assertFalse(self.line(prefix, earlier)[0])
+        unavailable = {"rc": 1, "stdout": "", "stderr": "Cannot summarize assessment"}
+        task = scan_task("List the failing rules by severity category")
+        self.assertFalse(all(render("{{ " + condition + " }}", stig_summary=unavailable) for condition in task["when"]))
 
 
 class PerSystemPlaybookTests(unittest.TestCase):
@@ -671,6 +1091,157 @@ class RebootTests(unittest.TestCase):
         report, _preview = self.messages(reboot_failed_after=command(0, "● nfs.mount loaded failed failed NFS"))
         self.assertIn("Failed systemd units now: 1: nfs.mount (before the reboot: 1).", report)
         self.assertIn("A real run also needs the acknowledgement, REBOOT NOW.", preview)
+
+
+class PatchControllerTests(unittest.TestCase):
+    """A patch run that reaches the controller it comes from never reboots it."""
+
+    def block(self):
+        [play] = yaml.safe_load((ROOT / "playbooks" / "patch.yml").read_text())
+        return play, named(play["tasks"], "Detect and optionally handle a reboot after real patching")["block"]
+
+    def test_the_reboot_is_skipped_for_the_controller_itself(self):
+        play, block = self.block()
+        [reboot] = [task for task in block if "ansible.builtin.reboot" in task]
+        self.assertEqual(reboot["when"], "lab_reboot_needed and allow_reboot and not lab_is_controller")
+        read = named(play["tasks"], "Read the boot ID")
+        self.assertEqual(read["ansible.builtin.slurp"]["src"], "/proc/sys/kernel/random/boot_id")
+        # The controller is recognized before the first package changes, which already need to know it.
+        names = [task["name"] for task in play["tasks"]]
+        self.assertEqual(names[:4], [read["name"], "Recognize the controller this run comes from",
+                                     "Upgrade Ubuntu packages without removals", "Install the EL reboot-check plugin"])
+        # The reboot handling runs only after real patching.
+        guarded = named(play["tasks"], "Detect and optionally handle a reboot after real patching")
+        self.assertEqual(guarded["when"], "not ansible_check_mode")
+
+    @unittest.skipUnless(Templar, "needs ansible-core, as CI installs it")
+    def test_needrestart_is_suspended_only_on_the_controller_itself(self):
+        # After a library update Ubuntu's needrestart restarts Semaphore, which would end the run halfway.
+        for playbook, task_name, fact in (("patch.yml", "Upgrade Ubuntu packages without removals", "lab_is_controller"),
+                                          ("stig-apply.yml", "Apply the vendor remediation on Ubuntu", "stig_is_controller")):
+            with self.subTest(playbook=playbook):
+                [play] = yaml.safe_load((ROOT / "playbooks" / playbook).read_text())
+                task = named(play["tasks"], task_name)
+                self.assertEqual(task["when"], "ansible_facts['os_family'] == 'Debian'")
+                self.assertEqual(rendered(play, {fact: True}, task["environment"]), {"NEEDRESTART_SUSPEND": "1"})
+                self.assertEqual(rendered(play, {fact: False}, task["environment"]), {})
+                names = [entry["name"] for entry in play["tasks"]]
+                self.assertLess(names.index("Recognize the controller this run comes from"), names.index(task_name))
+
+    @unittest.skipUnless(Templar and Path("/proc/sys/kernel/random/boot_id").exists(),
+                         "needs ansible-core, as CI installs it, and Linux")
+    def test_the_controller_is_told_apart_by_its_boot_id_and_reported(self):
+        play, block = self.block()
+        from ansible.plugins.loader import init_plugin_loader
+        try:
+            init_plugin_loader([])
+        except RuntimeError:  # set up already by an earlier test
+            pass
+        here = Path("/proc/sys/kernel/random/boot_id").read_text()
+        fact = named(play["tasks"], "Recognize the controller")["ansible.builtin.set_fact"]["lab_is_controller"]
+        report = named(block, "Report the completed patch result")
+        services = ("Services were not restarted on this controller, so that the run could finish: run sudo "
+                    "needrestart from its own terminal when no task is running, or reboot it.")
+        cases = ((here, True, True, "required and left alone: lab-alma is the controller this run comes from, and "
+                                    "its reboot would stop the run. Restart it from its own terminal when no task "
+                                    "is running, with sudo systemctl reboot"),
+                 ("1111-aaaa\n", True, True, "completed and connection restored"),
+                 (here, True, False, "required; left for the operator"),
+                 (here, False, True, "not requested by the operating system"))
+        for content, needed, allowed, expected in cases:
+            with self.subTest(controller=content == here, needed=needed, allowed=allowed):
+                variables = {"inventory_hostname": "lab-alma", "lab_boot_id": encoded(content),
+                             "lab_reboot_needed": needed, "allow_reboot": allowed,
+                             "ansible_facts": {"os_family": "RedHat"}}
+                is_controller = rendered(play, variables, fact)
+                self.assertIs(is_controller, content == here)
+                variables.update(lab_is_controller=is_controller,
+                                 lab_controller_note=trusted(report["vars"]["lab_controller_note"]),
+                                 lab_services_note=trusted(report["vars"]["lab_services_note"]))
+                reboots = rendered(play, variables, "{{ lab_reboot_needed and allow_reboot and not lab_is_controller }}")
+                self.assertIs(reboots, needed and allowed and content != here)
+                variables.update(lab_services_suffix=rendered(play, variables, report["vars"]["lab_services_suffix"]))
+                message = " ".join(rendered(play, variables, report["ansible.builtin.debug"]["msg"]).split())
+                self.assertEqual(message, f"lab-alma: updates completed. Reboot {expected}.")
+                # Only an Ubuntu controller is told that its services still wait for a restart.
+                variables["ansible_facts"] = {"os_family": "Debian"}
+                variables.update(lab_services_suffix=rendered(play, variables, report["vars"]["lab_services_suffix"]))
+                raw = rendered(play, variables, report["ansible.builtin.debug"]["msg"])
+                self.assertEqual(" ".join(raw.split()), f"lab-alma: updates completed. Reboot {expected}."
+                                                        + (f" {services}" if content == here else ""))
+                # The sentence about the services follows on the same line of the log.
+                self.assertNotIn(".\n", raw)
+
+
+class StigApplyControllerTests(unittest.TestCase):
+    """A STIG apply whose one target is the controller it comes from never reboots it."""
+
+    def tasks(self):
+        [play] = yaml.safe_load((ROOT / "playbooks" / "stig-apply.yml").read_text())
+        return play, play["tasks"]
+
+    def test_the_reboot_is_skipped_for_the_controller_itself(self):
+        _play, tasks = self.tasks()
+        names = [task["name"] for task in tasks]
+        [reboot] = [task for task in tasks if "ansible.builtin.reboot" in task]
+        self.assertEqual(reboot["when"], "allow_reboot and not stig_is_controller")
+        read = named(tasks, "Read the boot ID")
+        self.assertEqual(read["ansible.builtin.slurp"]["src"], "/proc/sys/kernel/random/boot_id")
+        # Recognized before the fixes, which install packages, and so before the reboot as well.
+        order = [read["name"], "Recognize the controller this run comes from", "Apply the vendor remediation on Ubuntu",
+                 reboot["name"], "Record the posture after remediation", "Explain what to verify next"]
+        self.assertEqual([name for name in names if name in order], order)
+
+    @unittest.skipUnless(Templar and Path("/proc/sys/kernel/random/boot_id").exists(),
+                         "needs ansible-core, as CI installs it, and Linux")
+    def test_the_controller_is_told_apart_by_its_boot_id_and_told_to_restart_itself(self):
+        play, tasks = self.tasks()
+        from ansible.plugins.loader import init_plugin_loader
+        try:
+            init_plugin_loader([])
+        except RuntimeError:  # set up already by an earlier test
+            pass
+        here = Path("/proc/sys/kernel/random/boot_id").read_text()
+        fact = named(tasks, "Recognize the controller")["ansible.builtin.set_fact"]["stig_is_controller"]
+        report = named(tasks, "Explain what to verify next")
+        cases = ((here, True, "without the reboot you approved: lab-rhel is the controller this run comes from, and "
+                              "its reboot would stop the run. Restart it from its own terminal when no task is "
+                              "running, with sudo systemctl reboot, then run the audit; many STIG rules only take "
+                              "effect after a reboot"),
+                 ("1111-aaaa\n", True, "and rebooted"),
+                 (here, False, "without a reboot; many STIG rules only take effect after one"),
+                 ("1111-aaaa\n", False, "without a reboot; many STIG rules only take effect after one"))
+        for content, allowed, expected in cases:
+            with self.subTest(controller=content == here, allowed=allowed):
+                variables = {"inventory_hostname": "lab-rhel", "stig_boot_id": encoded(content), "allow_reboot": allowed,
+                             "ansible_facts": {"os_family": "RedHat"},
+                             "stig_ssh_client_kept": trusted(report["vars"]["stig_ssh_client_kept"]),
+                             "stig_ssh_client_left": trusted(report["vars"]["stig_ssh_client_left"])}
+                is_controller = rendered(play, variables, fact)
+                self.assertIs(is_controller, content == here)
+                variables.update(stig_is_controller=is_controller)
+                reboots = rendered(play, variables, "{{ allow_reboot and not stig_is_controller }}")
+                self.assertIs(reboots, allowed and content != here)
+                variables.update(stig_controller_note=trusted(report["vars"]["stig_controller_note"]))
+                variables.update(stig_reboot_note=rendered(play, variables, report["vars"]["stig_reboot_note"]))
+                variables.update(stig_ssh_client_note=rendered(play, variables, report["vars"]["stig_ssh_client_note"]))
+                self.assertEqual(variables["stig_ssh_client_note"], "")
+                message = " ".join(rendered(play, variables, report["ansible.builtin.debug"]["msg"]).split())
+                self.assertTrue(message.startswith(f"lab-rhel: vendor remediation applied {expected}. Check console"),
+                                message)
+                self.assertNotIn("\n", rendered(play, variables, report["ansible.builtin.debug"]["msg"]).strip())
+                # On Ubuntu the message says what became of the SSH client's files that usg leaves for root only.
+                variables["ansible_facts"] = {"os_family": "Debian"}
+                variables.update(stig_ssh_client_note=rendered(play, variables, report["vars"]["stig_ssh_client_note"]))
+                message = " ".join(rendered(play, variables, report["ansible.builtin.debug"]["msg"]).split())
+                kept = ("On this controller the files usg wrote in /etc/ssh/ssh_config.d were made readable again, mode "
+                        "0644, so that ssh keeps working for the semaphore account and for you.")
+                left = ("usg wrote files in /etc/ssh/ssh_config.d that only root can read. Until they are readable, with "
+                        "sudo chmod 0644 /etc/ssh/ssh_config.d/*.conf, the ssh command ends with an error on this machine "
+                        "for every account but root.")
+                self.assertTrue(message.startswith(f"lab-rhel: vendor remediation applied {expected}. "
+                                                   f"{kept if content == here else left} Check console"), message)
+                self.assertNotIn("\n", rendered(play, variables, report["ansible.builtin.debug"]["msg"]).strip())
 
 
 class PackageLockTests(unittest.TestCase):

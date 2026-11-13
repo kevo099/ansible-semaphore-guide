@@ -130,7 +130,7 @@ class InlinePythonTests(unittest.TestCase):
                 scripts.add(script.name)
                 with self.subTest(script=script.name, command=match.group(0)):
                     self.assertIn("-I", match.group(1).split())
-        self.assertEqual(scripts, {"add-target.sh", "expose-semaphore.sh", *INSTALLERS})
+        self.assertEqual(scripts, {"add-target.sh", "expose-semaphore.sh", "update-runtime.sh", *INSTALLERS})
 
 
 class SharedPreflightTests(unittest.TestCase):
@@ -145,8 +145,11 @@ usage() { :; }
 SUDO_USER=sudoeditor
 controller_parse_args "$@"
 printf '%s\\n' "$mode" "$editor" "$lab_dir" "$expose" "$expose_address"
+[[ $fapolicyd_ready == no ]] || printf 'fapolicyd-ready\\n'
 '''
         for arguments, expected in (((), ["--plan", "sudoeditor", "/opt/ansible-lab", "", ""]),
+                                    (("--apply", "--fapolicyd-ready"),
+                                     ["--apply", "sudoeditor", "/opt/ansible-lab", "", "", "fapolicyd-ready"]),
                                     (("--apply", "--editor", "labeditor", "--lab-dir", "/srv/lab",
                                       "--expose", "https"), ["--apply", "labeditor", "/srv/lab", "https", ""]),
                                     (("--address", "controller.example.test", "--apply", "--expose", "http"),
@@ -220,6 +223,271 @@ printf 'LAB=%s\\n' "$lab_dir"
                     else:
                         self.assertTrue(path.is_dir())
                         path.rmdir()
+
+
+class FapolicydPreflightTests(unittest.TestCase):
+    """Where fapolicyd is active, as after the DISA STIG, the installer stops before it changes anything."""
+
+    # What fapolicyd-cli --list printed on RHEL 9.8 with fapolicyd 2.0.1 after the vendor's STIG fixes, without
+    # the four lines of this guide, which stood between rules 5 and 10.
+    STOCK = [
+        "-> %languages="
+        "application/x-bytecode.ocaml,application/x-bytecode.python,application/java-archive,"
+        "text/x-java,application/x-java-applet,application/javascript,text/javascript,text/x-awk,"
+        "text/x-gawk,text/x-lisp,application/x-elc,text/x-lua,text/x-m4,text/x-nftables,"
+        "text/x-perl,text/x-php,text/x-script.python,text/x-python,text/x-R,text/x-ruby,"
+        "text/x-script.guile,text/x-tcl,text/x-luatex,text/x-systemtap",
+        "1. allow perm=any uid=0 : dir=/var/tmp/",
+        "2. allow perm=any uid=0 trust=1 : all",
+        "3. allow perm=open exe=/usr/bin/rpm : all",
+        "4. allow perm=open exe=/usr/bin/python3.9 comm=dnf : all",
+        "5. deny_audit perm=any pattern=ld_so : all",
+        "10. deny_audit perm=any all : ftype=application/x-bad-elf",
+        "11. allow perm=open all : ftype=application/x-sharedlib trust=1",
+        "12. deny_audit perm=open all : ftype=application/x-sharedlib",
+        "13. allow perm=execute all : trust=1",
+        "14. allow perm=open all : ftype=%languages trust=1",
+        "15. deny_audit perm=any all : ftype=%languages",
+        "16. allow perm=any all : ftype=text/x-shellscript",
+        "17. deny_audit perm=execute all : all",
+        "18. allow perm=open all : all",
+        "19. deny perm=any all : all"]
+    OURS = ["allow perm=any all : path=/usr/local/bin/semaphore",
+            "allow perm=any all : dir=/opt/ansible-venv/",
+            "allow perm=open all : dir=/srv/lab/ ftype=%languages",
+            "allow perm=open all : dir=/srv/guides/ansible-semaphore-guide/ ftype=%languages"]
+    READY = "the file is read"
+    REFUSED = "head: cannot open '/srv/guides/ansible-semaphore-guide/scripts/summarize_xccdf.py' for reading: " \
+              "Operation not permitted"
+
+    def check(self, loaded, *arguments, active=True, cli=True, permissive=False, lab="/srv/lab",
+              guide="/srv/guides/ansible-semaphore-guide", read=READY):
+        # runuser stands in for the editor's read of one guide script: its standard error is what head printed.
+        body = '''
+usage() { :; }
+rules=$1; cli=$2; active=$3; fapolicyd_conf=$4; lab=$5; repo_dir=$6; read_error=$7; shift 7
+SUDO_USER=admin
+systemctl() { [[ "$*" == "is-active --quiet fapolicyd" && $active == yes ]]; }
+runuser() {
+  [[ "$*" == "-u admin -- head -c 1 -- $repo_dir/scripts/summarize_xccdf.py" ]] || { echo "unexpected: runuser $*"; exit 9; }
+  [[ -z "$read_error" ]] || { echo "$read_error" >&2; return 1; }
+  printf '#'
+}
+if [[ $cli == yes ]]; then fapolicyd-cli() { [[ "$1" == --list ]] && cat "$rules"; }; fi
+if [[ $cli == failing ]]; then fapolicyd-cli() { cat "$rules"; return 1; }; fi
+controller_parse_args --apply --lab-dir "$lab" "$@"
+controller_check_fapolicyd
+echo CONTINUES
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            rules = Path(directory) / "rules"
+            rules.write_text("\n".join(loaded) + "\n")
+            conf = Path(directory) / "fapolicyd.conf"
+            conf.write_text(f"permissive = {1 if permissive else 0}\nallow_filesystem_mark = 0\n")
+            # A PATH without fapolicyd-cli, so that only the stand-in function can supply it.
+            return subprocess.run(["/bin/bash", "-c", 'set -euo pipefail; source "$1"; shift; ' + body, "controller-test",
+                                   str(COMMON), str(rules), {True: "yes", False: "no"}.get(cli, cli),
+                                   "yes" if active else "no", str(conf), lab, guide,
+                                   "" if read == self.READY else read, *arguments],
+                                  capture_output=True, text=True, timeout=10, env={"PATH": "/usr/bin:/bin"})
+
+    def numbered(self, rules, first):
+        return [f"{first + offset}. {rule}" for offset, rule in enumerate(rules)]
+
+    def with_ours(self, ours=None, after=6):
+        """The stock list with our lines after its first `after` lines: after rule 5, where a file numbered 35 puts them."""
+        return self.STOCK[:after] + self.numbered(self.OURS if ours is None else ours, after) + self.STOCK[after:]
+
+    def assert_goes_on(self, result):
+        self.assertEqual((result.returncode, result.stdout.strip(), result.stderr), (0, "CONTINUES", ""))
+
+    def assert_refused(self, result, sentence="The number matters"):
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertNotIn("CONTINUES", result.stdout)
+        self.assertIn(sentence, result.stdout)
+        self.assertEqual(result.stderr, "")
+
+    def test_a_machine_without_the_rules_is_refused_with_the_rules_for_its_own_paths(self):
+        result = self.check(self.STOCK)
+        self.assert_refused(result, "nothing was changed.")
+        self.assertIn("/etc/fapolicyd/rules.d/35-ansible-semaphore-guide.rules", result.stdout)
+        # The four lines stand alone, ready to copy, with the lab folder and the clone of this run.
+        lines = result.stdout.splitlines()
+        start = lines.index(self.OURS[0])
+        self.assertEqual(lines[start:start + 4], self.OURS)
+        self.assertIn("  sudo fagenrules --load", lines)
+        self.assertIn("--fapolicyd-ready", result.stdout)
+
+    def test_the_rules_before_fapolicyds_own_denials_let_the_installer_go_on(self):
+        self.assert_goes_on(self.check(self.with_ours()))
+        # Written with other spacing, they are the same rules.
+        spaced = [rule.replace(" : ", "  :   ") + " " for rule in self.OURS]
+        self.assert_goes_on(self.check(self.with_ours(spaced)))
+
+    def test_each_of_the_four_rules_is_required(self):
+        for missing in range(4):
+            with self.subTest(missing=self.OURS[missing]):
+                self.assert_refused(self.check(self.with_ours(self.OURS[:missing] + self.OURS[missing + 1:])))
+        other_lab = [rule.replace("/srv/lab/", "/opt/ansible-lab/") for rule in self.OURS]
+        self.assert_refused(self.check(self.with_ours(other_lab)))
+
+    def test_a_rule_that_only_looks_like_ours_does_not_count(self):
+        for index, look_alike in ((0, "allow perm=any all : path=/usr/local/bin/semaphore-old"),
+                                  (1, "allow perm=any all : dir=/opt/ansible-venv/ trust=1"),
+                                  (2, "allow perm=open uid=0 : dir=/srv/lab/ ftype=%languages"),
+                                  (3, "allow perm=open all : dir=/srv/guides/ansible-semaphore-guide/ ftype=%languages trust=1")):
+            with self.subTest(look_alike):
+                ours = list(self.OURS)
+                ours[index] = look_alike
+                self.assert_refused(self.check(self.with_ours(ours)))
+
+    def test_every_one_of_the_four_has_to_come_before_the_rule_that_denies_it(self):
+        # All four after the shared-library rule, and each single one after the rule that would deny it.
+        self.assert_refused(self.check(self.with_ours(after=self.STOCK.index(
+            "12. deny_audit perm=open all : ftype=application/x-sharedlib") + 1)))
+        for index, stock_line in ((0, "17. deny_audit perm=execute all : all"),
+                                  (1, "12. deny_audit perm=open all : ftype=application/x-sharedlib"),
+                                  (2, "15. deny_audit perm=any all : ftype=%languages"),
+                                  (3, "19. deny perm=any all : all")):
+            with self.subTest(late=self.OURS[index], after=stock_line):
+                early = [rule for position, rule in enumerate(self.OURS) if position != index]
+                loaded = self.with_ours(early)
+                loaded.insert(loaded.index(stock_line) + 1, "30. " + self.OURS[index])
+                self.assert_refused(self.check(loaded))
+        # A rule set without the shared-library rules: the denial of scripts, or of everything, still counts.
+        for name, dropped in (("scripts", ("x-sharedlib",)), ("everything", ("x-sharedlib", "%languages"))):
+            with self.subTest(denied=name):
+                stock = [line for line in self.STOCK if not any(word in line for word in dropped)]
+                self.assert_goes_on(self.check(stock[:6] + self.numbered(self.OURS, 6) + stock[6:]))
+                self.assert_refused(self.check(stock[:-2] + self.numbered(self.OURS, 30) + stock[-2:]))
+
+    def test_a_rule_list_that_cannot_be_read_is_refused(self):
+        self.assert_refused(self.check(self.with_ours(), cli="failing"))
+
+    def test_rules_that_fapolicyd_has_not_loaded_yet_are_refused(self):
+        # fagenrules without --load: the compiled file has the lines and fapolicyd still refuses the editor.
+        result = self.check(self.with_ours(), read=self.REFUSED)
+        self.assert_refused(result, "does not apply\nthem yet: it still refuses admin a script in the guide's folder.")
+        self.assertIn("  sudo fagenrules --load", result.stdout.splitlines())
+        self.assertIn("Nothing was changed.", result.stdout)
+        self.assertNotIn("The number matters", result.stdout)
+        # A file mode that keeps another editor out of the guide's folder is not fapolicyd's refusal.
+        self.assert_goes_on(self.check(self.with_ours(), read="head: cannot open 'summarize_xccdf.py' for reading: "
+                                                             "Permission denied"))
+
+    def test_a_folder_with_a_space_is_refused_before_a_rule_is_printed_for_it(self):
+        for name, options in (("lab folder", {"lab": "/srv/my lab"}), ("guide's folder", {"guide": "/srv/my guides/guide"})):
+            with self.subTest(name):
+                result = self.check(self.with_ours(), **options)
+                self.assert_refused(result, "cannot name a path with a\nspace in it:")
+                self.assertIn("Nothing was changed.", result.stdout)
+                self.assertNotIn("allow perm=", result.stdout)
+        self.assert_goes_on(self.check(self.STOCK, "--fapolicyd-ready", lab="/srv/my lab"))
+
+    def test_the_guides_folder_is_named_by_the_path_its_links_lead_to(self):
+        # fapolicyd compares resolved paths, so a rule with the link's name would allow nothing.
+        with tempfile.TemporaryDirectory() as directory:
+            real = Path(directory).resolve() / "export" / "home" / "admin" / "guide"
+            real.mkdir(parents=True)
+            (Path(directory).resolve() / "home").symlink_to("export/home")
+            through_link = str(Path(directory).resolve() / "home" / "admin" / "guide")
+            result = self.check(self.STOCK, guide=through_link)
+            self.assert_refused(result)
+            self.assertIn(f"allow perm=open all : dir={real}/ ftype=%languages", result.stdout.splitlines())
+            self.assertNotIn(f"dir={through_link}/", result.stdout)
+            ours = self.OURS[:3] + [f"allow perm=open all : dir={real}/ ftype=%languages"]
+            self.assert_goes_on(self.check(self.with_ours(ours), guide=through_link))
+            linked = self.OURS[:3] + [f"allow perm=open all : dir={through_link}/ ftype=%languages"]
+            self.assert_refused(self.check(self.with_ours(linked), guide=through_link))
+
+    def test_no_fapolicyd_an_idle_or_a_permissive_one_and_the_option_all_go_on(self):
+        for name, arguments in (("not installed", {"cli": False}), ("not active", {"active": False}),
+                                ("permissive", {"permissive": True})):
+            with self.subTest(name):
+                # Not even the read as the editor is tried.
+                self.assert_goes_on(self.check(self.STOCK, read=self.REFUSED, **arguments))
+        self.assert_goes_on(self.check(self.STOCK, "--fapolicyd-ready", read=self.REFUSED))
+
+    def test_both_installers_check_before_the_first_package(self):
+        for script, first_change in (("install-controller-el9.sh", "dnf -y install"), ("install-controller.sh", "apt-get")):
+            with self.subTest(script=script):
+                text = (COMMON.parent / script).read_text()
+                self.assertEqual(text.count("\ncontroller_check_fapolicyd\n"), 1)
+                self.assertLess(text.index("\ncontroller_require_fresh_state"), text.index("\ncontroller_check_fapolicyd\n"))
+                self.assertLess(text.index("\ncontroller_check_fapolicyd\n"), text.index(first_change, text.index("\nPLAN\n")))
+                self.assertIn("--fapolicyd-ready", text)
+
+    def test_the_lab_folder_is_made_a_repository_without_gits_hook_samples(self):
+        # One of Git's sample hooks is a Perl script that fapolicyd denies to every account but root.
+        self.assertIn('git -C "$lab_dir" init -q -b main --template=\n', COMMON.read_text())
+
+
+class SshClientPreflightTests(unittest.TestCase):
+    """Where ssh does not start for an ordinary account, as after usg on Ubuntu, the installer stops before it changes anything."""
+
+    DENIED = "Can't open user config file /etc/ssh/ssh_config.d/00-cipher-list.conf: Permission denied"
+
+    def check(self, error=None, status=0, ssh=True):
+        # runuser stands in for the start of ssh as the account nobody; its standard error is what ssh printed.
+        body = '''
+usage() { :; }
+ssh_error=$1; ssh_status=$2
+runuser() {
+  [[ "$*" == "-u nobody -- ssh -G 127.0.0.1" && "$LC_ALL" == C ]] || { echo "unexpected: LC_ALL=$LC_ALL runuser $*" >&2; return 9; }
+  echo "host 127.0.0.1"
+  [[ -z "$ssh_error" ]] || echo "$ssh_error" >&2
+  return "$ssh_status"
+}
+controller_check_ssh_client
+echo CONTINUES
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            # Only cat and, for a machine that has it, a stand-in ssh are on the PATH.
+            Path(directory, "cat").symlink_to(shutil.which("cat"))
+            if ssh:
+                Path(directory, "ssh").write_text("#!/bin/sh\nexit 0\n")
+                Path(directory, "ssh").chmod(0o755)
+            return subprocess.run(["/bin/bash", "-c", 'set -euo pipefail; source "$1"; shift; ' + body, "controller-test",
+                                   str(COMMON), error or "", str(status)],
+                                  capture_output=True, text=True, timeout=10, env={"PATH": directory})
+
+    def test_a_machine_where_ssh_starts_goes_on(self):
+        result = self.check()
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "CONTINUES\n", ""))
+
+    def test_a_client_configuration_for_root_only_is_refused_with_the_remedy(self):
+        result = self.check(self.DENIED + "\n/etc/ssh/ssh_config: terminating, 1 bad configuration options", status=255)
+        self.assertEqual((result.returncode, result.stderr), (1, ""), result.stdout)
+        self.assertNotIn("CONTINUES", result.stdout)
+        lines = result.stdout.splitlines()
+        self.assertIn("  " + self.DENIED, lines)
+        self.assertIn("  sudo chmod 0644 /etc/ssh/ssh_config.d/*.conf", lines)
+        self.assertIn("Nothing was changed.", result.stdout)
+        # What ssh printed on its standard output is not part of the message.
+        self.assertNotIn("host 127.0.0.1", result.stdout)
+
+    def test_a_failure_without_a_message_is_still_refused(self):
+        result = self.check(status=1)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("  ssh -G 127.0.0.1 ended with an error and no message", result.stdout.splitlines())
+
+    def test_an_image_without_ssh_is_not_checked(self):
+        result = self.check(self.DENIED, status=255, ssh=False)
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "CONTINUES\n", ""))
+
+    def test_both_installers_check_before_the_first_package(self):
+        for script, first_change in (("install-controller-el9.sh", "dnf -y install"), ("install-controller.sh", "apt-get")):
+            with self.subTest(script=script):
+                text = (COMMON.parent / script).read_text()
+                self.assertEqual(text.count("\ncontroller_check_ssh_client\n"), 1)
+                self.assertIn("\ncontroller_check_fapolicyd\ncontroller_check_ssh_client\n", text)
+                self.assertLess(text.index("\ncontroller_check_ssh_client\n"), text.index(first_change, text.index("\nPLAN\n")))
+
+    def test_the_readiness_check_asks_the_same_of_the_service_account(self):
+        # Mid-installation, and at every later check: the account that starts ssh for a job.
+        check = (COMMON.parent / "check-controller.py").read_text()
+        self.assertIn('checks["service_can_start_ssh"] = command_ok(["runuser", "-u", "semaphore", "--", "ssh", "-G", "127.0.0.1"])',
+                      check)
 
 
 class SharedDownloadTests(unittest.TestCase):

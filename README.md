@@ -180,6 +180,7 @@ The files you run yourself, one by one:
 | [`controller/expose-semaphore.sh`](controller/expose-semaphore.sh) | The controller | Publishes the UI on the VM's address behind an nginx TLS proxy, or in plain HTTP, or reverts to loopback. |
 | [`controller/check-controller.py`](controller/check-controller.py) | The controller | Checks services, permissions and loopback listeners without printing credentials. |
 | [`controller/update-controller.sh`](controller/update-controller.sh) | The controller | Brings an installed controller up to this copy of the guide; plan by default. |
+| [`controller/update-runtime.sh`](controller/update-runtime.sh) | The controller | Brings an older controller's Ansible runtime and Semaphore's SSH connection reuse up to this copy of the guide; plan by default. |
 
 The lesson and operations playbooks:
 
@@ -192,8 +193,8 @@ The lesson and operations playbooks:
 | [`playbooks/patch.yml`](playbooks/patch.yml) | Updates one target at a time; reboot defaults to disabled. |
 | [`playbooks/report.yml`](playbooks/report.yml) | Reports each host's health without sudo and changes nothing: the **Health report** template on the **Operations** tab. |
 | [`playbooks/reboot.yml`](playbooks/reboot.yml) | Reboots exactly one target per run after an explicit acknowledgement, and shows its boot before and after: **Reboot one target**. |
-| [`playbooks/stig-audit.yml`](playbooks/stig-audit.yml) | Scans each selected target with the OS vendor's STIG content and fetches the report; changes no policy. |
-| [`playbooks/stig-apply.yml`](playbooks/stig-apply.yml) | Applies the vendor's own STIG remediation to exactly one target per run after an explicit recovery-point approval, with before and after scans. |
+| [`playbooks/stig-audit.yml`](playbooks/stig-audit.yml) | Scans each selected target with the OS vendor's STIG content and fetches the report, names the STIG release it measured and lists the open rules by DISA category; changes no policy. |
+| [`playbooks/stig-apply.yml`](playbooks/stig-apply.yml) | Applies the vendor's own STIG remediation to exactly one target per run after an explicit recovery-point approval, with before and after scans. Both STIG playbooks leave out the rules of an [exceptions file](docs/09-security-benchmarks.md#leave-out-rules-you-have-an-accepted-exception-for). |
 | [`playbooks/stig/`](playbooks/stig/) | `rhel/9`, `almalinux/9`, `rocky/9` and `ubuntu/24.04`, each with an `audit.yml` and `apply.yml` for that system only; the seeded Semaphore tabs use them. |
 
 All these playbooks require an explicit `--limit`. The nginx lesson owns its

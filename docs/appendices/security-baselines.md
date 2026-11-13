@@ -59,16 +59,20 @@ identify downloaded SCAP content, listed SCAP releases or dated manual releases.
 
 | Platform | Verified benchmarks | Use with this guide |
 | --- | --- | --- |
-| RHEL 8 / 9 / 10 | [CIS](https://www.cisecurity.org/benchmark/red_hat_linux) 4.0.0 / 3.0.0 / 1.0.1. RHEL 9 DISA SCAP V2R9 was downloaded in the Azure run. | Playbooks accept RHEL 9. Use its native SSG data stream or matching local SCAP content. |
-| Ubuntu 22.04 / 24.04 LTS | [CIS](https://www.cisecurity.org/benchmark/ubuntu_linux) 3.0.0 / 2.0.0. Ubuntu 24.04 DISA SCAP V1R5 was downloaded; installed USG supplied STIG V1R1. | Playbooks accept Ubuntu 24.04. USG needs Ubuntu Pro access; local SCAP uses OpenSCAP. |
-| AlmaLinux 9 | [CIS](https://www.cisecurity.org/benchmark/almalinuxos_linux) 3.0.0. DISA's July manual release was V1R7. | Use AlmaLinux's own package. Its SSG STIG label must not be equated with the independent DISA manual revision. |
+| RHEL 8 / 9 / 10 | [CIS](https://www.cisecurity.org/benchmark/red_hat_linux) 4.0.0 / 3.0.0 / 1.0.1. RHEL 9 DISA SCAP V2R9 was downloaded in the Azure run, and V2R10, posted on 5 October 2026, on 13 November. | Playbooks accept RHEL 9. Use its native SSG data stream or matching local SCAP content. |
+| Ubuntu 22.04 / 24.04 LTS | [CIS](https://www.cisecurity.org/benchmark/ubuntu_linux) 3.0.0 / 2.0.0. Ubuntu 24.04 DISA SCAP V1R5 was downloaded, and V1R6, posted on 5 October 2026, on 13 November; the manual STIG is then V1R7. Installed USG supplied STIG V1R1, and USG 24.04.8 still did on 13 November. | Playbooks accept Ubuntu 24.04. USG needs Ubuntu Pro access; local SCAP uses OpenSCAP. |
+| AlmaLinux 9 | [CIS](https://www.cisecurity.org/benchmark/almalinuxos_linux) 3.0.0. DISA's manual release was V1R7 in July and V1R8 in October 2026. | Use AlmaLinux's own package. Its SSG STIG label must not be equated with the independent DISA manual revision. |
 | Rocky Linux 9 | [CIS](https://www.cisecurity.org/benchmark/rocky_linux) 3.0.0. No independently named DISA Rocky STIG was verified. | The guide selects Rocky's own SSG stream; its STIG profile is titled for RHEL 9. |
 
 The [DISA July 2026 announcement](https://www.cyber.mil/stigs/stig-announcements)
 also lists Ubuntu 24.04 **manual V1R6**. That does not establish that a V1R6
 SCAP file exists. The [September 2026 Azure run](../validation/2026-09-onboard-stig.md)
 retrieved RHEL 9 SCAP V2R9 and Ubuntu 24.04 SCAP V1R5 without login; the tested
-V2R10 and V1R6 SCAP URLs were absent on September 28.
+V2R10 and V1R6 SCAP URLs were absent on September 28. On 13 November 2026 both
+were there, last modified on 5 October, beside the manual releases RHEL 9
+V2R10, Ubuntu 24.04 V1R7 and AlmaLinux OS 9 V1R8.
+[The November content record](../validation/2026-11-stig-content.md) compares
+them with the vendors' packaged profiles.
 
 ### Windows
 
@@ -263,12 +267,14 @@ Profile availability alone does not establish that every selected rule has a fix
 
 ### DISA SCAP files and profile IDs
 
-These two public ZIP downloads were verified in the September 2026 Azure run:
+These public ZIP downloads were verified: the first of each pair in the
+September 2026 Azure run, which scanned with it, and the second on 13 November
+2026, when a RHEL 9.8 and an Ubuntu 24.04 machine were scanned with it.
 
 | Platform | Downloaded SCAP 1.3 benchmark |
 | --- | --- |
-| RHEL 9 | [U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.zip](https://dl.dod.cyber.mil/wp-content/uploads/stigs/zip/U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.zip) |
-| Ubuntu 24.04 LTS | [U_CAN_Ubuntu_24-04_LTS_V1R5_STIG_SCAP_1-3_Benchmark.zip](https://dl.dod.cyber.mil/wp-content/uploads/stigs/zip/U_CAN_Ubuntu_24-04_LTS_V1R5_STIG_SCAP_1-3_Benchmark.zip) |
+| RHEL 9 | [U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.zip](https://dl.dod.cyber.mil/wp-content/uploads/stigs/zip/U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.zip), then [U_RHEL_9_V2R10_STIG_SCAP_1-3_Benchmark.zip](https://dl.dod.cyber.mil/wp-content/uploads/stigs/zip/U_RHEL_9_V2R10_STIG_SCAP_1-3_Benchmark.zip) |
+| Ubuntu 24.04 LTS | [U_CAN_Ubuntu_24-04_LTS_V1R5_STIG_SCAP_1-3_Benchmark.zip](https://dl.dod.cyber.mil/wp-content/uploads/stigs/zip/U_CAN_Ubuntu_24-04_LTS_V1R5_STIG_SCAP_1-3_Benchmark.zip), then [U_CAN_Ubuntu_24-04_LTS_V1R6_STIG_SCAP_1-3_Benchmark.zip](https://dl.dod.cyber.mil/wp-content/uploads/stigs/zip/U_CAN_Ubuntu_24-04_LTS_V1R6_STIG_SCAP_1-3_Benchmark.zip) |
 
 Each ZIP held one SCAP data stream XML and these eleven profile IDs. Select the
 profile required for your system; the MAC/classification labels are not CIS
@@ -291,15 +297,16 @@ xccdf_mil.disa.stig_profile_Disable_Slow_Rules
 
 Follow [chapter 9's local SCAP procedure](../09-security-benchmarks.md#scan-with-a-local-scap-content-file)
 to download, inspect and place the XML inside the lab folder. Then pass
-`stig_content_file` and `stig_content_profile`. For example, after inspecting
-that file with `oscap info` and selecting its MAC-1 Public profile:
+`stig_content_file`, the file or the folder that holds it, and
+`stig_content_profile`. For example, after inspecting the file with
+`oscap info` and selecting its MAC-1 Public profile:
 
 ```bash
 cd /opt/ansible-lab
 /opt/ansible-venv/bin/ansible-playbook -i inventories/lab.ini playbooks/stig/rhel/9/audit.yml \
   --limit lab-rhel \
   --private-key ~/.ssh/ansible_lab -K \
-  -e '{"stig_content_file": "content/rhel/9/U_RHEL_9_V2R9_STIG_SCAP_1-3_Benchmark.xml", "stig_content_profile": "xccdf_mil.disa.stig_profile_MAC-1_Public"}'
+  -e '{"stig_content_file": "content/rhel/9", "stig_content_profile": "xccdf_mil.disa.stig_profile_MAC-1_Public"}'
 ```
 
 This selects OpenSCAP on either supported OS family, bypassing the vendor

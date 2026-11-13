@@ -83,12 +83,59 @@ Use `sshd` as the journal unit on Enterprise Linux. If access is broken, perform
 checks through the guest console. Compare the result with the pre-hardening
 record, including crypto policy and which host keys are currently offered.
 
+### The controller after its own hardening
+
+On a controller hardened to the DISA STIG, these come from `fapolicyd` or from
+`umask 077`, not from an edit of yours. Chapter 9,
+[Harden the controller itself](09-security-benchmarks.md#harden-the-controller-itself),
+has the four rules and the two commands that end them.
+
+| Symptom, as the administrator | Cause |
+| --- | --- |
+| `git clone` or `git init` ends with `cannot copy ... fsmonitor-watchman.sample: Operation not permitted` | `fapolicyd` denies one of Git's own sample hooks; add `--template=` after `git clone` or `git init`. |
+| `git status` lists scripts you did not touch, `git checkout` or `git pull` refuses, `update-controller.sh` reports that Git is not allowed to read a file | `fapolicyd` denies scripts that no package installed. |
+| `Operation not permitted` from `python3 scripts/summarize_xccdf.py` or `/opt/ansible-venv/bin/ansible` | The same. |
+| The installer stops at once and prints four rules | The same, caught before anything changed. |
+| The installer stops at once: the rules are written, but the running `fapolicyd` does not apply them yet | The rules were written and not loaded, or loaded seconds ago; run `sudo fagenrules --load`, wait a few seconds and run the installer again. |
+| The installer stops at once: a rule cannot name a path with a space in it | The lab folder or the guide's folder has a space in its path; move it. |
+| A template for a playbook you just created fails with `Permission denied` | `umask 077` made the file `-rw-------`. |
+| Semaphore does not start after `allow_filesystem_mark = 1`: `Failed to execute /usr/local/bin/semaphore` | `fapolicyd` now watches the service and the rules are missing. |
+
+### Every job is unreachable on an Ubuntu machine hardened with `usg`
+
+The task log says `Can't open user config file
+/etc/ssh/ssh_config.d/00-cipher-list.conf: Permission denied` and
+`/etc/ssh/ssh_config: terminating, 1 bad configuration options`, and your own
+`ssh` command ends the same way. The readiness check reports
+`"service_can_start_ssh": false`. `usg` writes those files for root only;
+chapter 9, [An Ubuntu controller](09-security-benchmarks.md#an-ubuntu-controller),
+has the cause. Make them readable again:
+
+```bash
+sudo chmod 0644 /etc/ssh/ssh_config.d/*.conf
+```
+
+### A job on an Ubuntu controller ends while it installs packages on the controller
+
+The task stops without a result, and `journalctl -u semaphore` shows
+`Stopping semaphore.service` in the middle of it. After a package change that
+updates a library, Ubuntu's `needrestart` restarts the services that use it,
+and Semaphore, which runs the job, is one of them. The guide's **Patch** and
+**STIG apply** playbooks suspend it where the target is the controller the run
+comes from. In a playbook of your own that installs or upgrades packages on
+the controller, give that task `environment: {NEEDRESTART_SUSPEND: "1"}`, and
+run `sudo needrestart` from the controller's terminal afterwards. Enterprise
+Linux has no such automatic restart.
+
 ### Application allowlisting and temporary modules
 
 Ansible may fail when an application allowlisting policy rejects a transferred
 temporary Python module. SSH pipelining can avoid that transfer-and-execute
-path; the supplied `ansible.cfg` enables it. Validate sudo/TTY compatibility and
-preserve the host's intended allowlisting policy.
+path; the supplied `ansible.cfg` enables it, for the targets and for tasks that
+run on the controller. A task with `async` still writes its module to a file.
+A task of your own that runs on the controller with `become` gets no terminal,
+as over SSH. Validate sudo/TTY compatibility and preserve the host's intended
+allowlisting policy.
 
 For native RHEL SSG playbook execution, a root-owned private directory such as
 `/var/tmp/ansible-benchmark` can be selected with `ANSIBLE_REMOTE_TMP`. Inspect

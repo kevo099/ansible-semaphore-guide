@@ -14,6 +14,7 @@ controller_parse_args() {
   lab_dir=/opt/ansible-lab
   expose=
   expose_address=
+  fapolicyd_ready=no
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --help|-h) usage; exit 0 ;;
@@ -25,6 +26,7 @@ controller_parse_args() {
       --expose) [[ $# -ge 2 && ( "$2" == https || "$2" == http ) ]] || { usage; exit 2; }; expose="$2"; shift ;;
       # expose-semaphore.sh checks the value; it names the certificate and the printed URL.
       --address) [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || { usage; exit 2; }; expose_address="$2"; shift ;;
+      --fapolicyd-ready) fapolicyd_ready=yes ;;
       *) usage; exit 2 ;;
     esac
     shift
@@ -74,6 +76,132 @@ controller_require_fresh_state() {
   fi
   if getent passwd semaphore >/dev/null; then
     echo 'The semaphore account already exists; refusing to reuse it.'
+    exit 1
+  fi
+}
+
+# ssh reads the system's client configuration at every start. Where one of its files is
+# for root only, as usg leaves two after the Ubuntu STIG, ssh ends at once for every other
+# account, the service's among them: no job would reach a target, and the readiness check
+# in the middle of this installation would stop it there. So it stops here, before it
+# changes anything. An image without ssh gets it from this installer and is not checked.
+controller_check_ssh_client() {
+  command -v ssh >/dev/null 2>&1 || return 0
+  local error
+  if error=$(LC_ALL=C runuser -u nobody -- ssh -G 127.0.0.1 2>&1 >/dev/null); then return 0; fi
+  cat <<MESSAGE
+The ssh command does not start for an ordinary account on this machine:
+
+  ${error:-ssh -G 127.0.0.1 ended with an error and no message}
+
+Semaphore starts ssh for every job, so no job would reach a target, and this
+installation would stop halfway. Nothing was changed. Where the message names a
+file under /etc/ssh/ssh_config.d that cannot be opened, as on Ubuntu after
+"usg fix", make those files readable and run this installer again:
+
+  sudo chmod 0644 /etc/ssh/ssh_config.d/*.conf
+
+docs/11-troubleshooting.md, "Every job is unreachable on an Ubuntu machine
+hardened with usg", has the cause.
+MESSAGE
+  exit 1
+}
+
+# The four fapolicyd rules a controller of this guide needs, with this run's paths.
+# fapolicyd compares the path a symbolic link leads to, so the guide's folder is named
+# by that path; controller_validate_lab did the same for the lab folder.
+controller_fapolicyd_rules() {
+  printf '%s\n' \
+    'allow perm=any all : path=/usr/local/bin/semaphore' \
+    'allow perm=any all : dir=/opt/ansible-venv/' \
+    "allow perm=open all : dir=$lab_dir/ ftype=%languages" \
+    "allow perm=open all : dir=$(realpath -m -- "$repo_dir")/ ftype=%languages"
+}
+
+# The DISA STIG turns on fapolicyd, which denies programs that no package installed:
+# here Semaphore's binary and the Ansible runtime. It also keeps an administrator and
+# Git from reading the guide's scripts. Without rules for them this installation would
+# stop halfway, at Semaphore's first run, and the installer cannot be run a second time.
+# So it stops here, before it changes anything, and prints the rules to add.
+# --fapolicyd-ready skips the check for a site that allowed the same paths another way.
+controller_check_fapolicyd() {
+  [[ "$fapolicyd_ready" == no ]] || return 0
+  command -v fapolicyd-cli >/dev/null 2>&1 || return 0
+  systemctl is-active --quiet fapolicyd || return 0
+  # With permissive = 1 fapolicyd only logs what it would deny.
+  if grep -Eq '^[[:space:]]*permissive[[:space:]]*=[[:space:]]*1' \
+       "${fapolicyd_conf:-/etc/fapolicyd/fapolicyd.conf}" 2>/dev/null; then
+    return 0
+  fi
+  local guide loaded rule number last=0 missing=0 deny probe
+  guide=$(realpath -m -- "$repo_dir")
+  # fapolicyd splits a rule at its spaces, so these lines cannot name such a path.
+  if [[ "$lab_dir$guide" =~ [[:space:]] ]]; then
+    cat <<MESSAGE
+fapolicyd is active on this machine, as on a system hardened to the DISA STIG, and
+this installation needs fapolicyd rules that name the lab folder and the guide's
+folder. A rule written the way this guide writes them cannot name a path with a
+space in it:
+
+  $lab_dir
+  $guide
+
+Move the guide's folder, or choose another --lab-dir, and run this installer
+again. Nothing was changed. If your site wrote its own rules for these paths,
+pass --fapolicyd-ready.
+MESSAGE
+    exit 1
+  fi
+  # fapolicyd-cli --list prints the compiled rules as "N. rule". Whole rules are
+  # compared, so that a longer path or an added condition does not pass for ours.
+  loaded=$(fapolicyd-cli --list 2>/dev/null \
+             | sed -E 's/^[[:space:]]*[0-9]+\.[[:space:]]*//; s/[[:space:]]+/ /g; s/ $//') || loaded=
+  while IFS= read -r rule; do
+    # grep finds nothing where a rule is missing; that must not end the installer here.
+    number=$(grep -nxF -- "$rule" <<<"$loaded" | head -n 1 | cut -d: -f1) || true
+    if [[ -z "$number" ]]; then missing=1; elif (( number > last )); then last=$number; fi
+  done < <(controller_fapolicyd_rules)
+  # Each of the four has to come before fapolicyd's own rules that deny what it
+  # allows: shared libraries, scripts and programs that no package installed.
+  deny=$(grep -nE '^deny[_a-z]* perm=[a-z]+ all : (ftype=application/x-sharedlib|ftype=%languages|all)$' <<<"$loaded" \
+           | head -n 1 | cut -d: -f1) || true
+  if (( missing == 1 )) || [[ -n "$deny" && "$last" -gt "$deny" ]]; then
+    cat <<MESSAGE
+fapolicyd is active on this machine, as on a system hardened to the DISA STIG. It
+denies programs that no package installed, which here are Semaphore's binary and
+the Ansible runtime, and it keeps your account and Git from reading the guide's
+scripts. This installation would stop halfway and could not be run again, so
+nothing was changed.
+
+As root, put these four lines in
+/etc/fapolicyd/rules.d/35-ansible-semaphore-guide.rules. The number matters: they
+have to come before fapolicyd's own rules for shared libraries.
+
+$(controller_fapolicyd_rules)
+
+Then load them and run this installer again:
+
+  sudo fagenrules --load
+
+docs/09-security-benchmarks.md, "Harden the controller itself", explains each
+line. If your site allowed the same paths another way, pass --fapolicyd-ready.
+MESSAGE
+    exit 1
+  fi
+  # The lines can be in the compiled file and not yet in the running fapolicyd:
+  # fagenrules without --load, or the seconds a reload takes. So ask fapolicyd itself,
+  # with a read it refuses the editor until the last of the four rules is loaded.
+  probe=$(LC_ALL=C runuser -u "$editor" -- head -c 1 -- "$repo_dir/scripts/summarize_xccdf.py" 2>&1 >/dev/null) || true
+  if [[ "$probe" == *'Operation not permitted'* ]]; then
+    cat <<MESSAGE
+The four fapolicyd rules are written, but the running fapolicyd does not apply
+them yet: it still refuses $editor a script in the guide's folder. Load them,
+wait a few seconds and run this installer again:
+
+  sudo fagenrules --load
+
+Nothing was changed.
+MESSAGE
     exit 1
   fi
 }
@@ -231,7 +359,9 @@ INVENTORY
   # target addresses and Vault files out of the folder's history from the first commit.
   printf '%s\n' 'inventories/' 'host_vars/' 'group_vars/' > "$lab_dir/.gitignore"
   chown -R "$editor:semaphore" "$lab_dir"
-  runuser -u "$editor" -- git -C "$lab_dir" init -q -b main
+  # No hook samples from Git's templates: the folder needs none, and where fapolicyd is
+  # active an account other than root may not read one of them, which stops git init.
+  runuser -u "$editor" -- git -C "$lab_dir" init -q -b main --template=
   runuser -u "$editor" -- git -C "$lab_dir" -c user.name=ansible-practice -c user.email=ansible-practice@example.test \
     add -A
   runuser -u "$editor" -- git -C "$lab_dir" -c user.name=ansible-practice -c user.email=ansible-practice@example.test \
