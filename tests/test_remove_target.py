@@ -157,6 +157,17 @@ class RemoveTargetTests(unittest.TestCase):
         self.assertNotIn("lab-ubuntu.yml", result.stdout)
         self.assertTrue((folder / "lab-alma.yml").exists())
 
+    def test_variables_kept_beside_a_playbook_are_named_too(self):
+        # Ansible reads host_vars/ beside the playbook that runs: directly in playbooks/, or in one of its folders.
+        flat, feature = self.lab / "playbooks" / "host_vars", self.lab / "playbooks" / "site" / "host_vars"
+        for folder in (flat, feature):
+            folder.mkdir(parents=True)
+            (folder / "lab-alma.yml").write_text("ansible_port: 2222\n")
+        result = self.remove()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(f"Kept the variables of lab-alma, which a later host of that name would get: "
+                      f"{flat}/lab-alma.yml {feature}/lab-alma.yml\n", result.stdout)
+
     def test_owner_group_and_mode_are_kept_and_the_files_replaced_whole(self):
         # Without root the test can only give the files groups it belongs to; a second one,
         # if this account has one, shows the group is copied rather than defaulted.

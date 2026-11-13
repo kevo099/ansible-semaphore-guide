@@ -644,7 +644,7 @@ class OnboardScriptTests(AddTargetInfoMixin, unittest.TestCase):
         script = patterns + ('for v in "$@"; do if [[ $v =~ $key_pattern ]]; then echo key;'
                              ' elif [[ $v =~ $hash_pattern ]]; then echo hash; else echo none; fi; done')
         cases = {
-            "ssh-rsa AAAAB3NzaC1yc2E= ansible-practice": "key",
+            "ssh-rsa AAAAB3NzaC1yc2E= ansible-guide": "key",
             "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5": "key",
             "ecdsa-sha2-nistp384 AAAAE2VjZHNh comment with spaces": "key",
             "ssh-dss AAAAB3NzaC1kc3M=": "none",
@@ -850,7 +850,7 @@ class PlaybookTests(AddTargetLineMixin, unittest.TestCase):
         # It reads the file with a lookup and replaces only the key placeholder; nothing in
         # the file, such as Bash's ${#array[@]}, may be taken for a template.
         targets = yaml.safe_load((ROOT / "platforms" / "azure" / "targets.yml").read_text())[0]["vars"]
-        key = "ssh-rsa AAAAB3NzaC1yc2E= ansible-practice"
+        key = "ssh-rsa AAAAB3NzaC1yc2E= ansible-guide"
         path = str(ROOT / "onboard" / "new-vm" / "cloud-init.yaml")
         given = {"automation_public_key": key, "cloud_init_data": targets["cloud_init_data"],
                  "cloud_init_template": targets["cloud_init_template"].replace("../../onboard/new-vm/cloud-init.yaml", path)}

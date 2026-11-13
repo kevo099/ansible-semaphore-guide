@@ -58,10 +58,10 @@ flowchart TD
     cmd -- "run it, replacing<br/>any placeholder" --> added
     fi --> added["add-target.sh checks the<br/>values, trusts only the<br/>scanned key with that<br/>fingerprint: Added NAME"]
     added --> same{"One sudo password<br/>for every target?"}
-    same -- "yes, the default" --> ks["On the controller, once:<br/>sudo python3.12<br/>controller/lab-sudo.py.<br/>Or in the UI: Key Store,<br/>Lab sudo, Login with<br/>password, Username empty,<br/>then Lab inventory file,<br/>Sudo Credentials"]
+    same -- "yes, the default" --> ks["On the controller, once:<br/>sudo python3.12<br/>controller/lab-sudo.py.<br/>Or in the UI: Key Store,<br/>Target sudo password, Login with<br/>password, Username empty,<br/>then Inventory file,<br/>Sudo Credentials"]
     same -- "no, one per target" --> vault["In /opt/ansible-lab:<br/>ansible-vault create<br/>inventories/host_vars/<br/>HOST.yml. Lab vault<br/>password on every<br/>template's Vaults"]
     ks --> ping
-    vault --> ping["Semaphore, Lessons:<br/>Ping, then Baseline<br/>preview, each for every<br/>host in the lab group"]
+    vault --> ping["Semaphore, Baseline:<br/>Ping, then Baseline<br/>preview, each for every<br/>host in the lab group"]
     ping --> res{"Both succeed<br/>for the new host?"}
     res -- "no" --> fix["Fix what it names:<br/>Stage 4, When a<br/>step fails"]
     fix --> ping
@@ -74,14 +74,14 @@ flowchart TD
 | Step | Stage page | Where | Check |
 | --- | --- | --- | --- |
 | Plan, and create the controller VM | [Stage 0](stage-0-plan.md) | Your hypervisor or cloud | The VM's own checks pass, and you can log in as its administrator. |
-| Install the controller | [Stage 1](stage-1-controller.md#do-install-with-the-installer) | The controller VM | The readiness report says `"passed": true`, and Semaphore lists 24 templates on seven tabs. |
+| Install the controller | [Stage 1](stage-1-controller.md#do-install-with-the-installer) | The controller VM | The readiness report says `"passed": true`, and Semaphore lists 24 templates on eight tabs. |
 | Check the service key copy | [Stage 1](stage-1-controller.md#do-save-the-service-key) | The controller | `~/svc_ansible.pub`, which the installer leaves, holds one line starting with `ssh-rsa`. |
 | Prepare a machine that exists, in one command | [Stage 2](stage-2-existing-machines.md#do-onboard-it-in-one-command-from-the-controller) | The controller, as your administrator, without `sudo` | `Prepared and in the inventory: ADMIN@ADDRESS`; the machine is also added, so skip **Add the target**. |
 | Or prepare it another way | [Stage 2](stage-2-existing-machines.md) | The machine, as root; or the controller for the playbook | `RESULT: OK` after the `name=`, `address=`, `group=` and `fingerprint=` lines; from the playbook, a whole `add-target.sh` command. |
 | Prepare a new VM at first boot | [Stage 3](stage-3-new-vms-cloud-init.md) | The new VM | `onboard: svc_ansible is ready, with its sudo password set` with `--with-password`, or `onboard: svc_ansible is ready; set its sudo password next` and then a password you set; and the same four lines. |
 | Add the target | [Stage 4](stage-4-add-target-first-job.md#do-add-the-target-with-add-targetsh) | The controller, in the guide's folder | `Added NAME ... and trusted its verified host key`, or `Already present` on a repeat. Not needed after the one command. |
-| Give Semaphore the sudo password | [Stage 4](stage-4-add-target-first-job.md#do-give-semaphore-the-sudo-password) | The controller, `sudo python3.12 controller/lab-sudo.py`, once per password; or Semaphore's UI | `Stored the targets' sudo password as the key 'Lab sudo' ...`; the **Lab inventory file** shows **Lab sudo** as its **Sudo Credentials**. |
-| Verify | [Stage 4](stage-4-add-target-first-job.md#do-run-ping-and-baseline-preview) | Semaphore, the **Lessons** tab | **Ping** and **Baseline preview** succeed for the new host. |
+| Give Semaphore the sudo password | [Stage 4](stage-4-add-target-first-job.md#do-give-semaphore-the-sudo-password) | The controller, `sudo python3.12 controller/lab-sudo.py`, once per password; or Semaphore's UI | `Stored the targets' sudo password as the key 'Target sudo password' ...`; the **Inventory file** shows **Target sudo password** as its **Sudo Credentials**. |
+| Verify | [Stage 4](stage-4-add-target-first-job.md#do-run-ping-and-baseline-preview) | Semaphore, the **Baseline** tab | **Ping** and **Baseline preview** succeed for the new host. |
 
 Whoever controls a machine controls what it prints, so the files that run on
 it print data, and only `add-target.sh`, reviewed code on the controller, acts

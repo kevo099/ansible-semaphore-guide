@@ -253,7 +253,7 @@ NGINXMAIN
       # 64-character limit, which a long DNS name would exceed.
       if ! err=$(openssl req -x509 -newkey rsa:4096 -sha256 -days 825 -nodes \
           -keyout "$tls_dir/semaphore.key" -out "$tls_dir/semaphore.crt" \
-          -subj '/CN=Semaphore practice controller' -addext "subjectAltName=$san" 2>&1 >/dev/null); then
+          -subj '/CN=Semaphore controller' -addext "subjectAltName=$san" 2>&1 >/dev/null); then
         rm -f "$tls_dir/semaphore.key" "$tls_dir/semaphore.crt"
         printf '%s\n' "$err"
         echo "Could not create the certificate for $address."

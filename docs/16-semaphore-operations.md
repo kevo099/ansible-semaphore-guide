@@ -315,7 +315,7 @@ The [live evidence](validation/2026-09-community.md#history-audit-and-portabilit
 checked their APIs; the UI labels below come from the pinned 2.19.12 source,
 not a browser test of this procedure.
 
-**Where: browser, as a member of the practice project.**
+**Where: browser, as a member of the Ansible Automation project.**
 
 1. Open **Dashboard → History** and select the completed task's number.
    Match its template, **User**, **Start** and **Duration** to your run.

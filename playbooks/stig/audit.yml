@@ -1,0 +1,99 @@
+---
+# Read-only, so each host's result stands on its own: a host that is missing its
+# vendor scanner fails with an explanation without stopping the other hosts' scans.
+- name: Assess lab machines against their vendor STIG profile (scan only)
+  hosts: lab
+  become: true
+  gather_facts: false
+  vars_files:
+    - ../vars/stig_systems.yml
+  vars:
+    stig_phase: audit
+    stig_profile_el: xccdf_org.ssgproject.content_profile_stig
+    stig_usg_profile: disa_stig
+    stig_fetch_remote_resources: false
+    # Set by the per-system playbooks under playbooks/stig/; empty means every
+    # supported system, and the reports folder then has no system level.
+    stig_os_scope: ''
+    stig_report_folder: ''
+    # Optional: scan with a SCAP data stream you supply, such as a DISA SCAP
+    # benchmark in the lab folder's content/ directory, and one of its profile IDs.
+    stig_content_file: ''
+    stig_content_profile: ''
+    # Optional: an exceptions file, which XCCDF calls a tailoring file, in the lab
+    # folder. Its profile extends the one this run scans with and unselects the rules
+    # you have an accepted exception for. Without this variable, a per-system playbook
+    # uses content/<system>/<version>/tailoring.xml when that file exists.
+    stig_tailoring_file: ''
+    # stig_stamp is set once for every host of the run; see pre_tasks.
+    stig_remote_dir: "/var/log/stig-scans/{{ stig_stamp }}"
+    stig_fetch_dir: >-
+      {{ lookup('env', 'HOME') }}/stig-reports/{{ stig_report_folder ~ '/' if stig_report_folder else '' }}{{ stig_stamp }}
+  pre_tasks:
+    # Check mode skips the scanner commands, so a preview could only report
+    # missing results. Refuse it on the controller before any connection.
+    - name: Refuse check mode because the vendor scanner does not run in it
+      ansible.builtin.assert:
+        that:
+          - not ansible_check_mode
+        fail_msg: >-
+          Check mode skips the vendor scanner, so there would be no results to
+          read. The audit changes no security policy; run it without --check
+          or Dry Run.
+        quiet: true
+      tags: always
+
+    - name: Check scope and supported operating system
+      ansible.builtin.import_tasks: ../tasks/preflight.yml
+      tags: always
+
+    # One folder for every host of the run, named once from the controller's UTC clock;
+    # the default linear strategy gives the fact to every host. This must follow the
+    # preflight's fact gathering: in ansible-core 2.21 a run_once task gives hosts with
+    # no facts yet one shared fact cache, so each would see another host's facts.
+    - name: Use one report folder for the whole run # noqa: run-once[task]
+      ansible.builtin.set_fact:
+        stig_stamp: "{{ now(utc=true, fmt='%Y%m%dT%H%M%SZ') }}"
+      run_once: true
+      tags: always
+
+    # The per-system playbooks under playbooks/stig/ set stig_os_scope, such as
+    # RedHat-9 or Ubuntu-24.04, in the same form as this name.
+    - name: Name this host's system the way the per-system playbooks do
+      ansible.builtin.set_fact:
+        stig_os_key: >-
+          {{ ansible_facts['distribution'] }}-{{ ansible_facts['distribution_version']
+          if ansible_facts['distribution'] == 'Ubuntu' else ansible_facts['distribution_major_version'] }}
+      tags: always
+
+    - name: Stop when no host in the run has the system this playbook audits
+      ansible.builtin.fail:
+        msg: >-
+          No host in this run's limit runs {{ stig_systems[stig_os_scope].label }},
+          so there is nothing to audit. The hosts run {{ ansible_play_hosts
+          | map('extract', hostvars, 'stig_os_key') | unique | map('extract', stig_systems, 'label')
+          | join(', ') }}; run the STIG audit of that system instead, or add a
+          {{ stig_systems[stig_os_scope].label }} host to the inventory.
+      when:
+        - stig_os_scope | length > 0
+        - ansible_play_hosts | map('extract', hostvars, 'stig_os_key') | select('equalto', stig_os_scope)
+          | list | length == 0
+      tags: always
+
+    - name: Report hosts that another system's playbook covers
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }} runs {{ stig_systems[stig_os_key].label }}; this
+          run audits {{ stig_systems[stig_os_scope].label }} hosts only. Audit it
+          with {{ stig_systems[stig_os_key].label }} · STIG audit, or
+          playbooks/stig/{{ stig_systems[stig_os_key].folder }}/audit.yml.
+      when: stig_os_scope | length > 0 and stig_os_key != stig_os_scope
+      tags: always
+
+    - name: Leave hosts of other systems to their own playbook
+      ansible.builtin.meta: end_host
+      when: stig_os_scope | length > 0 and stig_os_key != stig_os_scope
+      tags: always
+  tasks:
+    - name: Scan with the vendor tooling and collect the evidence
+      ansible.builtin.import_tasks: ../tasks/stig_scan.yml

@@ -227,6 +227,9 @@ and its message names the fix:
 | `Writing the guide's files stopped ...` | The update put back what it had written. Fix the cause, such as a full disk or an editor saving the file, and run it again. |
 | `The password was accepted, but Semaphore also wants a second factor` | Pass an administrator's API token as `SEMAPHORE_API_TOKEN`; see [update a controller](controller-update.md). |
 | `... may not change the templates of project ...` | Use an administrator's login or token, or the project owner's or a manager's. |
+| `The project keeps its name ...: this login may not rename a project.` | Everything else was updated. Run the update once more as an administrator or the project's owner, or rename the project under its settings. |
+| `... this release moved it to ...` | You edited a playbook that now lives in its feature's folder. Run the update with `--replace-edited`, then make your change again in the new file; the message names the `git show` command that prints your version. |
+| `playbooks/host_vars holds values that Ansible reads only for a playbook directly in playbooks/` | Move the folder to `inventories/host_vars`, or `playbooks/group_vars` to `inventories/group_vars`, as the folder's owner, and run the update again. |
 | `Kept template ...: schedule ... runs it` | Move those schedules or integrations to the per-system templates, then run `--apply --remove-replaced` again. |
 | `... failed with HTTP NNN: REASON` | The text after the colon is Semaphore's own reason. |
 

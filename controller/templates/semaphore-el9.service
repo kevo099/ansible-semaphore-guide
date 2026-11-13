@@ -1,5 +1,5 @@
 [Unit]
-Description=Semaphore UI for Ansible practice (Enterprise Linux 9 controller)
+Description=Semaphore UI for Ansible (Enterprise Linux 9 controller)
 Wants=network-online.target
 After=network-online.target postgresql.service
 Requires=postgresql.service

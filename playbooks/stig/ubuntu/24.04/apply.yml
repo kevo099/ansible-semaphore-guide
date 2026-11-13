@@ -3,7 +3,7 @@
 # "Ubuntu 24.04 · STIG apply" templates run it. A host that runs another system is
 # refused before anything changes.
 - name: Apply the vendor STIG to one approved Ubuntu 24.04 host
-  ansible.builtin.import_playbook: ../../../stig-apply.yml
+  ansible.builtin.import_playbook: ../../apply.yml
   vars:
     stig_os_scope: Ubuntu-24.04
     stig_report_folder: ubuntu/24.04

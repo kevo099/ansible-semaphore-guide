@@ -89,7 +89,7 @@ single-line OpenSSH public key, and a key whose comment (the text after the
 base64 part) contains a `"`, a `\` or a character outside plain ASCII; remove such a comment from your copy of
 the key and run it again. On an error it prints the reason and writes nothing
 to standard output, so `~/onboard-new-vm.yaml` is then empty. The installer's
-key has the comment `ansible-practice`, which is safe. You can also edit a
+key has the comment `ansible-automation`, which is safe. You can also edit a
 copy by hand, following the same rules: keep the double quotes, and leave out
 a comment that holds a `"` or a `\`.
 

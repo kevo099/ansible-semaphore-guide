@@ -17,7 +17,7 @@ def main():
     result = subprocess.run(
         [
             "runuser", "-u", "semaphore", "--", "/usr/local/bin/semaphore",
-            "user", "add", "--admin", "--login", "admin", "--name", "Lab Administrator",
+            "user", "add", "--admin", "--login", "admin", "--name", "Ansible Admin",
             "--email", "admin@example.test", "--password", password,
             "--config", "/etc/semaphore/config.json",
         ],

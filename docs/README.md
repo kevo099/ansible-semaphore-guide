@@ -58,6 +58,7 @@ became the stage, by-hand and platform pages.
 - [SSH, sudo and the automation account by hand](manual-access.md): what the
   onboarding files do, one step at a time.
 - [Update a controller to a newer guide release](controller-update.md).
+- [Settings and your own playbooks](settings.md): the values meant to be changed, and where your playbooks go.
 
 ## Reference
 

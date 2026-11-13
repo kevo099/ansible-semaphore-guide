@@ -40,7 +40,7 @@ Project Guests could download backups in the test. Review membership accordingly
 
 **Where: controller, as your administrator account, on the isolated
 replacement.** Prerequisites: the same 2.19.12 binary/schema, an existing
-**Ansible Practice** project, and no project named **Portability practice**.
+**Ansible Automation** project, and no project named **Portability practice**.
 For this exercise use a source with no schedules or integrations; imported
 schedules can become active. The CLI opens the database and applies pending
 migrations, so do not use another version.
@@ -53,7 +53,7 @@ install -d -o semaphore -g semaphore -m 0700 /var/lib/semaphore/portability-prac
 runuser -u semaphore -- sh -c '
   umask 077
   exec /usr/local/bin/semaphore project export \
-    --config /etc/semaphore/config.json --project-name "Ansible Practice" \
+    --config /etc/semaphore/config.json --project-name "Ansible Automation" \
     --file /var/lib/semaphore/portability-practice/project.json
 '
 runuser -u semaphore -- /usr/local/bin/semaphore project import \

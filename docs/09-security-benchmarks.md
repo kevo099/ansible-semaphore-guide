@@ -13,8 +13,8 @@ available as a recovery and execution platform. The five starter lessons do
 not apply CIS or STIG hardening.
 
 Both seeded controllers ship the same vendor assessments as two shared
-playbooks, [`stig-audit.yml`](../playbooks/stig-audit.yml) and
-[`stig-apply.yml`](../playbooks/stig-apply.yml), with one audit and apply
+playbooks, [`stig/audit.yml`](../playbooks/stig/audit.yml) and
+[`stig/apply.yml`](../playbooks/stig/apply.yml), with one audit and apply
 playbook per operating system and version under
 [`playbooks/stig/`](../playbooks/stig/) and one Semaphore tab for each; see
 [the seeded STIG templates](#the-seeded-stig-templates) near the end of this
@@ -317,8 +317,8 @@ folder, content folder and Semaphore tab:
 | Ubuntu 24.04 | `playbooks/stig/ubuntu/24.04/` | `content/ubuntu/24.04/` | **STIG · Ubuntu 24.04** |
 
 Each playbook folder holds `audit.yml` and `apply.yml`. They are short
-wrappers that name their system and run the shared `playbooks/stig-audit.yml`
-and `playbooks/stig-apply.yml`, so a fix to the shared playbooks reaches every
+wrappers that name their system and run the shared `playbooks/stig/audit.yml`
+and `playbooks/stig/apply.yml`, so a fix to the shared playbooks reaches every
 system. Semaphore tabs cannot be nested, so each system and version gets one
 flat tab. Ansible tells the systems apart by the facts it gathers, the
 distribution and its major version, or the full version on Ubuntu; your
@@ -346,7 +346,7 @@ packaged Ansible playbook applied on RHEL above.
   `ubuntu`, and skips the hosts there that run another system; the log names
   each skipped host and its system. On the hosts it keeps, it installs the
   scanner where missing, runs the assessment, keeps the XML and HTML on the
-  target under `/var/log/stig-practice/STAMP/`, fetches them to the
+  target under `/var/log/stig-scans/STAMP/`, fetches them to the
   controller under `stig-reports/<system>/<version>/STAMP/HOST/` in the home of
   the account that runs the playbook, for example
   `/var/lib/semaphore/stig-reports/rhel/9/` for a Semaphore run and
@@ -386,9 +386,9 @@ so when your targets have different sudo passwords, limit the run to one host,
 such as `--limit lab-rhel`, or use the Vault option, which gives each host its
 own. Hosts of another system are skipped or refused before Ansible uses sudo
 on them, so their passwords are never tried.
-The shared `playbooks/stig-audit.yml` still audits every supported system in
+The shared `playbooks/stig/audit.yml` still audits every supported system in
 its limit at once, with reports under `~/stig-reports/STAMP/`, and
-`playbooks/stig-apply.yml` applies to whichever single host you name.
+`playbooks/stig/apply.yml` applies to whichever single host you name.
 
 The STIG templates refuse Dry Run because the scanner does not run in check
 mode.
@@ -542,7 +542,7 @@ time to see what it hides.
 The audit can also scan with a SCAP data stream file you supply instead of
 the vendor's packaged content, for example DISA's own SCAP benchmark for a
 newer STIG release. The file lives in the lab folder, so no repository or
-download happens during the run. `stig-audit.yml` then uses OpenSCAP on
+download happens during the run. `stig/audit.yml` then uses OpenSCAP on
 either family, installing `openscap-scanner` where it is missing, and the
 results, summary and HTML report work as for the vendor scan.
 
@@ -614,7 +614,7 @@ shows how. With the Vault option for sudo passwords, use `--ask-vault-pass`
 instead of `-K`.
 
 A relative path is read from the lab folder; an absolute path works too. The
-content is for audits only: `stig-apply.yml` refuses `stig_content_file`,
+content is for audits only: `stig/apply.yml` refuses `stig_content_file`,
 because DISA benchmarks carry checks but no fixes, and remediation always
 uses the vendor's packaged content.
 

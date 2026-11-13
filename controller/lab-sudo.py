@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
-"""Give Semaphore the lab targets' sudo password: the key "Lab sudo" on the lab inventory.
+"""Give Semaphore the targets' sudo password: the key "Target sudo password" on the inventory.
 
 Run it as root on the controller, in the guide's folder:
     sudo python3.12 controller/lab-sudo.py [--replace] [--lab-dir DIR] [--project-id ID] [--password-stdin]
 
 It does through Semaphore's API on loopback what Stage 4 does in the UI: it stores
-the shared sudo password of svc_ansible as the key "Lab sudo", of the type Login
+the shared sudo password of svc_ansible as the key "Target sudo password", of the type Login
 with password and with an empty Username, and chooses that key as the Sudo
-Credentials of "Lab inventory file". The Username stays empty because Semaphore
+Credentials of "Inventory file". The Username stays empty because Semaphore
 passes it to Ansible as --become-user, the account to become: any name there makes
 privileged tasks run as that account instead of root.
 
 Running it again changes nothing. --replace stores a new password in the existing
 key, with an empty Username. An inventory that uses another sudo credential, and a
-"Lab sudo" of another type, are refused with what to do instead. Semaphore never
+"Target sudo password" of another type, are refused with what to do instead. A key
+that still has its name of releases before v1.12.0, "Lab sudo", is renamed first
+and keeps its password. Semaphore never
 returns a key's Username, so one typed in the UI cannot be seen here: --replace
 clears it by storing the password anew. It asks for the password twice, without
 echo, and only when it stores one; --password-stdin reads one line from standard
@@ -33,8 +35,11 @@ import sys
 # Run as root from an administrator's copy of the guide: leave no root-owned bytecode in it.
 sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
-MARKER = Path("/etc/semaphore/.practice-project-seeded")
-KEY_NAME = "Lab sudo"
+# The installer's marker, under its name of today and of releases before v1.12.0.
+MARKERS = (Path("/etc/semaphore/.guide-project-seeded"), Path("/etc/semaphore/.practice-project-seeded"))
+KEY_NAME = "Target sudo password"
+# The key's name in releases before v1.12.0.
+FORMER_KEY_NAMES = ("Lab sudo",)
 # Semaphore's type for Login with password.
 KEY_TYPE = "login_password"
 # The bootstrap playbook and onboard-linux.sh --ask-password require this length.
@@ -107,7 +112,7 @@ class Run:
         self.seeder, self.client, self.say = seeder, client, say
         self.base, self.project_id = found["base"], found["project"]["id"]
         self.inventory_path = f"{self.base}/inventory/{found['inventory']['id']}"
-        self.inventory_name = found["inventory"].get("name") or "Lab inventory file"
+        self.inventory_name = found["inventory"].get("name") or seeder.INVENTORY_NAME
 
     def failed(self, error):
         """Whether Semaphore refused a request (True) or did not answer it (False)."""
@@ -121,8 +126,28 @@ class Run:
             return None
         return key if isinstance(key, dict) else None
 
+    def adopt_former_name(self, keys):
+        """Rename a key that still has an earlier release's name, keeping its password; returns the keys."""
+        former = [key for key in keys if key.get("name") in FORMER_KEY_NAMES]
+        if len(former) != 1 or any(key.get("name") == KEY_NAME for key in keys):
+            return keys
+        key, path = former[0], f"{self.base}/keys/{former[0].get('id')}"
+        try:
+            # Without override_secret Semaphore keeps the secret it holds.
+            self.client.call("PUT", path, dict(self.client.call("GET", path), name=KEY_NAME, override_secret=False))
+        except (self.seeder.ApiError, OSError) as error:
+            raise SystemExit(f"Semaphore did not rename the key {key['name']!r} (ID {key.get('id')}) to "
+                             f"{KEY_NAME!r} ({error}). Rename it in Key Store, then run this again. Nothing else "
+                             "was changed.") from None
+        renamed = self.read_key(key.get("id"))
+        if not renamed or renamed.get("name") != KEY_NAME or renamed.get("type") != key.get("type"):
+            raise SystemExit(f"Semaphore did not confirm the new name of the key {key['name']!r} (ID "
+                             f"{key.get('id')}). Look at it in Key Store, then run this again.")
+        self.say(f"Renamed the key {key['name']!r} (ID {key.get('id')}) to {KEY_NAME!r}; its password is kept.")
+        return self.seeder.read_list(self.client, f"{self.base}/keys")
+
     def configure(self, replace, get_password):
-        keys = self.seeder.read_list(self.client, f"{self.base}/keys")
+        keys = self.adopt_former_name(self.seeder.read_list(self.client, f"{self.base}/keys"))
         named = [key for key in keys if key.get("name") == KEY_NAME]
         if len(named) > 1:
             ids = ", ".join(str(key.get("id")) for key in named)
@@ -174,7 +199,7 @@ class Run:
                  "this again with --replace: it stores the password anew with an empty Username.")
 
     def check_existing(self, key, become, replace):
-        """Refuse a "Lab sudo" that cannot be used or fixed from here."""
+        """Refuse a "Target sudo password" that cannot be used or fixed from here."""
         if key.get("type") != KEY_TYPE:
             # Semaphore's list of what uses a key leaves out template vaults, so a new type
             # could break something this script cannot see.
@@ -310,7 +335,7 @@ def main(argv=None):
     args = parse_args(argv)
     if os.geteuid() != 0:
         raise SystemExit("Run it with sudo on the controller.")
-    if not MARKER.exists():
+    if not any(marker.exists() for marker in MARKERS):
         raise SystemExit("This controller was not set up by an installer that seeds Semaphore; give Semaphore "
                          "the sudo password in the UI, as docs/stage-4-add-target-first-job.md shows.")
     root = Path(os.path.realpath(args.lab_dir))
@@ -322,7 +347,7 @@ def main(argv=None):
     client = seeder.Client(seeder.API, os.environ.get("SEMAPHORE_API_TOKEN") or None)
     seeder.wait_ready(client)
     user = seeder.log_in(client, "admin", ask=True)
-    found = seeder.resolve(client, "Ansible Practice", str(root), args.project_id, user)
+    found = seeder.resolve(client, seeder.PROJECT_NAME, str(root), args.project_id, user)
     seeder.check_access(client, user, found)
     return Run(seeder, client, found).configure(args.replace, lambda: read_password(args.password_stdin))
 

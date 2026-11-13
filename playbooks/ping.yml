@@ -1,20 +1,6 @@
 ---
-- name: Prove SSH, Python, and target identity
-  hosts: lab
-  gather_facts: false
-  any_errors_fatal: true
-  pre_tasks:
-    - name: Check scope and supported operating system
-      ansible.builtin.import_tasks: tasks/preflight.yml
-      tags: always
-  tasks:
-    - name: Test the Ansible connection
-      ansible.builtin.ping:
-
-    - name: Explain what answered
-      ansible.builtin.debug:
-        msg: >-
-          {{ inventory_hostname }} ({{ ansible_host | default(inventory_hostname) }})
-          runs {{ ansible_facts['distribution'] }}
-          {{ ansible_facts['distribution_version'] }}.
-          Ansible ping proves SSH and Python, not ICMP or sudo.
+# This playbook moved to playbooks/baseline/ping.yml in release v1.12.0. The file keeps a
+# template or a command that still names the earlier path working for one release;
+# name the new path instead, because the release after that removes this file.
+- name: Run the playbook from its folder
+  ansible.builtin.import_playbook: baseline/ping.yml

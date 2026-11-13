@@ -37,10 +37,10 @@ Edit `lab_web_message` or the HTML template. Then inspect and validate the
 specific change before committing:
 
 ```bash
-git diff -- playbooks/webserver.yml playbooks/templates/practice.html.j2
+git diff -- playbooks/examples/webserver.yml playbooks/examples/templates/page.html.j2
 git diff --check
-/opt/ansible-venv/bin/ansible-playbook playbooks/webserver.yml --syntax-check
-git add playbooks/webserver.yml playbooks/templates/practice.html.j2
+/opt/ansible-venv/bin/ansible-playbook playbooks/examples/webserver.yml --syntax-check
+git add playbooks/examples/webserver.yml playbooks/examples/templates/page.html.j2
 git diff --cached
 git commit -m "Change the practice web page message"
 git push -u origin exercise/change-web-message
@@ -113,7 +113,7 @@ mkdir -p inventories/host_vars
 Enter `ansible_become_password` and the target's actual password **inside the
 Vault editor**, never as a command-line value. Create the matching encrypted
 file for `lab-alma`. Unlock them with `--ask-vault-pass` when running Ansible,
-for example `ansible-playbook playbooks/baseline.yml --limit lab --private-key
+for example `ansible-playbook playbooks/baseline/baseline.yml --limit lab --private-key
 ~/.ssh/ansible_lab --ask-vault-pass`, which uses each host's own sudo password
 in one run.
 

@@ -26,7 +26,7 @@ installer leaves in your home folder.
 ## Ubuntu or Enterprise Linux: the differences
 
 One page covers both installers. They run the same steps from the same shared
-code, `controller/controller-common.sh`, and seed the same practice project.
+code, `controller/controller-common.sh`, and seed the same project.
 Where a command below differs, both forms are shown.
 
 | | Ubuntu 24.04 | RHEL, AlmaLinux or Rocky Linux 9.4 or later |
@@ -178,9 +178,9 @@ use `DIR` wherever that path appears, and pass the same `--lab-dir DIR` to
 | Database | PostgreSQL 16, loopback only, SCRAM login, with a dedicated `semaphore` role and database |
 | Application | Semaphore Community 2.19.12, checksum-verified, `127.0.0.1:3000`, hardened `semaphore.service` run by the unprivileged `semaphore` account |
 | Secrets | In `/etc/semaphore` (0750, root and the `semaphore` group): `config.json` (0640, readable by the service), the initial admin password and the `svc_ansible` RSA 4096 private key (both root-only), the service key `svc_ansible.pub` (0644), an empty `known_hosts` that `add-target.sh` fills, and `gitconfig`, which lets the service read the lab folder's Git history. No value is printed. |
-| Lab folder | `/opt/ansible-lab`, owned by the editor and readable by the service: `ansible.cfg`, the nine playbooks and their supporting files, one STIG audit and apply playbook per system and version under `playbooks/stig/` (`rhel/9`, `almalinux/9`, `rocky/9`, `ubuntu/24.04`), the report summarizer `scripts/summarize_xccdf.py`, an empty `inventories/lab.ini`, a `content/` folder with the same per-system subfolders for SCAP files you supply, and a local Git history whose `.gitignore` keeps `inventories/`, `host_vars/` and `group_vars/` untracked |
-| Semaphore objects | Project **Ansible Practice**; keys **None** and **Practice target SSH**; repository **Local lab folder**; inventory **Lab inventory file**; variable groups **Practice defaults**, **Allow required reboot**, **DISA SCAP file · RHEL 9** and **DISA SCAP file · Ubuntu 24.04**; seven template tabs, **Lessons**, **Patching**, **STIG · RHEL 9**, **STIG · AlmaLinux 9**, **STIG · Rocky Linux 9**, **STIG · Ubuntu 24.04** and **Operations** |
-| 24 task templates | **Lessons:** Ping; Baseline preview; Baseline apply; Users; Webserver. **Patching:** Patch preview; Patch, no reboot; Patch, allow required reboot. **Each STIG tab**, with names that start with the system, such as **RHEL 9 · STIG audit**: STIG audit; STIG apply (approval required); STIG apply, allow required reboot; and on the RHEL 9 and Ubuntu 24.04 tabs, STIG audit, DISA SCAP file. **Operations:** Health report; Reboot one target |
+| Lab folder | `/opt/ansible-lab`, owned by the editor and readable by the service: `ansible.cfg`, the playbooks, each in the folder of its feature under `playbooks/` (`baseline/`, `patching/`, `operations/`, `stig/` and `examples/`) with the tasks and names they share in `tasks/` and `vars/`, one STIG audit and apply playbook per system and version under `playbooks/stig/` (`rhel/9`, `almalinux/9`, `rocky/9`, `ubuntu/24.04`), a folder `playbooks/site/` for playbooks of your own, the report summarizer `scripts/summarize_xccdf.py`, an empty `inventories/lab.ini`, a `content/` folder with the same per-system subfolders for SCAP files you supply, and a local Git history whose `.gitignore` keeps `inventories/`, `host_vars/` and `group_vars/` untracked |
+| Semaphore objects | Project **Ansible Automation**; keys **None** and **Target SSH key**; repository **Local playbooks**; inventory **Inventory file**; variable groups **Defaults**, **Allow required reboot**, **DISA SCAP file · RHEL 9** and **DISA SCAP file · Ubuntu 24.04**; eight template tabs, **Baseline**, **Patching**, **STIG · RHEL 9**, **STIG · AlmaLinux 9**, **STIG · Rocky Linux 9**, **STIG · Ubuntu 24.04**, **Operations** and **Examples** |
+| 24 task templates | **Baseline:** Ping; Baseline preview; Baseline apply. **Patching:** Patch preview; Patch, no reboot; Patch, allow required reboot. **Each STIG tab**, with names that start with the system, such as **RHEL 9 · STIG audit**: STIG audit; STIG apply (approval required); STIG apply, allow required reboot; and on the RHEL 9 and Ubuntu 24.04 tabs, STIG audit, DISA SCAP file. **Operations:** Health report; Reboot one target. **Examples:** Users; Webserver |
 | Key copy | `~/svc_ansible.pub` in the editor's home folder: a copy of the service key, owned by the editor, for the onboarding steps |
 
 Every lesson template, and **Health report**, sets its **Ansible options →
@@ -206,7 +206,7 @@ after the recovery preparation they depend on.
 
 ### The lab folder
 
-Semaphore reads the **Local lab folder** straight from its working tree at
+Semaphore reads the **Local playbooks** straight from its working tree at
 every run, uncommitted edits included; there is no clone step and nothing to
 sync. Edit playbooks as the editor account. The folder's `.gitignore` keeps
 `inventories/` out of Git, so Git cannot show or undo an inventory edit: copy
@@ -249,26 +249,26 @@ with three parts. First, the readiness report from `check-controller.py`:
 }
 ```
 
-Second, the seeding summary: the project **Ansible Practice** and its ID, the
-repository path, the inventory file, the seven template tabs and 24
+Second, the seeding summary: the project **Ansible Automation** and its ID, the
+repository path, the inventory file, the eight template tabs and 24
 template names with their IDs:
 
 ```text
 {
   "project": {
-    "name": "Ansible Practice",
+    "name": "Ansible Automation",
     "id": 1
   },
   "repository": {
-    "name": "Local lab folder",
+    "name": "Local playbooks",
     "path": "/opt/ansible-lab"
   },
   "inventory": {
-    "name": "Lab inventory file",
+    "name": "Inventory file",
     "file": "/opt/ansible-lab/inventories/lab.ini"
   },
   "views": [
-    "Lessons",
+    "Baseline",
     ...
   ],
   "templates": {
@@ -367,18 +367,18 @@ change, so from now on the password manager holds the real one. The update
 tool will ask for the new password later, as
 [update a controller](controller-update.md) describes.
 
-**Check:** the **Ansible Practice** project is present with the objects listed
+**Check:** the **Ansible Automation** project is present with the objects listed
 in [what the installer creates](#what-the-installer-creates), the **Task
-Templates** page shows the **Lessons**, **Patching**, four **STIG ·** and
-**Operations** tabs, the **Operations** tab holds **Health report** and
-**Reboot one target**, and the Key Store shows the SSH key **Practice target SSH** by name only. Log
+Templates** page shows the **Baseline**, **Patching**, four **STIG ·**,
+**Operations** and **Examples** tabs, the **Operations** tab holds **Health report** and
+**Reboot one target**, and the Key Store shows the SSH key **Target SSH key** by name only. Log
 out and back in with the new password.
 
 ## Do: save the service key
 
 **Where: the controller, as your administrator.** The installer created the
 key pair Semaphore logs in to targets with: the private key stays in
-`/etc/semaphore/svc_ansible` and in the Key Store as **Practice target SSH**,
+`/etc/semaphore/svc_ansible` and in the Key Store as **Target SSH key**,
 and the public key, the service key, is `/etc/semaphore/svc_ansible.pub`. Every
 target must trust that public key for the account `svc_ansible`. The installer
 also left a copy in your home folder, where Stage 3 and the by-hand ways of
@@ -392,7 +392,7 @@ sudo ssh-keygen -lf /etc/semaphore/svc_ansible.pub
 ```
 
 The first prints one line that starts with `ssh-rsa` and ends with
-`ansible-practice`; the other two print the same `SHA256:` value. If you
+`ansible-automation`; the other two print the same `SHA256:` value. If you
 installed with `--editor USER`, the copy is in that account's home folder.
 
 On a controller installed with an earlier release, or when the copy is

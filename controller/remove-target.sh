@@ -235,9 +235,9 @@ elif [[ -n $sharer ]]; then
 else
   echo "$known_hosts held no key for $address."
 fi
-# Ansible reads these beside the inventory and beside the playbooks, for any host of this name.
+# Ansible reads these beside the inventory and beside the playbook that runs, for any host of this name.
 kept_vars=()
-for folder in "$inventory_dir/host_vars" "$lab_dir/playbooks/host_vars"; do
+for folder in "$inventory_dir/host_vars" "$lab_dir/playbooks/host_vars" "$lab_dir"/playbooks/*/host_vars; do
   for kept in "$folder/$name" "$folder/$name.yml" "$folder/$name.yaml" "$folder/$name.json"; do
     [[ ! -e $kept ]] || kept_vars+=("$kept")
   done

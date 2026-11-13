@@ -9,7 +9,7 @@ publishing its inventory, Vault files or history you did not mean to share,
 and switch templates to it one at a time.
 
 This applies to a controller made by either [installer](../stage-1-controller.md),
-whose **Local lab folder** repository is `/opt/ansible-lab`. The
+whose **Local playbooks** repository is `/opt/ansible-lab`. The
 [Git chapter](../07-git-and-vscode.md) explains the difference between edited,
 committed, pushed and executed code; read it first.
 
@@ -17,7 +17,7 @@ committed, pushed and executed code; read it first.
 
 **Where: the controller, as the lab folder's owner.**
 
-Semaphore reads the **Local lab folder** straight from its working tree,
+Semaphore reads the **Local playbooks** straight from its working tree,
 uncommitted edits included. A template switched to a remote repository runs
 only what you committed and pushed, so review and commit before you switch.
 
@@ -97,7 +97,7 @@ in **Password**. Avoid an SSH URL with an SSH key: Semaphore 2.19.12 clones
 over SSH with host-key checking turned off (`StrictHostKeyChecking=no`,
 `UserKnownHostsFile=/dev/null`), so it would not verify the Git host. Switch
 one template at a time. The inventory, keys and variable groups stay as they
-are: **Lab inventory file** stays bound to the **Local lab folder**
+are: **Inventory file** stays bound to the **Local playbooks**
 repository, so Semaphore keeps reading `/opt/ansible-lab/inventories/lab.ini`
 and its `host_vars` on the controller. Keep that folder and repository object,
 and keep adding targets there.

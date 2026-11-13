@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Seed a fresh Semaphore controller with the guide's practice project, or update one.
+"""Seed a fresh Semaphore controller with the guide's project, or update one.
 
 Runs on the controller as root. Without --update, the installer runs it once: it
 logs in with the locally generated admin password, creates one project and its
@@ -30,13 +30,17 @@ import urllib.parse
 import urllib.request
 
 API = "http://127.0.0.1:3000/api"
-MARKER = Path("/etc/semaphore/.practice-project-seeded")
+MARKER = Path("/etc/semaphore/.guide-project-seeded")
+# The marker's name in releases before v1.12.0. An update renames the file.
+FORMER_MARKERS = (Path("/etc/semaphore/.practice-project-seeded"),)
 PASSWORD_FILE = Path("/etc/semaphore/initial-admin-password")
 # Root-only template backups and records of unconfirmed edits, kept by updates.
 BACKUP_DIR = Path("/root/ansible-lab-update")
 # Semaphore's project permission to change templates, tabs and variable groups
 # (CanManageProjectResources): owners and managers have it; administrators need none.
 CAN_MANAGE_PROJECT_RESOURCES = 4
+# The permission to change the project itself, its name included; a manager lacks it.
+CAN_UPDATE_PROJECT = 2
 
 RECOVERY_PROMPT = [{
     "name": "recovery_snapshot_ack",
@@ -47,7 +51,7 @@ RECOVERY_PROMPT = [{
     "values": [{"name": "SNAPSHOT READY - apply the vendor STIG fixes to this target", "value": "SNAPSHOT READY"}],
 }]
 
-# playbooks/reboot.yml reboots only with this answer; check mode needs none.
+# playbooks/operations/reboot.yml reboots only with this answer; check mode needs none.
 REBOOT_PROMPT = [{
     "name": "reboot_target_ack",
     "title": "Reboot the target in Limit now",
@@ -56,6 +60,46 @@ REBOOT_PROMPT = [{
     "required": True,
     "values": [{"name": "REBOOT NOW - restart this one target", "value": "REBOOT NOW"}],
 }]
+
+# What the guide calls the things it seeds. Releases before v1.12.0 gave them the
+# names listed in FORMER_NAMES. An update gives an object that still has an earlier
+# name its name of today, and leaves an object you renamed yourself as it is.
+PROJECT_NAME = "Ansible Automation"
+REPOSITORY_NAME = "Local playbooks"
+INVENTORY_NAME = "Inventory file"
+SSH_KEY_NAME = "Target SSH key"
+SUDO_KEY_NAME = "Target sudo password"
+DEFAULTS = "Defaults"
+ADMIN_LOGIN = "admin"
+ADMIN_NAME = "Ansible Admin"
+BASELINE_TAB = "Baseline"
+EXAMPLES_TAB = "Examples"
+FORMER_NAMES = {
+    PROJECT_NAME: ("Ansible Practice",),
+    REPOSITORY_NAME: ("Local lab folder",),
+    INVENTORY_NAME: ("Lab inventory file",),
+    SSH_KEY_NAME: ("Practice target SSH",),
+    SUDO_KEY_NAME: ("Lab sudo",),
+    DEFAULTS: ("Practice defaults",),
+    ADMIN_NAME: ("Lab Administrator",),
+    BASELINE_TAB: ("Lessons",),
+}
+
+# Release v1.12.0 moved each playbook into the folder of its feature. For one release
+# a thin playbook at the earlier path imports the moved one, so a template or command
+# that names the earlier path keeps working; an update points the seeded templates
+# at the new paths.
+MOVED_PLAYBOOKS = {
+    "playbooks/ping.yml": "playbooks/baseline/ping.yml",
+    "playbooks/baseline.yml": "playbooks/baseline/baseline.yml",
+    "playbooks/users.yml": "playbooks/examples/users.yml",
+    "playbooks/webserver.yml": "playbooks/examples/webserver.yml",
+    "playbooks/patch.yml": "playbooks/patching/patch.yml",
+    "playbooks/report.yml": "playbooks/operations/report.yml",
+    "playbooks/reboot.yml": "playbooks/operations/reboot.yml",
+    "playbooks/stig-audit.yml": "playbooks/stig/audit.yml",
+    "playbooks/stig-apply.yml": "playbooks/stig/apply.yml",
+}
 
 # Ansible options for each template. The playbooks' preflight requires an explicit
 # limit; this release passes the template's Limit option to ansible-playbook as --limit.
@@ -90,8 +134,8 @@ def disa_group(label):
 def stig_lessons(label, folder, group, disa_file):
     audit, apply = f"playbooks/stig/{folder}/audit.yml", f"playbooks/stig/{folder}/apply.yml"
     lessons = [
-        (f"{label} · STIG audit", audit, [], "Practice defaults", [], {"limit": [group]}),
-        (f"{label} · STIG apply (approval required)", apply, [], "Practice defaults",
+        (f"{label} · STIG audit", audit, [], DEFAULTS, [], {"limit": [group]}),
+        (f"{label} · STIG apply (approval required)", apply, [], DEFAULTS,
          RECOVERY_PROMPT, ONE_TARGET_PER_RUN),
         (f"{label} · STIG apply, allow required reboot", apply, [], "Allow required reboot",
          RECOVERY_PROMPT, ONE_TARGET_PER_RUN),
@@ -104,22 +148,22 @@ def stig_lessons(label, folder, group, disa_file):
 
 LESSONS = [
     # name, playbook, extra arguments, variable group, run prompt, Ansible options
-    ("Ping", "playbooks/ping.yml", [], "Practice defaults", [], ALL_LAB_TARGETS),
-    ("Baseline preview", "playbooks/baseline.yml", ["--check", "--diff"], "Practice defaults", [], ALL_LAB_TARGETS),
-    ("Baseline apply", "playbooks/baseline.yml", ["--diff"], "Practice defaults", [], ALL_LAB_TARGETS),
-    ("Users", "playbooks/users.yml", [], "Practice defaults", [], ALL_LAB_TARGETS),
-    ("Webserver", "playbooks/webserver.yml", [], "Practice defaults", [], ALL_LAB_TARGETS),
-    ("Patch preview", "playbooks/patch.yml", ["--check", "--diff"], "Practice defaults", [], ALL_LAB_TARGETS),
-    ("Patch, no reboot", "playbooks/patch.yml", [], "Practice defaults", [], ALL_LAB_TARGETS),
-    ("Patch, allow required reboot", "playbooks/patch.yml", [], "Allow required reboot", [], ALL_LAB_TARGETS),
+    ("Ping", "playbooks/baseline/ping.yml", [], DEFAULTS, [], ALL_LAB_TARGETS),
+    ("Baseline preview", "playbooks/baseline/baseline.yml", ["--check", "--diff"], DEFAULTS, [], ALL_LAB_TARGETS),
+    ("Baseline apply", "playbooks/baseline/baseline.yml", ["--diff"], DEFAULTS, [], ALL_LAB_TARGETS),
+    ("Users", "playbooks/examples/users.yml", [], DEFAULTS, [], ALL_LAB_TARGETS),
+    ("Webserver", "playbooks/examples/webserver.yml", [], DEFAULTS, [], ALL_LAB_TARGETS),
+    ("Patch preview", "playbooks/patching/patch.yml", ["--check", "--diff"], DEFAULTS, [], ALL_LAB_TARGETS),
+    ("Patch, no reboot", "playbooks/patching/patch.yml", [], DEFAULTS, [], ALL_LAB_TARGETS),
+    ("Patch, allow required reboot", "playbooks/patching/patch.yml", [], "Allow required reboot", [], ALL_LAB_TARGETS),
 ] + [lesson for system in STIG_SYSTEMS for lesson in stig_lessons(*system)] + [
     # Day-to-day jobs. The health report reads without sudo, so it works right after Ping.
-    ("Health report", "playbooks/report.yml", [], "Practice defaults", [], ALL_LAB_TARGETS),
-    ("Reboot one target", "playbooks/reboot.yml", [], "Practice defaults", REBOOT_PROMPT, ONE_TARGET_PER_RUN),
+    ("Health report", "playbooks/operations/report.yml", [], DEFAULTS, [], ALL_LAB_TARGETS),
+    ("Reboot one target", "playbooks/operations/reboot.yml", [], DEFAULTS, REBOOT_PROMPT, ONE_TARGET_PER_RUN),
 ]
 
 VARIABLE_GROUPS = {
-    "Practice defaults": {},
+    DEFAULTS: {},
     "Allow required reboot": {"allow_reboot": True},
     # Copy DISA's benchmark into this folder of the lab folder; the playbook stops
     # with an explanation while the folder holds none, or more than one.
@@ -128,17 +172,21 @@ VARIABLE_GROUPS = {
 }
 
 
-# Template tabs, which Semaphore calls views. Every seeded template belongs to one.
-# An update adds a missing tab after the last existing one and never moves a tab,
-# so a tab a release adds comes last here too: fresh and updated controllers then
-# show the same order.
+# Template tabs, which Semaphore calls views, one per feature. Every seeded template
+# belongs to one. An update adds a missing tab after the last existing one and never
+# moves a tab, so a tab a release adds comes last here too: fresh and updated
+# controllers then show the same order.
 VIEWS = [
-    ("Lessons", ["Ping", "Baseline preview", "Baseline apply", "Users", "Webserver"]),
+    (BASELINE_TAB, ["Ping", "Baseline preview", "Baseline apply"]),
     ("Patching", ["Patch preview", "Patch, no reboot", "Patch, allow required reboot"]),
 ] + [(stig_tab(system[0]), [lesson[0] for lesson in stig_lessons(*system)]) for system in STIG_SYSTEMS] + [
     ("Operations", ["Health report", "Reboot one target"]),
+    (EXAMPLES_TAB, ["Users", "Webserver"]),
 ]
 VIEW_OF = {name: title for title, names in VIEWS for name in names}
+# The tab that releases before v1.12.0 put these templates on. An update moves one that
+# is still there to its tab of today, and leaves one you moved elsewhere where it is.
+FORMER_TAB_OF = {"Users": BASELINE_TAB, "Webserver": BASELINE_TAB}
 
 # What releases before 1.7.0 seeded and the per-system STIG tabs replace, with the
 # name that each system's replacement has after "<system> · ". Updates report
@@ -156,6 +204,11 @@ REPLACED_VIEWS = ["STIG"]
 # one you filled in keeps your values until you delete it yourself.
 REPLACED_ENVIRONMENTS = {"Local SCAP content": {"stig_content_file": "content/REPLACE_WITH_BENCHMARK.xml",
                                                 "stig_content_profile": "REPLACE_WITH_PROFILE_ID"}}
+
+
+def seeded_marker():
+    """The file that marks a seeded controller, under its name of today or an earlier one."""
+    return next((path for path in (MARKER, *FORMER_MARKERS) if path.exists()), None)
 
 
 def lab_dir_path(value):
@@ -195,17 +248,19 @@ def template_payload(project_id, ids, lesson, vaults=()):
 
 
 def repository_payload(project_id, ids, lab_dir):
-    return {"project_id": project_id, "name": "Local lab folder", "git_url": lab_dir,
+    return {"project_id": project_id, "name": REPOSITORY_NAME, "git_url": lab_dir,
             "git_branch": "main", "ssh_key_id": ids["none_key"]}
 
 
 def inventory_payload(project_id, ids):
-    return {"project_id": project_id, "name": "Lab inventory file", "type": "file",
+    return {"project_id": project_id, "name": INVENTORY_NAME, "type": "file",
             "inventory": "inventories/lab.ini", "repository_id": ids["repository"],
             "ssh_key_id": ids["ssh_key"]}
 
 
-def view_payloads(project_id, first_position=0):
+def view_payloads(project_id, first_position=1):
+    # Semaphore's own All tab has position 0. A seeded tab there would share its place,
+    # and which of the two comes first would then depend on which was saved last.
     return {title: {"project_id": project_id, "title": title, "position": first_position + index}
             for index, (title, _names) in enumerate(VIEWS)}
 
@@ -218,7 +273,7 @@ def environment_payloads(project_id):
 def seed_plan(project_id, ids, lab_dir, ssh_login):
     """Pure description of every object to create, in dependency order."""
     return {
-        "key": {"project_id": project_id, "name": "Practice target SSH", "type": "ssh",
+        "key": {"project_id": project_id, "name": SSH_KEY_NAME, "type": "ssh",
                 "ssh": {"login": ssh_login, "passphrase": "", "private_key": "<read from key file>"}},
         "repository": repository_payload(project_id, ids, lab_dir),
         "inventory": inventory_payload(project_id, ids),
@@ -239,6 +294,15 @@ def update_plan(existing, repository_id, inventory_id):
     that a seeded template without a tab is put on its tab. Duplicate names that
     the update would have to choose between are reported and stop an apply.
 
+    Release v1.12.0 gave the seeded objects the names of their features, a tab
+    per feature and a folder per feature. "renames" lists the objects that still
+    have an earlier release's name, "taken" a new name that something else has,
+    "moves" the seeded templates still on their earlier tab, "repoint" the
+    seeded templates that still name a playbook's earlier path, and
+    "earlier_paths" templates of yours that do, which are only reported.
+    existing may also hold "project", "projects", "repository", "inventory",
+    "keys" and "users" for the renames; what is missing is not renamed.
+
     Seeded objects this release replaces are listed under "replaced": the old
     templates, and the old tab and variable group when nothing else uses them.
     A replaced template that a schedule or integration runs, or whose schedules
@@ -246,18 +310,46 @@ def update_plan(existing, repository_id, inventory_id):
     kept. A replaced variable group you filled in is listed under "edited"
     instead, and kept. Only remove_replaced() deletes anything.
     """
-    env_names = [env["name"] for env in existing["environments"]]
-    view_titles = [view["title"] for view in existing["views"]]
+    renames, taken, several, notes = planned_renames(existing)
+    # Everything below reads the names as they are once the renames are done.
+    new_name = {(rename["what"], rename["id"]): rename["to"] for rename in renames}
+    env_names = [new_name.get(("variable group", env.get("id")), env["name"]) for env in existing["environments"]]
+    view_titles = [new_name.get(("tab", view.get("id")), view["title"]) for view in existing["views"]]
+    title_of = {view.get("id"): title for view, title in zip(existing["views"], view_titles)}
+    # Releases before v1.12.0 put their first tab at Semaphore's own All tab's position.
+    # While two tabs share a position, the one saved last comes first: renaming a tab
+    # would move it in front of All. So every other tab moves one place up, once.
+    # A tab before All keeps its place.
+    all_tab = {view.get("position") or 0 for view in existing["views"] if view.get("type") == "all"}
+    tied = any((view.get("position") or 0) in all_tab for view in existing["views"] if view.get("type") != "all")
+    positions = [{"id": view.get("id"), "title": title_of[view.get("id")], "from": view.get("position") or 0,
+                  "to": (view.get("position") or 0) + 1}
+                 for view in existing["views"]
+                 if view.get("type") != "all" and (view.get("position") or 0) >= min(all_tab)] if tied else []
     seeded = lab_templates(existing["templates"], VIEW_OF, repository_id, inventory_id)
     seeded_names = [t["name"] for t in seeded]
     duplicated = sorted({name for name in seeded_names if seeded_names.count(name) > 1})
     missing_templates = [lesson[0] for lesson in LESSONS if lesson[0] not in seeded_names]
     tabs = [{"id": t["id"], "name": t["name"]} for t in seeded
             if not t.get("view_id") and t["name"] not in duplicated]
-    needed_views = {VIEW_OF[name] for name in missing_templates} | {VIEW_OF[t["name"]] for t in tabs}
+    # A template moves only with the update that brings the names of today: while its tab
+    # still has the earlier title, or while that update was begun and not finished. Later,
+    # a template on Baseline is there because you put it there.
+    earlier_title = {view.get("id") for view in existing["views"]
+                     if view["title"] in FORMER_NAMES.get(title_of[view.get("id")], ())}
+    moves = [{"id": t["id"], "name": t["name"], "view_id": t["view_id"], "to": VIEW_OF[t["name"]]} for t in seeded
+             if t.get("view_id") and t["name"] not in duplicated and t["name"] in FORMER_TAB_OF
+             and title_of.get(t["view_id"]) == FORMER_TAB_OF[t["name"]] != VIEW_OF[t["name"]]
+             and (t["view_id"] in earlier_title or existing.get("unfinished"))]
+    needed_views = ({VIEW_OF[name] for name in missing_templates} | {VIEW_OF[t["name"]] for t in tabs}
+                    | {move["to"] for move in moves})
+    earlier = [t for t in existing["templates"]
+               if t.get("repository_id") == repository_id and t.get("playbook") in MOVED_PLAYBOOKS]
+    guide_names = set(VIEW_OF) | set(REPLACED_TEMPLATES)
+    repoint = [t for t in earlier if t["name"] in guide_names and t.get("inventory_id") == inventory_id]
     needed_envs = {lesson[3] for lesson in LESSONS if lesson[0] in missing_templates}
-    ambiguous = sorted([f"variable group {name!r}" for name in needed_envs if env_names.count(name) > 1]
-                       + [f"tab {title!r}" for title in needed_views if view_titles.count(title) > 1])
+    ambiguous = sorted(set([f"variable group {name!r}" for name in needed_envs if env_names.count(name) > 1]
+                           + [f"tab {title!r}" for title in needed_views if view_titles.count(title) > 1] + several))
     triggers = existing.get("triggers", {})
     candidates = lab_templates(existing["templates"], REPLACED_TEMPLATES, repository_id, inventory_id)
     in_use = [t for t in candidates if triggered(triggers.get(t["id"]))]
@@ -270,6 +362,18 @@ def update_plan(existing, repository_id, inventory_id):
         "tabs": sorted(tabs, key=lambda t: (t["name"], t["id"])),
         "duplicates": duplicated,
         "ambiguous": ambiguous,
+        "renames": renames,
+        "taken": taken,
+        "notes": notes,
+        # Highest first, so that no two of them share a place on the way.
+        "positions": sorted(positions, key=lambda item: -item["from"]),
+        "moves": sorted(moves, key=lambda t: (t["name"], t["id"])),
+        "repoint": sorted(({"id": t["id"], "name": t["name"], "from": t["playbook"],
+                            "to": MOVED_PLAYBOOKS[t["playbook"]]} for t in repoint),
+                          key=lambda t: (t["name"], t["id"])),
+        "earlier_paths": sorted(({"id": t["id"], "name": t["name"], "playbook": t["playbook"],
+                                  "moved_to": MOVED_PLAYBOOKS[t["playbook"]]} for t in earlier if t not in repoint),
+                                key=lambda t: (t["name"], t["id"])),
         "replaced": {
             "templates": sorted(({"id": t["id"], "name": t["name"]} for t in replaced),
                                 key=lambda t: (t["name"], t["id"])),
@@ -283,6 +387,59 @@ def update_plan(existing, repository_id, inventory_id):
                           for t in in_use), key=lambda t: (t["name"], t["id"])),
         "edited": [e["name"] for e in existing["environments"] if e["name"] in REPLACED_ENVIRONMENTS and edited(e)],
     }
+
+
+def planned_renames(existing):
+    """(renames, taken, several, notes) for the seeded objects that still have an earlier release's name.
+
+    A project, repository, inventory, key, variable group, tab or administrator is
+    renamed only while its name is one that an earlier release gave it. The keys
+    are the ones the inventory uses to log in and for sudo, and the administrator
+    is the login the installer created. Where something else already has the new
+    name, nothing is renamed and the pair is listed under taken. A variable group
+    or tab whose earlier name two objects share is listed under several. notes
+    says what this login may not rename.
+    """
+    renames, taken, several, notes = [], [], [], []
+
+    def consider(what, item, new, field="name", others=()):
+        if not item or item.get(field) not in FORMER_NAMES[new]:
+            return
+        if any(other.get(field) == new for other in others if other.get("id") != item.get("id")):
+            taken.append(f"{what} {new!r}, the new name of the seeded {item[field]!r}")
+            return
+        renames.append({"what": what, "id": item.get("id"), "from": item[field], "to": new})
+
+    def consider_named(what, items, new, field="name"):
+        # Found by name alone: with two of that name, which one the installer made cannot be told.
+        named = [item for item in items if item.get(field) in FORMER_NAMES[new]]
+        if len(named) > 1:
+            several.append(f"{what} {named[0][field]!r}")
+        elif named:
+            consider(what, named[0], new, field, items)
+
+    project = existing.get("project")
+    if project and project.get("name") in FORMER_NAMES[PROJECT_NAME] and existing.get("may_rename_project") is False:
+        notes.append(f"The project keeps its name {project['name']!r}: this login may not rename a project. An "
+                     "administrator or the project's owner can, with this update or under the project's settings.")
+    else:
+        consider("project", project, PROJECT_NAME, others=existing.get("projects") or [])
+    consider("repository", existing.get("repository"), REPOSITORY_NAME, others=existing.get("repositories") or [])
+    inventory = existing.get("inventory") or {}
+    consider("inventory", inventory, INVENTORY_NAME, others=existing.get("inventories") or [])
+    keys = existing.get("keys") or []
+    by_id = {key.get("id"): key for key in keys}
+    consider("key", by_id.get(inventory.get("ssh_key_id")), SSH_KEY_NAME, others=keys)
+    consider("key", by_id.get(inventory.get("become_key_id")), SUDO_KEY_NAME, others=keys)
+    consider_named("variable group", existing.get("environments") or [], DEFAULTS)
+    consider_named("tab", existing.get("views") or [], BASELINE_TAB, field="title")
+    if existing.get("users") is None and "may_rename_project" in existing:
+        notes.append("The administrator's name was not looked at: only a Semaphore administrator may list the users. "
+                     f"One named {FORMER_NAMES[ADMIN_NAME][0]!r} can be renamed under Users.")
+    for user in existing.get("users") or []:
+        if user.get("username") == ADMIN_LOGIN:
+            consider("administrator", user, ADMIN_NAME)
+    return renames, taken, several, notes
 
 
 def lab_templates(templates, names, repository_id, inventory_id):
@@ -536,6 +693,9 @@ def resolve(client, project_name, lab_dir, project_id=None, user=None):
     projects = client.call("GET", "/projects") or []
     matches = ([p for p in projects if p["id"] == project_id] if project_id
                else [p for p in projects if p.get("name") == project_name])
+    if not matches and not project_id and project_name == PROJECT_NAME:
+        # A controller seeded by an earlier release still has that release's name for it.
+        matches = [p for p in projects if p.get("name") in FORMER_NAMES[PROJECT_NAME]]
     if matches:
         hint = "Pass --project-id with the ID of the seeded one."
     elif (user or {}).get("admin"):
@@ -566,11 +726,36 @@ def resolve(client, project_name, lab_dir, project_id=None, user=None):
         "views": client.call("GET", f"{base}/views") or [],
         "templates": templates,
         "triggers": triggers_of(client, base, [t["id"] for t in replaced]),
+        "projects": projects,
     }
 
 
+def read_for_renames(client, found, user):
+    """What resolve() found, with what an update also reads to plan its renames.
+
+    These are the project's keys, repositories and inventories and, for a login
+    that is a Semaphore administrator, the users: only such a login may list
+    them, and another one renames no administrator. It also says whether this
+    login may rename the project, and whether an update to the names of today
+    was begun and not finished.
+    """
+    admin, base = bool((user or {}).get("admin")), found["base"]
+    role = {} if admin else client.call("GET", f"{base}/role") or {}
+    return dict(found, keys=client.call("GET", f"{base}/keys") or [],
+                repositories=client.call("GET", f"{base}/repositories") or [],
+                inventories=client.call("GET", f"{base}/inventory") or [],
+                users=(client.call("GET", "/users") or []) if admin else None,
+                may_rename_project=admin or bool((role.get("permissions") or 0) & CAN_UPDATE_PROJECT),
+                # The marker file gets its name of today when an update is through.
+                unfinished=seeded_marker() not in (None, MARKER))
+
+
+PLAN_INPUT = ("environments", "views", "templates", "triggers", "project", "projects", "repository", "repositories",
+              "inventory", "inventories", "keys", "users", "may_rename_project", "unfinished")
+
+
 def plan_for(found):
-    return update_plan({key: found[key] for key in ("environments", "views", "templates", "triggers")},
+    return update_plan({key: found[key] for key in PLAN_INPUT if key in found},
                        found["repository"]["id"], found["inventory"]["id"])
 
 
@@ -766,15 +951,122 @@ def remove_replaced(client, found, plan, backup_dir, say=print):
     return backup, removed
 
 
-def apply_update(client, found, plan, backup_dir, say=print):
-    """Add what the plan lists. Returns the path of the template backup, if one was taken.
+# Where each kind of object is read and saved, below the project's own path, and what
+# besides its name has to be the same after a rename.
+RENAMED = {
+    "project": ("", "name", ("alert", "max_parallel_tasks")),
+    "repository": ("/repositories/{id}", "name", ("git_url", "git_branch", "ssh_key_id")),
+    "inventory": ("/inventory/{id}", "name", ("type", "inventory", "repository_id", "ssh_key_id", "become_key_id")),
+    "key": ("/keys/{id}", "name", ("type",)),
+    "variable group": ("/environment/{id}", "name", ("json", "env")),
+    "tab": ("/views/{id}", "title", ("position",)),
+    "administrator": ("/users/{id}", "name", ("username", "email", "admin")),
+}
 
-    It removes nothing; remove_replaced() does that, once the lab folder holds
-    the playbooks the new templates run.
+
+def rename_path(base, rename):
+    path = RENAMED[rename["what"]][0].format(id=rename["id"])
+    return path if rename["what"] == "administrator" else base + path
+
+
+def rename_body(what, current, new):
+    """What to save so that one object gets its new name and nothing else changes."""
+    if what == "key":
+        # Without override_secret Semaphore keeps the secret it holds.
+        return dict(current, name=new, override_secret=False)
+    if what == "variable group":
+        # A group's secrets are saved as a list of changes; this makes none.
+        return dict(current, name=new, secrets=[])
+    return dict(current, **{RENAMED[what][1]: new})
+
+
+def secret_names(item):
+    return sorted(str(secret.get("name")) for secret in item.get("secrets") or [])
+
+
+def apply_renames(client, found, plan, backup_dir, say=print):
+    """Give the seeded objects that still have an earlier release's name their name of today.
+
+    Each object is read again first and renamed only while it has the name the
+    plan saw. What it was is saved, root-only, before the first change, and after
+    each one the object is read back: a rename that changed anything else stops
+    the update there. Returns the path of that record, if one was written.
+    """
+    renames = plan.get("renames") or []
+    if not renames:
+        return None
+    base = found["base"]
+    before = [{"what": rename["what"], "object": client.call("GET", rename_path(base, rename))} for rename in renames]
+    backup = take_backup(client, base, found, backup_dir, "semaphore-before-renames", {"renamed": before})
+    say(f"The renamed objects and every template as they were before: {backup}")
+    for rename in renames:
+        what, path = rename["what"], rename_path(base, rename)
+        field, kept = RENAMED[what][1:]
+        current = client.call("GET", path)
+        if current.get(field) != rename["from"]:
+            say(f"Kept the {what} {current.get(field)!r}: its name changed since the plan")
+            continue
+        client.call("PUT", path, rename_body(what, current, rename["to"]))
+        after = client.call("GET", path)
+        same = (all(after.get(key) == current.get(key) for key in kept)
+                and secret_names(after) == secret_names(current))
+        if after.get(field) != rename["to"] or not same:
+            raise SystemExit(f"Semaphore did not rename the {what} {rename['from']!r} to {rename['to']!r} and leave "
+                             f"the rest as it was; compare it in the UI with {backup}. Stopped there; run the "
+                             "update again once the cause is fixed.")
+        say(f"Renamed the {what} {rename['from']!r} to {rename['to']!r}")
+    return backup
+
+
+def repoint_templates(client, found, plan, backup_dir, say=print, lab_dir=None):
+    """Point the seeded templates at the playbooks' new paths. Returns the names of those it changed.
+
+    Call it once the lab folder holds the playbooks at their new paths: until
+    then the earlier paths are the ones that exist. With lab_dir, a template is
+    left on its earlier path while the folder lacks the new one. A template
+    whose playbook you changed meanwhile is left alone.
+    """
+    todo, done = plan.get("repoint") or [], []
+    if not todo:
+        return done
+    base = found["base"]
+    backup = take_backup(client, base, found, backup_dir, "semaphore-templates")
+    say(f"Templates as they were before their playbook paths changed: {backup}")
+    for item in todo:
+        if lab_dir is not None and not (Path(lab_dir) / item["to"]).is_file():
+            say(f"Left {item['name']!r} on {item['from']}: the lab folder has no {item['to']} yet. Update its "
+                "files with controller/update-controller.sh, which then changes the path.")
+            continue
+        path = f"{base}/templates/{item['id']}"
+        before = client.call("GET", path)
+        if before.get("playbook") != item["from"]:
+            say(f"Kept the playbook you gave {item['name']!r} meanwhile")
+            continue
+        save_verified(client, path, before, dict(before, playbook=item["to"]), backup_dir)
+        done.append(item["name"])
+    return done
+
+
+def rename_marker():
+    """Give the marker file of a controller seeded by an earlier release its name of today."""
+    current = seeded_marker()
+    if current is not None and current != MARKER:
+        current.rename(MARKER)
+
+
+def apply_update(client, found, plan, backup_dir, say=print):
+    """Rename and add what the plan lists. Returns the path of the template backup, if one was taken.
+
+    It removes nothing and changes no playbook path; remove_replaced() and
+    repoint_templates() do that, once the lab folder holds the playbooks the
+    templates of this release run.
     """
     if plan["ambiguous"]:
         raise SystemExit("Several objects share a name the update needs: " + "; ".join(plan["ambiguous"])
                          + ". Rename or remove the extra ones, then run again. Nothing was changed.")
+    if plan.get("taken"):
+        raise SystemExit("A name this release gives a seeded object is in use: " + "; ".join(plan["taken"])
+                         + ". Rename or remove yours, then run again. Nothing was changed.")
     pending = pending_edits(backup_dir)
     if pending:
         raise SystemExit("An earlier update could not confirm its edit of " + ", ".join(
@@ -785,20 +1077,33 @@ def apply_update(client, found, plan, backup_dir, say=print):
     vaults, note = seeded_vaults(client, base, found) if plan["templates"] else ([], None)
     if note:
         say(note)
+    environments, views = found["environments"], found["views"]
+    renamed = apply_renames(client, found, plan, backup_dir, say)
+    for item in plan.get("positions") or []:
+        path = f"{base}/views/{item['id']}"
+        current = client.call("GET", path)
+        if (current.get("position") or 0) != item["from"]:
+            say(f"Kept the place you gave the tab {current.get('title')!r} meanwhile")
+            continue
+        client.call("PUT", path, dict(current, position=item["to"]))
+    if renamed or plan.get("positions"):
+        # The lists below are keyed by name and place, so read them as they are now.
+        environments = client.call("GET", f"{base}/environment") or []
+        views = client.call("GET", f"{base}/views") or []
     backup = None
-    if plan["tabs"]:
+    if plan["tabs"] or plan.get("moves"):
         # Semaphore rewrites a template's variable-group links when it saves one; keep
         # every template as it was, root-only, before changing any of them.
         backup = take_backup(client, base, found, backup_dir, "semaphore-templates")
         say(f"Templates as they were before: {backup}")
 
     ids = {"repository": found["repository"]["id"], "inventory": found["inventory"]["id"],
-           "environments": {env["name"]: env["id"] for env in found["environments"]},
-           "views": {view["title"]: view["id"] for view in found["views"]}}
+           "environments": {env["name"]: env["id"] for env in environments},
+           "views": {view["title"]: view["id"] for view in views}}
     for name in plan["environments"]:
         body = environment_payloads(project_id)[name]
         ids["environments"][name] = client.call("POST", f"{base}/environment", body)["id"]
-    position = first_free_position(found["views"])
+    position = first_free_position(views)
     for title in plan["views"]:
         body = {"project_id": project_id, "title": title, "position": position}
         ids["views"][title] = client.call("POST", f"{base}/views", body)["id"]
@@ -813,6 +1118,13 @@ def apply_update(client, found, plan, backup_dir, say=print):
             say(f"Kept the tab you gave {tab['name']!r} meanwhile")
             continue
         save_verified(client, path, before, dict(before, view_id=ids["views"][VIEW_OF[tab["name"]]]), backup_dir)
+    for move in plan.get("moves") or []:
+        path = f"{base}/templates/{move['id']}"
+        before = client.call("GET", path)
+        if before.get("view_id") != move["view_id"]:
+            say(f"Kept the tab you gave {move['name']!r} meanwhile")
+            continue
+        save_verified(client, path, before, dict(before, view_id=ids["views"][move["to"]]), backup_dir)
     return backup
 
 
@@ -820,6 +1132,7 @@ def update(client, args, user):
     """--update for seed-semaphore.py itself; update-controller.py calls the parts directly."""
     found = resolve(client, args.project_name, args.lab_dir, getattr(args, "project_id", None), user)
     check_access(client, user, found)
+    found = read_for_renames(client, found, user)
     plan = plan_for(found)
     result = {"project": {"name": found["project"]["name"], "id": found["project"]["id"]},
               "planned" if args.plan else "done": plan}
@@ -828,12 +1141,19 @@ def update(client, args, user):
         backup = apply_update(client, found, plan, BACKUP_DIR, say=notes.append)
         if backup:
             result["template_backup"] = str(backup)
+        if any(rename["what"] == "project" for rename in plan["renames"]):
+            result["project"]["name"] = client.call("GET", f"/project/{found['project']['id']}")["name"]
+        # This command does not write the lab folder's files, so only paths that exist are named.
+        repointed = repoint_templates(client, found, plan, BACKUP_DIR, say=notes.append, lab_dir=args.lab_dir)
+        if len(repointed) == len(plan["repoint"]):
+            rename_marker()
         if args.remove_replaced:
             removal_backup, removed = remove_replaced(client, found, plan, BACKUP_DIR, say=notes.append)
             result["removed"] = removed
             if removal_backup:
                 result["removal_backup"] = str(removal_backup)
-        result["notes"] = [note for note in notes if not note.startswith(("Templates", "Removed"))]
+        result["notes"] = plan["notes"] + [note for note in notes
+                                           if not note.startswith(("Templates", "Removed", "The renamed"))]
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
@@ -842,9 +1162,9 @@ def main():
     parser.add_argument("--lab-dir", type=lab_dir_path, required=True)
     parser.add_argument("--key-file", type=Path, help="private automation key, root-only (seeding only)")
     parser.add_argument("--known-hosts", type=Path, help="Semaphore's known_hosts file (seeding only)")
-    parser.add_argument("--project-name", default="Ansible Practice")
+    parser.add_argument("--project-name", default=PROJECT_NAME)
     parser.add_argument("--ssh-login", default="svc_ansible")
-    parser.add_argument("--admin-login", default="admin")
+    parser.add_argument("--admin-login", default=ADMIN_LOGIN)
     parser.add_argument("--update", action="store_true", help="add what this release seeds to a seeded project")
     parser.add_argument("--plan", action="store_true", help="with --update, only show what would change")
     parser.add_argument("--project-id", type=int, help="with --update, the seeded project's ID when names repeat")
@@ -855,7 +1175,7 @@ def main():
     args = parser.parse_args()
 
     if args.update:
-        if not MARKER.exists():
+        if seeded_marker() is None:
             raise SystemExit("This controller was not seeded by the installer; there is no project to update")
         client = Client(API, os.environ.get("SEMAPHORE_API_TOKEN") or None)
         wait_ready(client)
@@ -867,8 +1187,8 @@ def main():
     if args.key_file is None or args.known_hosts is None:
         raise SystemExit("Seeding needs --key-file and --known-hosts")
 
-    if MARKER.exists():
-        raise SystemExit("Practice project already seeded; manage further changes in the UI")
+    if seeded_marker() is not None:
+        raise SystemExit("The guide's project is already seeded; manage further changes in the UI")
     for required in (args.key_file, args.known_hosts, Path(args.lab_dir) / "inventories" / "lab.ini"):
         if not required.is_file():
             raise SystemExit(f"Missing required file: {required}")
@@ -897,7 +1217,7 @@ def main():
     ids = {"none_key": none_keys[0]}
 
     ids["ssh_key"] = client.call("POST", f"/project/{project_id}/keys", {
-        "project_id": project_id, "name": "Practice target SSH", "type": "ssh",
+        "project_id": project_id, "name": SSH_KEY_NAME, "type": "ssh",
         "ssh": {"login": args.ssh_login, "passphrase": "", "private_key": private_key},
     })["id"]
     ids["repository"] = client.call("POST", f"/project/{project_id}/repositories",
@@ -917,8 +1237,8 @@ def main():
     MARKER.touch(mode=0o600, exist_ok=False)
     print(json.dumps({
         "project": {"name": args.project_name, "id": project_id},
-        "repository": {"name": "Local lab folder", "path": args.lab_dir},
-        "inventory": {"name": "Lab inventory file", "file": str(Path(args.lab_dir) / "inventories" / "lab.ini")},
+        "repository": {"name": REPOSITORY_NAME, "path": args.lab_dir},
+        "inventory": {"name": INVENTORY_NAME, "file": str(Path(args.lab_dir) / "inventories" / "lab.ini")},
         "views": list(ids["views"]),
         "templates": templates,
     }, indent=2, ensure_ascii=False))

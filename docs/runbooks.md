@@ -28,7 +28,7 @@ Type the shared sudo password when the first command asks, and compare the
 host key with the machine's console before you answer SSH's question. The
 second command is needed once for the lab: skip it when Semaphore already holds
 that password. Then, in Semaphore, run **Ping** and **Baseline preview** on the
-**Lessons** tab, and **Health report** on the **Operations** tab.
+**Baseline** tab, and **Health report** on the **Operations** tab.
 [Stage 2](stage-2-existing-machines.md#do-onboard-it-in-one-command-from-the-controller)
 explains every prompt. The command makes the controller's service key the
 account's only login; to log in as `svc_ansible` with your own key too, for
@@ -160,7 +160,7 @@ target the controller cannot log in to gets the new password at its console
 with `sudo passwd svc_ansible`. Save the new password in your password
 manager, and resume the schedules.
 
-**Check:** `lab-sudo.py` says `Stored the new password in the key 'Lab sudo'
+**Check:** `lab-sudo.py` says `Stored the new password in the key 'Target sudo password'
 (ID N), with an empty Username`; **Baseline preview** passes for every host.
 
 **Undo or next:** run both commands again with the old password. The details
@@ -212,10 +212,10 @@ pending reboot, [reboot one target](#reboot-one-target-safely), or
 In the Run dialog, type exactly one inventory host in **Limit**, such as
 `lab-alma`, and choose `REBOOT NOW - restart this one target`. Turn on **Dry
 Run** first for a preview: it reads the target, reports its boot ID, uptime
-and failed units, and reboots nothing. It needs **Lab sudo**. From the
+and failed units, and reboots nothing. It needs **Target sudo password**. From the
 terminal, set up as [chapter 5](05-cli-lessons.md#establish-the-command-line-environment)
 shows and with a key of your own authorized for `svc_ansible`, the same is
-`ansible-playbook playbooks/reboot.yml --limit lab-alma --private-key ~/.ssh/ansible_lab -K -e '{"reboot_confirm": true}'`.
+`ansible-playbook playbooks/operations/reboot.yml --limit lab-alma --private-key ~/.ssh/ansible_lab -K -e '{"reboot_confirm": true}'`.
 
 **Check:** the log ends with the target's boot ID before and now, which must
 say `changed`, its uptime, its system state, and its failed units now and
