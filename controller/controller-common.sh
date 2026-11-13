@@ -80,6 +80,33 @@ controller_require_fresh_state() {
   fi
 }
 
+# ssh reads the system's client configuration at every start. Where one of its files is
+# for root only, as usg leaves two after the Ubuntu STIG, ssh ends at once for every other
+# account, the service's among them: no job would reach a target, and the readiness check
+# in the middle of this installation would stop it there. So it stops here, before it
+# changes anything. An image without ssh gets it from this installer and is not checked.
+controller_check_ssh_client() {
+  command -v ssh >/dev/null 2>&1 || return 0
+  local error
+  if error=$(LC_ALL=C runuser -u nobody -- ssh -G 127.0.0.1 2>&1 >/dev/null); then return 0; fi
+  cat <<MESSAGE
+The ssh command does not start for an ordinary account on this machine:
+
+  ${error:-ssh -G 127.0.0.1 ended with an error and no message}
+
+Semaphore starts ssh for every job, so no job would reach a target, and this
+installation would stop halfway. Nothing was changed. Where the message names a
+file under /etc/ssh/ssh_config.d that cannot be opened, as on Ubuntu after
+"usg fix", make those files readable and run this installer again:
+
+  sudo chmod 0644 /etc/ssh/ssh_config.d/*.conf
+
+docs/11-troubleshooting.md, "Every job is unreachable on an Ubuntu machine
+hardened with usg", has the cause.
+MESSAGE
+  exit 1
+}
+
 # The four fapolicyd rules a controller of this guide needs, with this run's paths.
 # fapolicyd compares the path a symbolic link leads to, so the guide's folder is named
 # by that path; controller_validate_lab did the same for the lab folder.

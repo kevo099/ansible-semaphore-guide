@@ -422,6 +422,74 @@ echo CONTINUES
         self.assertIn('git -C "$lab_dir" init -q -b main --template=\n', COMMON.read_text())
 
 
+class SshClientPreflightTests(unittest.TestCase):
+    """Where ssh does not start for an ordinary account, as after usg on Ubuntu, the installer stops before it changes anything."""
+
+    DENIED = "Can't open user config file /etc/ssh/ssh_config.d/00-cipher-list.conf: Permission denied"
+
+    def check(self, error=None, status=0, ssh=True):
+        # runuser stands in for the start of ssh as the account nobody; its standard error is what ssh printed.
+        body = '''
+usage() { :; }
+ssh_error=$1; ssh_status=$2
+runuser() {
+  [[ "$*" == "-u nobody -- ssh -G 127.0.0.1" && "$LC_ALL" == C ]] || { echo "unexpected: LC_ALL=$LC_ALL runuser $*" >&2; return 9; }
+  echo "host 127.0.0.1"
+  [[ -z "$ssh_error" ]] || echo "$ssh_error" >&2
+  return "$ssh_status"
+}
+controller_check_ssh_client
+echo CONTINUES
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            # Only cat and, for a machine that has it, a stand-in ssh are on the PATH.
+            Path(directory, "cat").symlink_to(shutil.which("cat"))
+            if ssh:
+                Path(directory, "ssh").write_text("#!/bin/sh\nexit 0\n")
+                Path(directory, "ssh").chmod(0o755)
+            return subprocess.run(["/bin/bash", "-c", 'set -euo pipefail; source "$1"; shift; ' + body, "controller-test",
+                                   str(COMMON), error or "", str(status)],
+                                  capture_output=True, text=True, timeout=10, env={"PATH": directory})
+
+    def test_a_machine_where_ssh_starts_goes_on(self):
+        result = self.check()
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "CONTINUES\n", ""))
+
+    def test_a_client_configuration_for_root_only_is_refused_with_the_remedy(self):
+        result = self.check(self.DENIED + "\n/etc/ssh/ssh_config: terminating, 1 bad configuration options", status=255)
+        self.assertEqual((result.returncode, result.stderr), (1, ""), result.stdout)
+        self.assertNotIn("CONTINUES", result.stdout)
+        lines = result.stdout.splitlines()
+        self.assertIn("  " + self.DENIED, lines)
+        self.assertIn("  sudo chmod 0644 /etc/ssh/ssh_config.d/*.conf", lines)
+        self.assertIn("Nothing was changed.", result.stdout)
+        # What ssh printed on its standard output is not part of the message.
+        self.assertNotIn("host 127.0.0.1", result.stdout)
+
+    def test_a_failure_without_a_message_is_still_refused(self):
+        result = self.check(status=1)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("  ssh -G 127.0.0.1 ended with an error and no message", result.stdout.splitlines())
+
+    def test_an_image_without_ssh_is_not_checked(self):
+        result = self.check(self.DENIED, status=255, ssh=False)
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "CONTINUES\n", ""))
+
+    def test_both_installers_check_before_the_first_package(self):
+        for script, first_change in (("install-controller-el9.sh", "dnf -y install"), ("install-controller.sh", "apt-get")):
+            with self.subTest(script=script):
+                text = (COMMON.parent / script).read_text()
+                self.assertEqual(text.count("\ncontroller_check_ssh_client\n"), 1)
+                self.assertIn("\ncontroller_check_fapolicyd\ncontroller_check_ssh_client\n", text)
+                self.assertLess(text.index("\ncontroller_check_ssh_client\n"), text.index(first_change, text.index("\nPLAN\n")))
+
+    def test_the_readiness_check_asks_the_same_of_the_service_account(self):
+        # Mid-installation, and at every later check: the account that starts ssh for a job.
+        check = (COMMON.parent / "check-controller.py").read_text()
+        self.assertIn('checks["service_can_start_ssh"] = command_ok(["runuser", "-u", "semaphore", "--", "ssh", "-G", "127.0.0.1"])',
+                      check)
+
+
 class SharedDownloadTests(unittest.TestCase):
     def test_checksum_mismatch_deletes_download_before_extracting(self):
         # All commands that could touch /var/cache are replaced. The real

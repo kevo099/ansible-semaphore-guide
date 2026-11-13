@@ -74,7 +74,10 @@ run comes from, should that be in the inventory: the reboot would stop the run
 in the middle and leave the hosts after it unpatched. The controller is patched
 like any other host, and the report says `Reboot required and left alone`;
 restart it from its own terminal, with `sudo systemctl reboot`, when no task is
-running. For a deliberate forced reboot
+running. On an Ubuntu controller the run also keeps `needrestart` from
+restarting services after a library update, because Semaphore is one of them
+and its restart would end the run halfway; the report then asks for
+`sudo needrestart` from the controller's terminal, or a reboot. For a deliberate forced reboot
 exercise, write a separately named playbook, make the choice explicit, and
 include connection and application checks. Do not hide power actions in a
 connectivity or audit job.

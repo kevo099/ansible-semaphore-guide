@@ -369,7 +369,9 @@ packaged Ansible playbook applied on RHEL above.
   the reboot is left alone, because it would stop the run before the second
   scan; the last message says so. Restart the controller from its own
   terminal with `sudo systemctl reboot` when no task is running, then run the
-  audit. From the CLI
+  audit. On an Ubuntu controller the fixes also run without `needrestart`,
+  which would restart Semaphore after a library update and end the run
+  halfway; the restart of the controller covers those services. From the CLI
   the same gates are `--limit lab-alma` and `-e '{"stig_confirm": true}'`, plus
   `--ask-vault-pass` if you chose the Vault option for sudo passwords.
 - **STIG audit, DISA SCAP file** (RHEL 9 and Ubuntu 24.04) scans with DISA's
@@ -648,9 +650,11 @@ lists the profile IDs by platform.
 
 The controller holds the automation key and the sudo password of every
 target, so where the STIG applies, it applies to the controller first. This
-section was run on a RHEL 9.8 controller with the vendor's `stig` profile in
-November 2026 ([record](validation/2026-11-hardened-controller.md)). An Ubuntu
-controller was not hardened in that run.
+section was run on a RHEL 9.8 controller with the vendor's `stig` profile, also
+in FIPS mode, in November 2026
+([record](validation/2026-11-hardened-controller.md)). The orders, the table
+and the four rules below are for Enterprise Linux;
+[an Ubuntu controller](#an-ubuntu-controller) has its own short list.
 
 Both orders work:
 
@@ -679,6 +683,7 @@ What the STIG sets, and what it means for this guide:
 | `umask 077` for every login | A playbook you create in the lab folder is `-rw-------`, and its template fails with `Permission denied`. The guide's own tools set the modes of what they write. | Make the file readable by its group, or give the lab folder a default ACL once. |
 | A sudo password at every command, and no `NOPASSWD` rule | The guide's tools ask more often. | Nothing. |
 | The `FIPS:STIG` crypto policy | Ed25519 keys are refused; the guide's RSA keys work, as [above](#the-seeded-stig-templates). | Nothing. |
+| Nothing for FIPS mode itself: the fixes leave `sudo fips-mode-setup --enable` and the restart to you | With it on, Semaphore, PostgreSQL, the HTTPS proxy, jobs and the update tools kept working. `ssh-keygen` no longer reads an Ed25519 key, so the one-command onboarding leaves that host key out of its list and says so. | Nothing. |
 | A shell that closes after ten idle minutes, and a login banner | An idle terminal ends. | Nothing. |
 
 **Where: the controller, as its administrator.** The four `fapolicyd` rules
@@ -748,7 +753,52 @@ password and administrator name and FIPS mode in CAT I, which are yours to
 decide. A controller installed on a hardened machine failed one more,
 `RHEL-09-411035`: PostgreSQL's package gives its `postgres` account a login
 shell. Where the vendor's fixes followed the installation, that rule did not
-fail and the controller ran.
+fail and the controller ran. With FIPS mode enabled as well, the FIPS rule
+passed and two remained in CAT I, the boot loader's password and
+administrator name.
+
+**The browser.** On the hardened controller, with FIPS mode on as well and in
+both orders, Semaphore's UI was walked with Chromium through the tunnel of
+[Stage 1](stage-1-controller.md#do-open-semaphore) and, published with
+`--expose https`, by the controller's address: the sign-in, the eight tabs, a
+template started from its form, its live log, the inventory, key and
+repository pages, and the sign-out. `firewalld` kept the `https` service that
+the installer added, and the proxy answered TLS 1.2 and 1.3 only.
+
+### An Ubuntu controller
+
+An Ubuntu 24.04 controller was hardened with **Ubuntu 24.04 · STIG apply**,
+its own name in **Limit**, restarted, and walked in the browser the same way.
+Ubuntu's profile has no `fapolicyd`, so none of the four rules applies there,
+and a file you create in the lab folder stays readable for Semaphore. Three
+other things matter:
+
+- **`needrestart`.** After a package change that updates a library, Ubuntu
+  restarts the services that use it, and Semaphore, which runs the job, is one
+  of them. The first apply ended halfway that way. The **STIG apply** and
+  **Patch** playbooks now suspend `needrestart` where the target is the
+  controller the run comes from; the controller's restart, or
+  `sudo needrestart` from its terminal, covers the services afterwards.
+- **The SSH client's files.** `usg` works with `umask 077`, so its fix for the
+  SSH client's ciphers and MACs leaves `00-cipher-list.conf` and
+  `00-mac-list.conf` in `/etc/ssh/ssh_config.d` for root only. `ssh` then ends
+  with `Can't open user config file ...: Permission denied` for every other
+  account, and on a controller every job fails as unreachable. On its own
+  controller the apply playbook gives those files mode `0644` back in the same
+  command. On a machine you hardened with `sudo usg fix disa_stig` yourself,
+  and on a target whose accounts use `ssh`, do it by hand; the audit counted
+  no finding for it:
+
+  ```bash
+  sudo chmod 0644 /etc/ssh/ssh_config.d/*.conf
+  ```
+
+  On such a machine the installer stops before it changes anything and
+  prints that command, and on an installed controller the readiness check
+  reports `"service_can_start_ssh": false`.
+
+- **The login banner.** An interactive login asks `Do you agree? [y/N]` before
+  the shell. Jobs and the guide's own tools are not asked.
 
 ## Concept
 

@@ -122,6 +122,22 @@
       vars:
         stig_phase: before
 
+    # The boot ID is new at every start and differs between any two machines. The
+    # lookup reads it where Ansible runs, so the same value means this host is the
+    # controller the run comes from. Its reboot would stop the run before the second
+    # scan and leave the task without a result, so it is left for its own terminal.
+    # On Ubuntu a restart of its services would end the run as well; see below.
+    - name: Read the boot ID
+      ansible.builtin.slurp:
+        src: /proc/sys/kernel/random/boot_id
+      register: stig_boot_id
+
+    - name: Recognize the controller this run comes from
+      ansible.builtin.set_fact:
+        stig_is_controller: >-
+          {{ (stig_boot_id.content | b64decode | trim) ==
+             (lookup('ansible.builtin.file', '/proc/sys/kernel/random/boot_id') | trim) }}
+
     # oscap applies the vendor's own fixes from the data stream; 2 means some
     # rules still fail after remediation, which is normal for a first pass. The
     # scan before it chose the profile and copied any exceptions file to the target.
@@ -141,28 +157,28 @@
       when: ansible_facts['os_family'] == 'RedHat'
 
     # With a tailoring file, usg takes the profile from the file instead of a name.
+    # The fixes install packages. After a library update, Ubuntu's needrestart restarts
+    # the services that use it, Semaphore among them, which would end this run halfway
+    # on the controller it comes from. There the restarts wait for the reboot instead.
+    # usg works with umask 077, so its fix for the SSH client's ciphers and MACs leaves
+    # the files it writes in /etc/ssh/ssh_config.d for root only, and ssh then ends with
+    # "Can't open user config file" for every other account. On the controller that is
+    # the semaphore account: every job would fail from here on, the second scan of this
+    # run first. So there, in the same command, those files get their usual mode back.
     - name: Apply the vendor remediation on Ubuntu
-      ansible.builtin.command:
-        argv: >-
+      vars:
+        stig_usg_fix: >-
           {{ ['usg', 'fix'] + (['--tailoring-file', stig_tailoring_remote] if stig_tailored else [stig_usg_profile]) }}
+        stig_keep_ssh_client: >-
+          "$@"; status=$?;
+          find /etc/ssh/ssh_config.d -maxdepth 1 -type f -name '*.conf' ! -perm -004 -exec chmod 0644 {} +;
+          exit "$status"
+      ansible.builtin.command:
+        argv: "{{ (['/bin/sh', '-c', stig_keep_ssh_client, 'usg-fix'] if stig_is_controller else []) + stig_usg_fix }}"
+      environment: "{{ {'NEEDRESTART_SUSPEND': '1'} if stig_is_controller else {} }}"
       register: stig_remediate_usg
       changed_when: true
       when: ansible_facts['os_family'] == 'Debian'
-
-    # The boot ID is new at every start and differs between any two machines. The
-    # lookup reads it where Ansible runs, so the same value means this host is the
-    # controller the run comes from. Its reboot would stop the run before the second
-    # scan and leave the task without a result, so it is left for its own terminal.
-    - name: Read the boot ID
-      ansible.builtin.slurp:
-        src: /proc/sys/kernel/random/boot_id
-      register: stig_boot_id
-
-    - name: Recognize the controller this run comes from
-      ansible.builtin.set_fact:
-        stig_is_controller: >-
-          {{ (stig_boot_id.content | b64decode | trim) ==
-             (lookup('ansible.builtin.file', '/proc/sys/kernel/random/boot_id') | trim) }}
 
     - name: Reboot only when explicitly approved
       ansible.builtin.reboot:
@@ -187,9 +203,19 @@
           {{ stig_controller_note if (allow_reboot and stig_is_controller)
              else ('and rebooted' if allow_reboot
              else 'without a reboot; many STIG rules only take effect after one') }}
+        stig_ssh_client_kept: >-
+          On this controller the files usg wrote in /etc/ssh/ssh_config.d were made
+          readable again, mode 0644, so that ssh keeps working for the semaphore
+          account and for you.
+        stig_ssh_client_left: >-
+          usg wrote files in /etc/ssh/ssh_config.d that only root can read. Until they
+          are readable, with sudo chmod 0644 /etc/ssh/ssh_config.d/*.conf, the ssh
+          command ends with an error on this machine for every account but root.
+        stig_ssh_client_note: >-
+          {{ (' ' ~ (stig_ssh_client_kept if stig_is_controller else stig_ssh_client_left)) if ansible_facts['os_family'] == 'Debian' else '' }}
       ansible.builtin.debug:
         msg: >-
-          {{ inventory_hostname }}: vendor remediation applied {{ stig_reboot_note }}.
+          {{ inventory_hostname }}: vendor remediation applied {{ stig_reboot_note }}.{{ stig_ssh_client_note }}
           Check console login, SSH and sudo now: STIG commonly removes NOPASSWD
           sudo rules, such as the one cloud-init gives an image's administrator,
           so confirm each account you administer with can still sudo with a

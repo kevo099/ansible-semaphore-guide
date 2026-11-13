@@ -522,6 +522,27 @@ class OnboardScriptTests(AddTargetInfoMixin, unittest.TestCase):
         result = self.run_onboard('note "RESULT: OK"\n')
         self.assertEqual((result.returncode, result.stdout), (0, "RESULT: OK\n"))
 
+    def test_a_host_key_ssh_keygen_refuses_is_left_out_of_the_list_not_fatal(self):
+        # In FIPS mode ssh-keygen ends with an error for an Ed25519 key; the RSA key after it must still be listed.
+        refuses_ed25519 = ('case "$2" in *ed25519*) echo "sshkey_read: Ed25519 keys are not allowed in FIPS mode" >&2; exit 255;; esac\n'
+                           'case "$2" in *ecdsa*) echo "256 SHA256:ecdsaprint root@host (ECDSA)";; '
+                           '*) echo "3072 SHA256:rsaprint root@host (RSA)";; esac')
+        body = ('mkdir "$work/keys"; for kind in ecdsa ed25519 rsa; do : > "$work/keys/ssh_host_${kind}_key.pub"; done\n'
+                'host_key_fingerprints "$work"/keys/ssh_host_*_key.pub "$work/keys/absent.pub" | sed "s|$work|WORK|"\n'
+                'note "RESULT: OK"\n')
+        result = self.run_onboard(body, {"ssh-keygen": refuses_ed25519})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.splitlines(), [
+            "  256 SHA256:ecdsaprint (ECDSA)",
+            "  left out: WORK/keys/ssh_host_ed25519_key.pub, which ssh-keygen cannot read on this system "
+            "(an Ed25519 key in FIPS mode, for one)",
+            "  3072 SHA256:rsaprint (RSA)",
+            "RESULT: OK"])
+        self.assertEqual(result.stderr, "")
+        # The report uses it for every host key file, and no bare ssh-keygen call on them is left.
+        self.assertIn("\nhost_key_fingerprints /etc/ssh/ssh_host_*_key.pub\n", ONBOARD)
+        self.assertNotIn('ssh-keygen -lf "$pub" |', ONBOARD)
+
     def test_known_failures_name_their_cause(self):
         account = section(ONBOARD, "# --- Account and keys", 'uid=$(id -u "$account")')
         labels = "home=/home/svc_ansible\n" + section(ONBOARD, "if command -v selinuxenabled", "# --- Password")

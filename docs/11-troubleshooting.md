@@ -101,6 +101,32 @@ has the four rules and the two commands that end them.
 | A template for a playbook you just created fails with `Permission denied` | `umask 077` made the file `-rw-------`. |
 | Semaphore does not start after `allow_filesystem_mark = 1`: `Failed to execute /usr/local/bin/semaphore` | `fapolicyd` now watches the service and the rules are missing. |
 
+### Every job is unreachable on an Ubuntu machine hardened with `usg`
+
+The task log says `Can't open user config file
+/etc/ssh/ssh_config.d/00-cipher-list.conf: Permission denied` and
+`/etc/ssh/ssh_config: terminating, 1 bad configuration options`, and your own
+`ssh` command ends the same way. The readiness check reports
+`"service_can_start_ssh": false`. `usg` writes those files for root only;
+chapter 9, [An Ubuntu controller](09-security-benchmarks.md#an-ubuntu-controller),
+has the cause. Make them readable again:
+
+```bash
+sudo chmod 0644 /etc/ssh/ssh_config.d/*.conf
+```
+
+### A job on an Ubuntu controller ends while it installs packages on the controller
+
+The task stops without a result, and `journalctl -u semaphore` shows
+`Stopping semaphore.service` in the middle of it. After a package change that
+updates a library, Ubuntu's `needrestart` restarts the services that use it,
+and Semaphore, which runs the job, is one of them. The guide's **Patch** and
+**STIG apply** playbooks suspend it where the target is the controller the run
+comes from. In a playbook of your own that installs or upgrades packages on
+the controller, give that task `environment: {NEEDRESTART_SUSPEND: "1"}`, and
+run `sudo needrestart` from the controller's terminal afterwards. Enterprise
+Linux has no such automatic restart.
+
 ### Application allowlisting and temporary modules
 
 Ansible may fail when an application allowlisting policy rejects a transferred

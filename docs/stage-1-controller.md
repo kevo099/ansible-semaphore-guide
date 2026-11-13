@@ -97,7 +97,9 @@ after `git clone`, and expect the installer to stop once with four `fapolicyd`
 rules to add; chapter 9,
 [Harden the controller itself](09-security-benchmarks.md#harden-the-controller-itself),
 explains both. Until those rules are loaded your account may not open the
-guide's Python files, so read them in step 2 below with `sudo less`.
+guide's Python files, so read them in step 2 below with `sudo less`. On Ubuntu
+hardened with `usg`, expect the installer to stop once over two files of the
+SSH client instead; it prints the one command that ends that.
 
 `~/ansible-semaphore-guide` is **the guide's folder**. Every command in this
 guide that starts with `controller/` runs from it: the installer,
@@ -231,6 +233,7 @@ with three parts. First, the readiness report from `check-controller.py`:
     "semaphore_bind_matches_exposure_loopback": true,
     "configuration_is_private": true,
     "service_can_read_known_hosts": true,
+    "service_can_start_ssh": true,
     "semaphore_is_active": true,
     "semaphore_is_enabled": true,
     "postgresql_is_active": true,

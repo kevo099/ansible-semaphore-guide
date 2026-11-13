@@ -73,6 +73,19 @@ reported=
 keys_file='' hash_file='' ask_password=''
 fail() { printf 'onboard: %s\n' "$*" >&2; reported=yes; printf 'RESULT: FAILED: %s\n' "$*"; exit 1; }
 note() { printf '%s\n' "$*"; }
+# Fingerprints of the host keys in the given files. In FIPS mode ssh-keygen refuses an
+# Ed25519 key, and sshd does not offer it either: such a file is named and left out.
+host_key_fingerprints() {
+  local pub line
+  for pub in "$@"; do
+    [ -f "$pub" ] || continue
+    if line=$(ssh-keygen -lf "$pub" 2>/dev/null); then
+      printf '%s\n' "$line" | awk '{print "  " $1, $2, $NF}'
+    else
+      note "  left out: $pub, which ssh-keygen cannot read on this system (an Ed25519 key in FIPS mode, for one)"
+    fi
+  done
+}
 trap 'reported=yes; printf "RESULT: FAILED: unexpected error at line %s; see the error output\n" "$LINENO"; exit 1' ERR
 work=$(mktemp -d)
 cleanup() {
@@ -535,10 +548,7 @@ while IFS= read -r entry; do
   note "warning: this check cannot evaluate \"$entry\"; make sure sshd lets $account in"
 done < <(awk '!seen[$0]++' "$work/unsure")
 note "host keys to compare with ssh-keyscan from the controller:"
-for pub in /etc/ssh/ssh_host_*_key.pub; do
-  [ -f "$pub" ] || continue
-  ssh-keygen -lf "$pub" | awk '{print "  " $1, $2, $NF}'
-done
+host_key_fingerprints /etc/ssh/ssh_host_*_key.pub
 # The values add-target.sh --from-info reads on the controller. They are data, not
 # a command: the controller does not trust this VM, so only its own reviewed code
 # acts on them. A value that cannot be read here is left out, and the option that

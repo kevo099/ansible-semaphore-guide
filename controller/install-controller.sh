@@ -91,6 +91,7 @@ controller_validate_lab
 controller_require_fresh_state /etc/postgresql /var/lib/postgresql
 controller_check_sources semaphore.service
 controller_check_fapolicyd
+controller_check_ssh_client
 
 # 2. Packages that create nothing the preflight refuses, then the pinned Semaphore archive.
 #    A failed download or checksum leaves nothing that blocks a rerun. apt-get waits up

@@ -102,6 +102,7 @@ controller_validate_lab
 controller_require_fresh_state /var/lib/pgsql/data/PG_VERSION
 controller_check_sources semaphore-el9.service
 controller_check_fapolicyd
+controller_check_ssh_client
 
 # 2. Packages that create nothing the preflight refuses, then the pinned Semaphore archive.
 #    A failed download or checksum leaves nothing that blocks a rerun.

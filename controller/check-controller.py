@@ -63,6 +63,10 @@ def main():
     checks["service_can_read_known_hosts"] = group_can_read(
         Path("/etc/semaphore/known_hosts").stat(), grp.getgrnam("semaphore").gr_gid
     )
+    # ssh reads the system's client configuration at every start. Where one of its files is
+    # for root only, as usg leaves two after the Ubuntu STIG, ssh ends at once for the
+    # service account and no job reaches a target.
+    checks["service_can_start_ssh"] = command_ok(["runuser", "-u", "semaphore", "--", "ssh", "-G", "127.0.0.1"])
     checks["semaphore_is_active"] = command_ok(["systemctl", "is-active", "--quiet", "semaphore"])
     checks["semaphore_is_enabled"] = command_ok(["systemctl", "is-enabled", "--quiet", "semaphore"])
     # Ubuntu's postgresql unit is a wrapper that stays active while the cluster unit

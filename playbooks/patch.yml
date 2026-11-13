@@ -21,6 +21,24 @@
           The key=value form produces strings and is rejected.
         quiet: true
   tasks:
+    # The boot ID is new at every start and differs between any two machines. The
+    # lookup reads it where Ansible runs, so the same value means this host is the
+    # controller the run comes from. Its reboot would stop the run in the middle and
+    # leave the hosts after it unpatched, so it is left for its own terminal.
+    - name: Read the boot ID
+      ansible.builtin.slurp:
+        src: /proc/sys/kernel/random/boot_id
+      register: lab_boot_id
+
+    - name: Recognize the controller this run comes from
+      ansible.builtin.set_fact:
+        lab_is_controller: >-
+          {{ (lab_boot_id.content | b64decode | trim) ==
+             (lookup('ansible.builtin.file', '/proc/sys/kernel/random/boot_id') | trim) }}
+
+    # After a library update, Ubuntu's needrestart restarts the services that use it,
+    # Semaphore among them, which would end this run halfway on the controller it comes
+    # from. There the restarts are left for the administrator, and the report says so.
     - name: Upgrade Ubuntu packages without removals
       ansible.builtin.apt:
         update_cache: true
@@ -30,6 +48,7 @@
         autoremove: false
         lock_timeout: 600
         auto_install_module_deps: false
+      environment: "{{ {'NEEDRESTART_SUSPEND': '1'} if lab_is_controller else {} }}"
       when: ansible_facts['os_family'] == 'Debian'
 
     - name: Install the EL reboot-check plugin
@@ -79,21 +98,6 @@
               {{ (lab_reboot_marker.stat.exists | default(false)) or
                  ((lab_reboot_hint.rc | default(0)) == 1) }}
 
-        # The boot ID is new at every start and differs between any two machines. The
-        # lookup reads it where Ansible runs, so the same value means this host is the
-        # controller the run comes from. Its reboot would stop the run in the middle and
-        # leave the hosts after it unpatched, so it is left for its own terminal.
-        - name: Read the boot ID
-          ansible.builtin.slurp:
-            src: /proc/sys/kernel/random/boot_id
-          register: lab_boot_id
-
-        - name: Recognize the controller this run comes from
-          ansible.builtin.set_fact:
-            lab_is_controller: >-
-              {{ (lab_boot_id.content | b64decode | trim) ==
-                 (lookup('ansible.builtin.file', '/proc/sys/kernel/random/boot_id') | trim) }}
-
         - name: Reboot only when required and explicitly approved
           ansible.builtin.reboot:
             reboot_timeout: 900
@@ -107,10 +111,15 @@
               required and left alone: {{ inventory_hostname }} is the controller this run
               comes from, and its reboot would stop the run. Restart it from its own terminal
               when no task is running, with sudo systemctl reboot
+            lab_services_note: >-
+              Services were not restarted on this controller, so that the run could finish:
+              run sudo needrestart from its own terminal when no task is running, or reboot it.
+            lab_services_suffix: >-
+              {{ (' ' ~ lab_services_note) if (lab_is_controller and ansible_facts['os_family'] == 'Debian') else '' }}
           ansible.builtin.debug:
             msg: >-
               {{ inventory_hostname }}: updates completed. Reboot
               {{ lab_controller_note if (lab_reboot_needed and allow_reboot and lab_is_controller)
                  else ('completed and connection restored' if (lab_reboot_needed and allow_reboot)
                  else ('required; left for the operator' if lab_reboot_needed
-                 else 'not requested by the operating system')) }}.
+                 else 'not requested by the operating system')) }}.{{ lab_services_suffix }}

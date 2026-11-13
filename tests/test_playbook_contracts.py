@@ -464,7 +464,7 @@ class ExceptionsFileTests(unittest.TestCase):
                       "role, severity or weight than the profile gives: sshd_set_idle_timeout. What it leaves out",
                       message(refined))
 
-    def commands(self, tailored, local_content=False):
+    def commands(self, tailored, local_content=False, controller=False):
         variables = {"stig_tailored": tailored, "stig_tailoring_remote": "/var/log/stig-practice/S/tailoring.xml" if tailored else "",
                      "stig_tailoring": self.DESCRIBED, "stig_local_content": local_content, "stig_profile_el": STIG_PROFILE,
                      "stig_content_profile": "xccdf_mil.disa.stig_profile_MAC-1_Classified", "stig_usg_profile": "disa_stig",
@@ -474,6 +474,11 @@ class ExceptionsFileTests(unittest.TestCase):
         variables["stig_scan_profile"] = render(chosen["stig_scan_profile"], **variables)
         self.assertEqual(render(chosen["stig_tailoring_remote"], **variables), variables["stig_tailoring_remote"])
         apply = tasks("playbooks/stig-apply.yml")[0]["tasks"]
+        # The Ubuntu fix builds its command from two task variables; a target that is not the controller
+        # gets the plain usg command.
+        usg_fix = named(apply, "Apply the vendor remediation on Ubuntu")
+        variables.update(stig_is_controller=controller, stig_keep_ssh_client=usg_fix["vars"]["stig_keep_ssh_client"],
+                         stig_usg_fix=render(usg_fix["vars"]["stig_usg_fix"], **variables))
         return {name: render(task["ansible.builtin.command"]["argv"], **variables) for name, task in (
             ("el", scan_task("Scan Enterprise Linux against the vendor STIG profile")),
             ("usg", scan_task("Scan Ubuntu with the Ubuntu Security Guide STIG profile")),
@@ -494,6 +499,36 @@ class ExceptionsFileTests(unittest.TestCase):
         self.assertEqual(self.commands(False, local_content=True)["local"],
                          ["oscap", "xccdf", "eval", "--profile", "xccdf_mil.disa.stig_profile_MAC-1_Classified", "--results",
                           f"{folder}/audit.xml", "--report", f"{folder}/audit.html", f"{folder}/content.xml"])
+
+    def test_on_its_own_controller_the_ubuntu_fix_gives_the_ssh_client_its_files_back(self):
+        # usg works with umask 077 and leaves the SSH client's files for root only, which ends ssh for the
+        # semaphore account. The fix and the repair are one command: no later task could connect.
+        for tailored, tail in ((False, ["usg", "fix", "disa_stig"]),
+                               (True, ["usg", "fix", "--tailoring-file", "/var/log/stig-practice/S/tailoring.xml"])):
+            argv = self.commands(tailored, controller=True)["usg_fix"]
+            self.assertEqual(argv[:2] + argv[3:], ["/bin/sh", "-c", "usg-fix"] + tail)
+        script = argv[2]
+        self.assertIn("/etc/ssh/ssh_config.d", script)
+        with tempfile.TemporaryDirectory() as work:
+            folder, binaries = Path(work, "ssh_config.d"), Path(work, "bin")
+            folder.mkdir()
+            binaries.mkdir()
+            (folder / "50-site.conf").write_text("Host *\n")
+            (folder / "50-site.conf").chmod(0o644)
+            (folder / "notes.txt").write_text("not a configuration file\n")
+            (folder / "notes.txt").chmod(0o600)
+            # A stand-in usg: it writes its files as usg does and ends with a status of its own.
+            (binaries / "usg").write_text(f"#!/bin/sh\necho \"usg $*\"\numask 077\necho 'Host *' > {folder}/00-cipher-list.conf\n"
+                                          f"echo 'Host *' > {folder}/00-mac-list.conf\nexit 3\n")
+            (binaries / "usg").chmod(0o755)
+            result = subprocess.run(["/bin/sh", "-c", script.replace("/etc/ssh/ssh_config.d", str(folder)), *argv[3:]],
+                                    capture_output=True, text=True, timeout=30,
+                                    env={"PATH": f"{binaries}{os.pathsep}/usr/bin:/bin"})
+            self.assertEqual((result.returncode, result.stdout, result.stderr),
+                             (3, "usg fix --tailoring-file /var/log/stig-practice/S/tailoring.xml\n", ""))
+            modes = {path.name: oct(path.stat().st_mode & 0o777) for path in folder.iterdir()}
+            self.assertEqual(modes, {"00-cipher-list.conf": "0o644", "00-mac-list.conf": "0o644",
+                                     "50-site.conf": "0o644", "notes.txt": "0o600"})
 
     def test_with_one_every_scan_and_fix_uses_the_file_and_its_profile(self):
         commands = self.commands(True)
@@ -1066,17 +1101,32 @@ class PatchControllerTests(unittest.TestCase):
         return play, named(play["tasks"], "Detect and optionally handle a reboot after real patching")["block"]
 
     def test_the_reboot_is_skipped_for_the_controller_itself(self):
-        _play, block = self.block()
-        names = [task["name"] for task in block]
+        play, block = self.block()
         [reboot] = [task for task in block if "ansible.builtin.reboot" in task]
         self.assertEqual(reboot["when"], "lab_reboot_needed and allow_reboot and not lab_is_controller")
-        read = named(block, "Read the boot ID")
+        read = named(play["tasks"], "Read the boot ID")
         self.assertEqual(read["ansible.builtin.slurp"]["src"], "/proc/sys/kernel/random/boot_id")
-        self.assertLess(names.index(read["name"]), names.index("Recognize the controller this run comes from"))
-        self.assertLess(names.index("Recognize the controller this run comes from"), names.index(reboot["name"]))
-        # The whole block runs only after real patching, so a preview reads nothing more.
-        guarded = named(self.block()[0]["tasks"], "Detect and optionally handle a reboot after real patching")
+        # The controller is recognized before the first package changes, which already need to know it.
+        names = [task["name"] for task in play["tasks"]]
+        self.assertEqual(names[:4], [read["name"], "Recognize the controller this run comes from",
+                                     "Upgrade Ubuntu packages without removals", "Install the EL reboot-check plugin"])
+        # The reboot handling runs only after real patching.
+        guarded = named(play["tasks"], "Detect and optionally handle a reboot after real patching")
         self.assertEqual(guarded["when"], "not ansible_check_mode")
+
+    @unittest.skipUnless(Templar, "needs ansible-core, as CI installs it")
+    def test_needrestart_is_suspended_only_on_the_controller_itself(self):
+        # After a library update Ubuntu's needrestart restarts Semaphore, which would end the run halfway.
+        for playbook, task_name, fact in (("patch.yml", "Upgrade Ubuntu packages without removals", "lab_is_controller"),
+                                          ("stig-apply.yml", "Apply the vendor remediation on Ubuntu", "stig_is_controller")):
+            with self.subTest(playbook=playbook):
+                [play] = yaml.safe_load((ROOT / "playbooks" / playbook).read_text())
+                task = named(play["tasks"], task_name)
+                self.assertEqual(task["when"], "ansible_facts['os_family'] == 'Debian'")
+                self.assertEqual(rendered(play, {fact: True}, task["environment"]), {"NEEDRESTART_SUSPEND": "1"})
+                self.assertEqual(rendered(play, {fact: False}, task["environment"]), {})
+                names = [entry["name"] for entry in play["tasks"]]
+                self.assertLess(names.index("Recognize the controller this run comes from"), names.index(task_name))
 
     @unittest.skipUnless(Templar and Path("/proc/sys/kernel/random/boot_id").exists(),
                          "needs ansible-core, as CI installs it, and Linux")
@@ -1088,8 +1138,10 @@ class PatchControllerTests(unittest.TestCase):
         except RuntimeError:  # set up already by an earlier test
             pass
         here = Path("/proc/sys/kernel/random/boot_id").read_text()
-        fact = named(block, "Recognize the controller")["ansible.builtin.set_fact"]["lab_is_controller"]
+        fact = named(play["tasks"], "Recognize the controller")["ansible.builtin.set_fact"]["lab_is_controller"]
         report = named(block, "Report the completed patch result")
+        services = ("Services were not restarted on this controller, so that the run could finish: run sudo "
+                    "needrestart from its own terminal when no task is running, or reboot it.")
         cases = ((here, True, True, "required and left alone: lab-alma is the controller this run comes from, and "
                                     "its reboot would stop the run. Restart it from its own terminal when no task "
                                     "is running, with sudo systemctl reboot"),
@@ -1099,15 +1151,26 @@ class PatchControllerTests(unittest.TestCase):
         for content, needed, allowed, expected in cases:
             with self.subTest(controller=content == here, needed=needed, allowed=allowed):
                 variables = {"inventory_hostname": "lab-alma", "lab_boot_id": encoded(content),
-                             "lab_reboot_needed": needed, "allow_reboot": allowed}
+                             "lab_reboot_needed": needed, "allow_reboot": allowed,
+                             "ansible_facts": {"os_family": "RedHat"}}
                 is_controller = rendered(play, variables, fact)
                 self.assertIs(is_controller, content == here)
                 variables.update(lab_is_controller=is_controller,
-                                 lab_controller_note=trusted(report["vars"]["lab_controller_note"]))
+                                 lab_controller_note=trusted(report["vars"]["lab_controller_note"]),
+                                 lab_services_note=trusted(report["vars"]["lab_services_note"]))
                 reboots = rendered(play, variables, "{{ lab_reboot_needed and allow_reboot and not lab_is_controller }}")
                 self.assertIs(reboots, needed and allowed and content != here)
+                variables.update(lab_services_suffix=rendered(play, variables, report["vars"]["lab_services_suffix"]))
                 message = " ".join(rendered(play, variables, report["ansible.builtin.debug"]["msg"]).split())
                 self.assertEqual(message, f"lab-alma: updates completed. Reboot {expected}.")
+                # Only an Ubuntu controller is told that its services still wait for a restart.
+                variables["ansible_facts"] = {"os_family": "Debian"}
+                variables.update(lab_services_suffix=rendered(play, variables, report["vars"]["lab_services_suffix"]))
+                raw = rendered(play, variables, report["ansible.builtin.debug"]["msg"])
+                self.assertEqual(" ".join(raw.split()), f"lab-alma: updates completed. Reboot {expected}."
+                                                        + (f" {services}" if content == here else ""))
+                # The sentence about the services follows on the same line of the log.
+                self.assertNotIn(".\n", raw)
 
 
 class StigApplyControllerTests(unittest.TestCase):
@@ -1124,7 +1187,8 @@ class StigApplyControllerTests(unittest.TestCase):
         self.assertEqual(reboot["when"], "allow_reboot and not stig_is_controller")
         read = named(tasks, "Read the boot ID")
         self.assertEqual(read["ansible.builtin.slurp"]["src"], "/proc/sys/kernel/random/boot_id")
-        order = ["Apply the vendor remediation on Ubuntu", read["name"], "Recognize the controller this run comes from",
+        # Recognized before the fixes, which install packages, and so before the reboot as well.
+        order = [read["name"], "Recognize the controller this run comes from", "Apply the vendor remediation on Ubuntu",
                  reboot["name"], "Record the posture after remediation", "Explain what to verify next"]
         self.assertEqual([name for name in names if name in order], order)
 
@@ -1149,7 +1213,10 @@ class StigApplyControllerTests(unittest.TestCase):
                  ("1111-aaaa\n", False, "without a reboot; many STIG rules only take effect after one"))
         for content, allowed, expected in cases:
             with self.subTest(controller=content == here, allowed=allowed):
-                variables = {"inventory_hostname": "lab-rhel", "stig_boot_id": encoded(content), "allow_reboot": allowed}
+                variables = {"inventory_hostname": "lab-rhel", "stig_boot_id": encoded(content), "allow_reboot": allowed,
+                             "ansible_facts": {"os_family": "RedHat"},
+                             "stig_ssh_client_kept": trusted(report["vars"]["stig_ssh_client_kept"]),
+                             "stig_ssh_client_left": trusted(report["vars"]["stig_ssh_client_left"])}
                 is_controller = rendered(play, variables, fact)
                 self.assertIs(is_controller, content == here)
                 variables.update(stig_is_controller=is_controller)
@@ -1157,9 +1224,23 @@ class StigApplyControllerTests(unittest.TestCase):
                 self.assertIs(reboots, allowed and content != here)
                 variables.update(stig_controller_note=trusted(report["vars"]["stig_controller_note"]))
                 variables.update(stig_reboot_note=rendered(play, variables, report["vars"]["stig_reboot_note"]))
+                variables.update(stig_ssh_client_note=rendered(play, variables, report["vars"]["stig_ssh_client_note"]))
+                self.assertEqual(variables["stig_ssh_client_note"], "")
                 message = " ".join(rendered(play, variables, report["ansible.builtin.debug"]["msg"]).split())
                 self.assertTrue(message.startswith(f"lab-rhel: vendor remediation applied {expected}. Check console"),
                                 message)
+                self.assertNotIn("\n", rendered(play, variables, report["ansible.builtin.debug"]["msg"]).strip())
+                # On Ubuntu the message says what became of the SSH client's files that usg leaves for root only.
+                variables["ansible_facts"] = {"os_family": "Debian"}
+                variables.update(stig_ssh_client_note=rendered(play, variables, report["vars"]["stig_ssh_client_note"]))
+                message = " ".join(rendered(play, variables, report["ansible.builtin.debug"]["msg"]).split())
+                kept = ("On this controller the files usg wrote in /etc/ssh/ssh_config.d were made readable again, mode "
+                        "0644, so that ssh keeps working for the semaphore account and for you.")
+                left = ("usg wrote files in /etc/ssh/ssh_config.d that only root can read. Until they are readable, with "
+                        "sudo chmod 0644 /etc/ssh/ssh_config.d/*.conf, the ssh command ends with an error on this machine "
+                        "for every account but root.")
+                self.assertTrue(message.startswith(f"lab-rhel: vendor remediation applied {expected}. "
+                                                   f"{kept if content == here else left} Check console"), message)
                 self.assertNotIn("\n", rendered(play, variables, report["ansible.builtin.debug"]["msg"]).strip())
 
 

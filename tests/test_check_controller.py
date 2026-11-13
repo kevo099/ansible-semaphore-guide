@@ -105,7 +105,7 @@ class Ping:
 class ReportTests(unittest.TestCase):
     """main() on a simulated controller: its files in a temporary folder, services and listeners stubbed."""
 
-    def report(self, exposure="loopback", active=UBUNTU_UNITS, listeners=None, ping=True, ubuntu=True):
+    def report(self, exposure="loopback", active=UBUNTU_UNITS, listeners=None, ping=True, ubuntu=True, ssh_starts=True):
         interface, default_listeners = EXPOSURES[exposure]
         with tempfile.TemporaryDirectory() as directory:
             settings = Path(directory, "etc", "semaphore")
@@ -125,6 +125,9 @@ class ReportTests(unittest.TestCase):
             def command_ok(arguments):
                 if arguments[:3] == ["systemctl", "is-active", "--quiet"]:
                     return arguments[3] in active
+                if arguments[-3:] == ["ssh", "-G", "127.0.0.1"]:
+                    # As the service account, which is the one that starts ssh for a job.
+                    return arguments[:4] == ["runuser", "-u", "semaphore", "--"] and ssh_starts
                 return True
 
             opener = mock.Mock()
@@ -164,6 +167,11 @@ class ReportTests(unittest.TestCase):
                                      {"configuration_is_private"})
                 self.assertTrue(checks["strict_target_host_verification"])
                 self.assertTrue(checks["port_3000_listening"] and checks["port_5432_listening"])
+
+    def test_an_ssh_client_the_service_account_cannot_start_is_named(self):
+        # After the Ubuntu STIG usg leaves two files of the SSH client's configuration for root only.
+        self.assertEqual(self.new_failures(ssh_starts=False), {"service_can_start_ssh"})
+        self.assertTrue(self.report()["service_can_start_ssh"])
 
     def test_ubuntu_cluster_down_behind_its_active_wrapper_unit_names_postgresql(self):
         # Ubuntu's postgresql.service stays active while postgresql@16-main is down.
