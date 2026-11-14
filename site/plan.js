@@ -45,8 +45,8 @@
 #
 # The file holds no secret, and the installation prints none: the initial admin
 # password is created on the VM and stays in a root-only file there. Do not add
-# a write_files: or runcmd: of your own beside vendor data; it would replace
-# this file's.
+# a write_files:, packages: or runcmd: of your own beside vendor data; it would
+# replace this file's.
 write_files:
   - path: /etc/ansible-semaphore-guide/first-boot.conf
     owner: root:root
@@ -80,6 +80,7 @@ runcmd:
       [[ $release =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || stop "release= in $conf must be a release tag such as v1.13.0"
       [[ $admin != REPLACE_WITH_ADMIN_LOGIN && $admin =~ ^[A-Za-z_][A-Za-z0-9_.-]*$ ]] ||
         stop "admin= in $conf must be the login of this VM's administrator; it still holds the placeholder or is empty"
+      [[ $admin != root ]] || stop "admin= in $conf must be your own administrator account, not root"
       home=$(getent passwd "$admin" | cut -d: -f6) || home=
       [[ -n $home && -d $home ]] ||
         stop "this VM has no account $admin with a home folder; create the VM with that administrator, or continue by hand with docs/stage-1-controller.md"
@@ -139,10 +140,22 @@ runcmd:
   var DEFAULTS = { platform: 'proxmox', system: 'ubuntu', admin: '', expose: 'tunnel', address: '', release: RELEASE };
   var FIELDS = ['platform', 'system', 'admin', 'expose', 'address', 'release'];
 
-  // The same patterns as controller/first-boot.sh and the command in user-data.yaml.
+  // No wider than controller/first-boot.sh, the command in user-data.yaml and
+  // controller/expose-semaphore.sh accept: a value the page lets through is one they take.
   var ADMIN = /^[A-Za-z_][A-Za-z0-9_.-]{0,31}$/;
-  var ADDRESS = /^[A-Za-z0-9][A-Za-z0-9.:-]{0,252}$/;
-  var RELEASE_NAME = /^[A-Za-z0-9][A-Za-z0-9._\/-]{0,99}$/;
+  var DNS_NAME = /^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$/;
+  var RELEASE_NAME = /^v[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$/;
+
+  // An IPv4 address or a DNS name. A name of digits and dots only must be a whole IPv4 address.
+  function validAddress(value) {
+    if (/^[0-9.]+$/.test(value)) {
+      var parts = value.split('.');
+      return parts.length === 4 && parts.every(function (part) {
+        return /^(0|[1-9][0-9]{0,2})$/.test(part) && Number(part) <= 255;
+      });
+    }
+    return DNS_NAME.test(value);
+  }
 
   function normalize(answers) {
     var result = {};
@@ -165,13 +178,17 @@ runcmd:
       errors.admin = 'Enter the login of the VM\'s administrator.';
     } else if (!ADMIN.test(a.admin)) {
       errors.admin = 'A login starts with a letter or an underscore and holds letters, digits, dots, hyphens and underscores only.';
-    } else if (a.admin === 'root') {
-      errors.admin = 'Use your own administrator account, not root: it will own the lab folder and edit the playbooks.';
+    } else if (a.admin === 'root' || a.admin === 'semaphore') {
+      errors.admin = 'Use your own administrator account, not ' + a.admin + ': it will own the lab folder and edit the playbooks.';
     } else if (a.admin === 'svc_ansible') {
       errors.admin = 'svc_ansible is the account Semaphore logs in to the other machines with. Use your own administrator account.';
+    } else if (a.platform === 'seed' && method(a).name === 'first-boot' && a.admin !== SYSTEMS[a.system].defaultUser) {
+      // The seed ISO of Stage 3 creates no account, so the image's own user is the administrator.
+      errors.admin = 'With a seed ISO the administrator is the image\'s own user, which on ' + SYSTEMS[a.system].label +
+        ' is ' + SYSTEMS[a.system].defaultUser + '. Enter ' + SYSTEMS[a.system].defaultUser + '.';
     }
-    if (a.address && !ADDRESS.test(a.address)) {
-      errors.address = 'Enter an IP address or a DNS name, without https:// and without a path.';
+    if (a.address && !validAddress(a.address)) {
+      errors.address = 'Enter an IPv4 address or a DNS name, without https://, a port or a path.';
     }
     if (!RELEASE_NAME.test(a.release)) {
       errors.release = 'Enter a release tag of the guide, such as ' + RELEASE + '.';
@@ -259,19 +276,21 @@ runcmd:
         id: 'create', title: 'Create the VM on Proxmox, with the file as vendor data',
         where: 'The Proxmox node\'s shell, as root',
         text: [
-          'First copy the file from step 1 to the node\'s snippets folder, which on the default local storage is ' +
-          '/var/lib/vz/snippets/. Then create the VM from a cloud image of ' + system.label + '. VMID, STORAGE, vmbr0, ' +
-          'IMAGE_FILE and ADMIN_KEY.pub are your own values: the image is the one you downloaded and checked on the ' +
-          'node, and the key is your workstation\'s public key.'
+          'Before the first time, allow snippets on the node\'s local storage, and download and check the cloud image ' +
+          'of ' + system.label + ' on the node; the two links below show how. Then copy the file from step 1 and your ' +
+          'workstation\'s public key to the node, and create the VM. VMID, STORAGE, vmbr0 and IMAGE_FILE are your own values.'
         ],
         list: [],
-        commands: [{ label: 'On your workstation', code: 'scp ' + FILE_NAME + ' root@PROXMOX_NODE:/var/lib/vz/snippets/' + FILE_NAME },
+        commands: [{ label: 'On your workstation', code: 'scp ' + FILE_NAME + ' root@PROXMOX_NODE:/var/lib/vz/snippets/' + FILE_NAME +
+          '\nscp ~/.ssh/id_ed25519.pub root@PROXMOX_NODE:/root/ADMIN_KEY.pub' },
           { label: 'On the node', code: commands.join('\n') }],
         expect: 'The VM starts. qm cloudinit dump VMID user shows your administrator ' + a.admin + ' and its key.',
         note: 'Use vendor=, not user=: with user= the administrator and its key from the Cloud-Init panel never reach the VM. ' +
-          'For a fixed address, replace ip=dhcp with ip=VM_ADDRESS/PREFIX,gw=GATEWAY_ADDRESS.',
-        links: [{ text: 'Stage 3: each of these commands explained', href: doc(a, 'stage-3-new-vms-cloud-init.md', 'do-on-proxmox-attach-the-file-to-a-new-vm') },
-          { text: 'Build a VM from a cloud image', href: doc(a, 'platform-proxmox.md', 'do-build-a-vm-from-a-cloud-image') }]
+          'For a fixed address, replace ip=dhcp with ip=VM_ADDRESS/PREFIX,gw=GATEWAY_ADDRESS. Proxmox also has a new VM ' +
+          'install every pending update at its first boot, before the controller; qm set VMID --ciupgrade 0 turns that off.',
+        links: [{ text: 'Allow snippets on a storage', href: doc(a, 'platform-proxmox.md', 'do-enable-snippets-on-a-storage') },
+          { text: 'Build a VM from a cloud image', href: doc(a, 'platform-proxmox.md', 'do-build-a-vm-from-a-cloud-image') },
+          { text: 'Stage 3: each of these commands explained', href: doc(a, 'stage-3-new-vms-cloud-init.md', 'do-on-proxmox-attach-the-file-to-a-new-vm') }]
       };
     }
     return {
@@ -300,9 +319,7 @@ runcmd:
       }],
       expect: 'seed-controller.iso exists. Attach it to the new VM as a CD/DVD drive before its first boot, give the VM ' +
         size + ', and start it.',
-      note: a.admin === system.defaultUser ? '' :
-        'This seed creates no account of its own, so the administrator is ' + system.defaultUser +
-        '. You entered ' + a.admin + ': go back and enter ' + system.defaultUser + ', or add your account to user-data yourself.',
+      note: 'This seed creates no account of its own, so the administrator is the image\'s own user, ' + system.defaultUser + '.',
       links: [{ text: 'Stage 3: the seed ISO explained', href: doc(a, 'stage-3-new-vms-cloud-init.md', 'do-on-another-hypervisor-build-a-nocloud-seed') }]
     };
   }
@@ -470,7 +487,8 @@ runcmd:
     var answers = {};
     String(text || '').replace(/^[#?]/, '').split('&').forEach(function (pair) {
       var at = pair.indexOf('=');
-      var name = at === -1 ? pair : pair.slice(0, at);
+      if (at === -1) { return; }
+      var name = pair.slice(0, at);
       if (FIELDS.indexOf(name) === -1) { return; }
       try { answers[name] = decodeURIComponent(pair.slice(at + 1)); } catch (error) { /* a broken escape: ignore the value */ }
     });

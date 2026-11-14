@@ -25,8 +25,8 @@
 #
 # The file holds no secret, and the installation prints none: the initial admin
 # password is created on the VM and stays in a root-only file there. Do not add
-# a write_files: or runcmd: of your own beside vendor data; it would replace
-# this file's.
+# a write_files:, packages: or runcmd: of your own beside vendor data; it would
+# replace this file's.
 write_files:
   - path: /etc/ansible-semaphore-guide/first-boot.conf
     owner: root:root
@@ -60,6 +60,7 @@ runcmd:
       [[ $release =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || stop "release= in $conf must be a release tag such as v1.13.0"
       [[ $admin != REPLACE_WITH_ADMIN_LOGIN && $admin =~ ^[A-Za-z_][A-Za-z0-9_.-]*$ ]] ||
         stop "admin= in $conf must be the login of this VM's administrator; it still holds the placeholder or is empty"
+      [[ $admin != root ]] || stop "admin= in $conf must be your own administrator account, not root"
       home=$(getent passwd "$admin" | cut -d: -f6) || home=
       [[ -n $home && -d $home ]] ||
         stop "this VM has no account $admin with a home folder; create the VM with that administrator, or continue by hand with docs/stage-1-controller.md"

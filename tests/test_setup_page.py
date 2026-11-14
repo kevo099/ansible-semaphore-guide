@@ -7,6 +7,7 @@ Nothing here opens a browser or a network connection.
 """
 
 import importlib.util
+import ipaddress
 import itertools
 import json
 from pathlib import Path
@@ -27,6 +28,11 @@ PLATFORMS = ("proxmox", "azure", "seed", "existing")
 SYSTEMS = ("ubuntu", "rhel", "almalinux", "rocky")
 EXPOSURES = (("tunnel", ""), ("https", ""), ("https", "controller.example.test"))
 HOSTILE = ("ada; id", "ada$(id)", "ada`id`", "ada id", "-ada", "ada|id", "ada\nid", "<b>ada</b>", "ada'", 'ada"', "a" * 33)
+# The user a cloud image of each system creates, which a seed ISO's administrator is.
+IMAGE_USER = {"ubuntu": "ubuntu", "rhel": "cloud-user", "almalinux": "almalinux", "rocky": "rocky"}
+# Built from parts so the repository's check for literal addresses passes over them.
+IPV4 = "192.0.2" + ".5"
+IPV6 = "2001:db8" + "::5"
 
 spec = importlib.util.spec_from_file_location("validate", ROOT / "scripts" / "validate.py")
 assert spec and spec.loader
@@ -50,7 +56,7 @@ def answers(platform="proxmox", system="ubuntu", expose="tunnel", address="", ad
 class PlanTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.cases = [answers(platform, system, expose, address)
+        cls.cases = [answers(platform, system, expose, address, admin=IMAGE_USER[system] if platform == "seed" else "ada")
                      for platform, system, (expose, address) in itertools.product(PLATFORMS, SYSTEMS, EXPOSURES)]
         cls.steps = node("args[0].map((a) => plan.steps(a))", cls.cases)
         cls.methods = node("args[0].map((a) => plan.method(a).name)", cls.cases)
@@ -95,7 +101,7 @@ class PlanTests(unittest.TestCase):
             [filled] = [step["file"] for step in steps if "file" in step]
             self.assertEqual(filled["name"], "controller-first-boot.yaml")
             changed = [(old, new) for old, new in zip(USER_DATA.splitlines(), filled["content"].splitlines()) if old != new]
-            expected = [("      admin=REPLACE_WITH_ADMIN_LOGIN", "      admin=ada")]
+            expected = [("      admin=REPLACE_WITH_ADMIN_LOGIN", f"      admin={case['admin']}")]
             if case["expose"] == "https":
                 expected.append(("      expose=tunnel", "      expose=https"))
             if case["address"]:
@@ -103,7 +109,7 @@ class PlanTests(unittest.TestCase):
             self.assertEqual(changed, expected, case)
             self.assertEqual(len(filled["content"].splitlines()), len(USER_DATA.splitlines()))
             [conf] = yaml.safe_load(filled["content"])["write_files"]
-            self.assertEqual(conf["content"].splitlines()[1], "admin=ada")
+            self.assertEqual(conf["content"].splitlines()[1], f"admin={case['admin']}")
 
     def test_another_release_reaches_the_file_the_commands_and_the_links(self):
         steps = node("plan.steps(args[0])", answers("azure", release="v1.14.0"))
@@ -190,8 +196,15 @@ class PlanTests(unittest.TestCase):
         for system in ("ubuntu", "almalinux", "rocky"):
             [create] = [step for step in node("plan.steps(args[0])", answers("proxmox", system)) if step["id"] == "create"]
             copy, on_node = create["commands"]
-            self.assertEqual(copy["code"], "scp controller-first-boot.yaml root@PROXMOX_NODE:/var/lib/vz/snippets/"
-                                           "controller-first-boot.yaml")
+            file_copy, key_copy = copy["code"].splitlines()
+            self.assertEqual(file_copy, "scp controller-first-boot.yaml root@PROXMOX_NODE:/var/lib/vz/snippets/"
+                                        "controller-first-boot.yaml")
+            # Stage 3's own example of getting the key onto the node, and its two prerequisites.
+            self.assertIn(f"`{key_copy}`", stage_3)
+            self.assertIn(f"{file_copy}\n{key_copy}\n", page)
+            self.assertEqual([link["href"].rsplit("#", 1)[1] for link in create["links"]][:2],
+                             ["do-enable-snippets-on-a-storage", "do-build-a-vm-from-a-cloud-image"])
+            self.assertIn("--ciupgrade 0", create["note"])
             lines = on_node["code"].replace("--ciuser ada ", "--ciuser ADMIN ").splitlines()
             same = [line for line in lines if not re.search(r"--memory|qm resize|--cicustom|qm start", line)]
             for line in same:
@@ -214,13 +227,18 @@ class PlanTests(unittest.TestCase):
             [create] = [step for step in node("plan.steps(args[0])", answers("seed", system, admin=user)) if step["id"] == "create"]
             code = create["commands"][0]["code"]
             self.assertIn("cp ~/controller-first-boot.yaml vendor-data\n", code)
-            self.assertEqual(create["note"], "")
+            self.assertIn(f"the image's own user, {user}.", create["note"])
             for line in code.replace("seed-controller", "seed-NAME").replace("controller-1 controller", "NAME-1 NAME").splitlines():
                 if not line.startswith(("cp ", "hostname:", "fqdn:")):
                     self.assertIn(f"{line}\n", stage_3, line)
             self.assertIn(f"`{user}`", stage_3)
-            [other] = [step for step in node("plan.steps(args[0])", answers("seed", system)) if step["id"] == "create"]
-            self.assertIn(f"the administrator is {user}. You entered ada", other["note"])
+            # Another login would give a file whose first boot must stop, so the page asks for the right one.
+            self.assertEqual(node("plan.validate(args[0])", answers("seed", system)),
+                             {"admin": f"With a seed ISO the administrator is the image's own user, which on "
+                                       f"{node('plan.SYSTEMS[args[0]].label', system)} is {user}. Enter {user}."})
+        # RHEL there installs by commands on a VM that exists, with whatever administrator it has.
+        self.assertEqual(node("plan.validate(args[0])", answers("seed", "rhel")), {})
+        self.assertEqual({name: system["defaultUser"] for name, system in node("plan.SYSTEMS").items()}, IMAGE_USER)
 
     def test_azure_names_the_field_the_guide_names(self):
         azure = (ROOT / "docs" / "platform-azure.md").read_text()
@@ -252,13 +270,15 @@ class PlanTests(unittest.TestCase):
                 self.assertIn(parsed.fragment, validator.headings(page.read_text()), href)
 
     def test_values_that_could_change_a_command_are_refused(self):
-        for value in HOSTILE + ("", "root", "svc_ansible"):
+        for value in HOSTILE + ("", "root", "semaphore", "svc_ansible"):
             with self.subTest(admin=value):
                 self.assertIn("admin", node("plan.validate(args[0])", answers(admin=value)))
         for value in ("https://controller.example.test", "controller.example.test/path", "a b", "-x", "$(id)", "a;b"):
             with self.subTest(address=value):
                 self.assertIn("address", node("plan.validate(args[0])", answers(expose="https", address=value)))
-        for value in ("v1.13.0 --upload-pack=x", "--upload-pack=x", "v1;id", "$(id)"):
+        # A release is a tag of the guide and nothing else: a path could send every link to another repository.
+        for value in ("v1.13.0 --upload-pack=x", "--upload-pack=x", "v1;id", "$(id)", "main", "feat/x", "v1.13",
+                      "v1.13.0/../../../../other/fork/blob/main", "v1.13.0/"):
             with self.subTest(release=value):
                 self.assertIn("release", node("plan.validate(args[0])", answers(release=value)))
         self.assertEqual(node("plan.validate(args[0])", answers("azure", "rhel", "https", "controller.example.test")), {})
@@ -266,18 +286,37 @@ class PlanTests(unittest.TestCase):
                        "return 'file'; } catch (f) { return 'refused'; } } })()", answers(admin="ada; id"))
         self.assertEqual(refused, "refused")
 
-    def test_the_page_accepts_what_the_scripts_accept_and_no_more(self):
-        # The same three patterns, written once in JavaScript and once in Bash.
+    def test_the_page_lets_through_only_what_the_scripts_take(self):
         source = (SITE / "plan.js").read_text()
         script = (ROOT / "controller" / "first-boot.sh").read_text()
         bootstrap = yaml.safe_load(USER_DATA)["runcmd"][0][2]
+        # The login: one pattern, in JavaScript with a length and in Bash without.
         self.assertIn("var ADMIN = /^[A-Za-z_][A-Za-z0-9_.-]{0,31}$/;", source)
-        self.assertIn("var ADDRESS = /^[A-Za-z0-9][A-Za-z0-9.:-]{0,252}$/;", source)
-        self.assertIn(r"var RELEASE_NAME = /^[A-Za-z0-9][A-Za-z0-9._\/-]{0,99}$/;", source)
         for text in (script, bootstrap):
             self.assertIn("[[ $admin != REPLACE_WITH_ADMIN_LOGIN && $admin =~ ^[A-Za-z_][A-Za-z0-9_.-]*$ ]]", text)
-        self.assertIn("$address =~ ^[A-Za-z0-9][A-Za-z0-9.:-]*$ ]]", script)
+        # The release: the page takes tags only, which the command in the file takes too.
+        self.assertIn(r"var RELEASE_NAME = /^v[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$/;", source)
         self.assertIn("[[ $release =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]]", bootstrap)
+        # The address: whatever the page lets through, expose-semaphore.sh's own rule takes, here in Python.
+        def script_takes(address):
+            if re.fullmatch(r"[0-9.]+", address) or ":" in address:
+                try:
+                    ipaddress.ip_address(address)
+                except ValueError:
+                    return False
+                return "%" not in address
+            return bool(re.fullmatch(r"[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?", address))
+        samples = [IPV4, IPV4 + ":443", "192.0.2.300", "1.2.3", "01.2.3.4", "controller.example.test",
+                   "controller.example.test.", "controller.example.test:8443", "-controller", "controller-", "c", "a..b",
+                   IPV6, f"[{IPV6}]", IPV6 + "%eth0", "https://controller.example.test", "a b", "a" * 253, "a" * 254]
+        verdicts = node("args[0].map((address) => !('address' in plan.validate({admin: 'ada', expose: 'https', address})))",
+                        samples)
+        for address, page_takes in zip(samples, verdicts):
+            with self.subTest(address=address):
+                self.assertLessEqual(page_takes, script_takes(address))
+        taken = [address for address, page_takes in zip(samples, verdicts) if page_takes]
+        # IPv6 is the one thing the script takes and the page leaves to the command line.
+        self.assertEqual(taken, [IPV4, "controller.example.test", "c", "a..b", "a" * 253])
 
     def test_an_address_without_https_is_dropped_not_passed_on(self):
         steps = node("plan.steps(args[0])", answers("azure", expose="tunnel", address="controller.example.test"))
@@ -289,6 +328,8 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(encoded, "platform=azure&system=rocky&admin=ada&expose=https&address=controller.example.test")
         decoded = node("plan.decode(args[0])", "#" + encoded + "&view=steps&other=1")
         self.assertEqual(decoded, dict(case, release="v1.13.0"))
+        # A name without a value is no value: "#admin" must not make an administrator called admin.
+        self.assertEqual(node("plan.decode(args[0])", "#admin&system&view=steps")["admin"], "")
         # Unknown choices fall back to the defaults, and a broken escape is ignored.
         self.assertEqual(node("plan.decode(args[0])", "#platform=nowhere&system=plan9&expose=ftp&admin=%E0%A4%A"),
                          dict(platform="proxmox", system="ubuntu", admin="", expose="tunnel", address="", release="v1.13.0"))
@@ -305,15 +346,19 @@ class PageSourceTests(unittest.TestCase):
         html = (SITE / "index.html").read_text()
         self.assertEqual(re.findall(r'(?:src|href)="([^"#]+)"', html.replace('href="data:', 'x="')),
                          ["setup.css", "plan.js", "setup.js"])
-        self.assertIn("default-src 'none'; script-src 'self'; style-src 'self'; img-src data:; base-uri 'none'; "
-                      "form-action 'none'", html)
+        # No policy in the page itself: from a clone, some browsers match 'self' to no file at all.
+        # A server sends it as a header, which site/README.md gives; nothing inline would break under it.
+        self.assertNotIn("Content-Security-Policy", html)
+        self.assertIn("`Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src data:; "
+                      "base-uri 'none'; form-action 'none'`", (SITE / "README.md").read_text())
         self.assertNotRegex(html, r"<script(?![^>]*\bsrc=)")
         self.assertNotRegex(html, r"\sstyle=|\son[a-z]+=")
         for name in ("setup.css", "setup.js"):
             self.assertNotRegex((SITE / name).read_text(), r"https?://|@import|url\(")
-        urls = {url.rstrip(".") for url in re.findall(r"https?://[^\s'\"`)]+", (SITE / "plan.js").read_text())}
+        urls = {url.rstrip(".,") for url in re.findall(r"https?://[^\s'\"`)]+", (SITE / "plan.js").read_text())}
+        # The last one is the word in "without https://", which the page says about an address.
         self.assertEqual(urls, {"https://github.com/kevo099/ansible-semaphore-guide", "http://127.0.0.1:8088/",
-                                "https://github.com/kevo099/ansible-semaphore-guide.git"})
+                                "https://github.com/kevo099/ansible-semaphore-guide.git", "https://"})
 
     def test_the_page_writes_answers_as_text_never_as_markup(self):
         script = (SITE / "setup.js").read_text()

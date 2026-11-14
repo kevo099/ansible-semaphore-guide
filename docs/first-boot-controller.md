@@ -51,7 +51,7 @@ address=
 | `release` | The guide's release tag to install. |
 | `admin` | The login of the administrator the VM is created with. It will own the guide's folder, `~/ansible-semaphore-guide`, and the lab folder. |
 | `expose` | `tunnel`: the UI stays on loopback, for an SSH tunnel. `https`: nginx also serves it on port 443 of the VM's address, as [`--expose https`](stage-1-controller.md#optional-publish-the-ui-on-the-controllers-address) does. |
-| `address` | With `https` only: the IP address or DNS name you will browse to, which the certificate names. Empty means the VM's own address, which on a cloud VM behind NAT, as on Azure, is a private one. |
+| `address` | With `https` only: the IP address or DNS name you will browse to, without a port, which the certificate names. Empty means the VM's own address, which on a cloud VM behind NAT, as on Azure, is a private one. |
 
 Save the result as `controller-first-boot.yaml`. It holds no secret, and the
 installation prints none: the initial admin password is made on the VM and
@@ -66,9 +66,19 @@ differ.
 
 ### Proxmox VE: vendor data
 
-**Where: the Proxmox node's shell, as root.** Copy the file to the node's
-snippets folder, create the VM from the cloud image, and attach the file as
-vendor data before the first start:
+**Where: your workstation, then the Proxmox node's shell as root.** Before
+the first time, [allow snippets](platform-proxmox.md#do-enable-snippets-on-a-storage)
+on the node's `local` storage, and download and check the cloud image on the
+node, as [the cloud-image example](platform-proxmox.md#do-build-a-vm-from-a-cloud-image)
+shows. Copy the file and your workstation's public key to the node:
+
+```bash
+scp controller-first-boot.yaml root@PROXMOX_NODE:/var/lib/vz/snippets/controller-first-boot.yaml
+scp ~/.ssh/id_ed25519.pub root@PROXMOX_NODE:/root/ADMIN_KEY.pub
+```
+
+On the node, create the VM from the image and attach the file as vendor data
+before the first start:
 
 ```bash
 qm create VMID --name controller --ostype l26 --cpu host --cores 2 --memory 4096 \
@@ -85,7 +95,9 @@ qm start VMID
 `ADMIN` is the login you put in the file. On AlmaLinux and Rocky Linux, add
 `qm set VMID --rng0 source=/dev/urandom` before the start. Use `vendor=`, not
 `user=`: Proxmox writes the user data itself, with your administrator and its
-key, and `user=` would replace that.
+key, and `user=` would replace that. Proxmox also has a new VM install every
+pending update at its first boot, before the controller, which adds minutes;
+`qm set VMID --ciupgrade 0` turns that off.
 [Stage 3](stage-3-new-vms-cloud-init.md#do-on-proxmox-attach-the-file-to-a-new-vm)
 has the snippets storage, the image and the fixed-address form.
 
@@ -145,9 +157,11 @@ sudo grep -E 'Semaphore UI|fingerprint' /var/log/ansible-guide-first-boot.log
    [`controller/first-boot.sh`](../controller/first-boot.sh).
 3. That script runs the installer for your system with `--apply --editor
    ADMIN`, and `--expose https` when you chose it, then the readiness check.
-4. Everything it printed is in `/var/log/ansible-guide-first-boot.log`, which
-   root alone reads. The last lines say `RESULT: OK` or `RESULT: STOPPED:`
-   with the reason.
+4. Everything it printed is in `/var/log/ansible-guide-first-boot.log`, a
+   root-only file. The last lines say `RESULT: OK` or `RESULT: STOPPED:` with
+   the reason. cloud-init keeps the same lines in
+   `/var/log/cloud-init-output.log` and shows them on the VM's console; none
+   of them is secret.
 
 It does not create the VM, register RHEL, open a firewall in front of the VM,
 add machines or change the admin password. Those stay yours.
@@ -159,21 +173,29 @@ add machines or change the admin password. Those stay yours.
 
 | The reason given | Cause | Next step |
 | --- | --- | --- |
-| `admin= in ... must be the login of this VM's administrator` | The placeholder was left in, or the value is empty | Create the VM again with the value filled in, or install by hand with [Stage 1](stage-1-controller.md) |
-| `this VM has no account ... with a home folder` | The VM was created with another administrator than the file names | The same |
+| `there is no /etc/ansible-semaphore-guide/first-boot.conf` | The script was run by hand on a VM that never got the file | Install by hand with [Stage 1](stage-1-controller.md) |
+| `admin= in ... must be the login of this VM's administrator` | The placeholder was left in, or the value is empty | Create the VM again with the value filled in, or install by hand with Stage 1 |
+| `admin= in ... must be your own administrator account, not root` | The file names `root` or `semaphore` | The same |
+| `this VM has no account ...` | The VM was created with another administrator than the file names | The same |
+| `release= in ...`, `expose= in ...` or `address= in ...` | That value is not one the scripts take: a release tag, `tunnel` or `https`, and an IP address or DNS name without a port, given only with `https` | Correct the value in `/etc/ansible-semaphore-guide/first-boot.conf`, then run the script again as shown below the table; for `release=`, install by hand with Stage 1 |
+| `this system (ID=...) is none of Ubuntu, RHEL, AlmaLinux and Rocky Linux` | Another system's image | Use an image of a supported system |
 | `Git is not installed, so cloud-init could not install packages` | No working package repositories, as on RHEL before registration, or no outbound network | Fix that, then install by hand with Stage 1 |
 | `could not fetch release ... from ...` | No outbound HTTPS to GitHub, or a release tag that does not exist; the log has Git's own message | Fix that, then install by hand with Stage 1 |
 | `release ... has no controller/first-boot.sh` | The file names a release before `v1.13.0` | Use `v1.13.0` or later |
 | `the installer ended with an error, shown above` | The installer's own stop, which the log shows | [Stage 1, when it fails](stage-1-controller.md#when-it-fails). The installer does not run twice on one VM, so after a failure half way a new VM is the short way |
+| `the controller is installed, but publishing the UI over HTTPS failed` | The installer's last step, `--expose https`, failed; the controller itself is complete, on loopback | Fix the cause the log shows, then run the script again; it publishes without installing again |
 | `the controller is installed, but its readiness check fails` | A check of [controller readiness](stage-1-controller.md#check-controller-readiness) fails | `sudo python3.12 controller/check-controller.py` names the check |
 
 No line at all in the log, or no log: the VM never received the file. Check
 the snippet's path and storage, the `cidata` label of the seed, that the VM
 was made from a cloud image, and that no user data of your own has a
-`write_files:` or `runcmd:`, which would replace the file's.
+`write_files:`, `packages:` or `runcmd:`, which would replace the file's.
 
 After a stop that you fixed on the VM, the script runs again by hand, from the
-guide's folder: `sudo bash controller/first-boot.sh`.
+guide's folder: `sudo bash controller/first-boot.sh`. It never runs the
+installer a second time: on a controller that is already installed it
+finishes an HTTPS publication that failed, runs the readiness check and
+reports.
 
 ## Concept
 

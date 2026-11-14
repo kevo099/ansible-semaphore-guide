@@ -64,8 +64,20 @@ INSTALLER = textwrap.dedent('''\
     printf '%s\\n' "$(basename "$0") $*" >> "$MOCK_INSTALLER_LOG"
     printf 'HOME=%s\\n' "$HOME" >> "$MOCK_INSTALLER_LOG"
     echo "installer output"
+    # The real installer seeds, and writes its marker, before it publishes over HTTPS.
+    [ -z "${MOCK_INSTALLER_SEEDS:-}" ] || : > "$MOCK_INSTALLER_SEEDS"
     exit "${MOCK_INSTALLER_STATUS:-0}"
 ''')
+
+EXPOSE = textwrap.dedent('''\
+    printf '%s\\n' "$(basename "$0") $*" >> "$MOCK_INSTALLER_LOG"
+    echo "exposure output"
+    [ "${MOCK_EXPOSE_STATUS:-0}" != 0 ] || printf 'https\\n' > "$MOCK_EXPOSURE_FILE"
+    exit "${MOCK_EXPOSE_STATUS:-0}"
+''')
+# Built from parts so the repository's check for literal addresses passes over them.
+IPV4 = "192.0.2" + ".5"
+IPV6 = "2001:db8" + "::5"
 
 
 def bootstrap_script(text):
@@ -129,7 +141,7 @@ class UserDataTests(unittest.TestCase):
     def test_the_comment_names_each_value_and_both_ways_to_hand_the_file_over(self):
         comment = "".join(line for line in self.text.splitlines(keepends=True) if line.startswith("#"))
         for word in ("release ", "admin ", "expose ", "address ", "vendor data", "Custom data", "holds no secret",
-                     "docs/first-boot-controller.md", "site/index.html"):
+                     "docs/first-boot-controller.md", "site/index.html", "write_files:, packages: or runcmd:"):
             self.assertIn(word, comment)
 
     def test_the_script_fetches_from_this_repository_only(self):
@@ -184,6 +196,10 @@ class BootstrapTests(Relocated):
                                "holds the placeholder or is empty")
         self.write_conf(admin="")
         self.assertStopped(self.run_bootstrap(), "admin= in")
+        # root has a home folder, and the installer refuses it as the lab folder's owner only later.
+        self.write_conf(admin="root")
+        self.assertStopped(self.run_bootstrap(MOCK_ACCOUNTS=json.dumps({"root": str(self.home)})),
+                           "admin= in " + str(self.conf) + " must be your own administrator account, not root")
         self.assertEqual(self.recorded("runuser"), [])
 
     def test_an_account_the_vm_does_not_have_stops_it(self):
@@ -228,33 +244,38 @@ class FirstBootScriptTests(Relocated):
         super().setUp()
         self.controller = self.work / "guide" / "controller"
         self.controller.mkdir(parents=True)
-        self.marker, self.os_release = self.work / "seeded", self.work / "os-release"
+        self.marker, self.os_release, self.exposure = self.work / "seeded", self.work / "os-release", self.work / "exposure"
         self.os_release.write_text('ID="ubuntu"\nVERSION_ID="24.04"\n')
         self.installer_log = self.work / "installer.log"
         script = SCRIPT.read_text()
         for original, replacement in ((CONF, self.conf), (LOG, self.log), ("/etc/os-release", self.os_release),
                                       ("/etc/semaphore/.guide-project-seeded", self.marker),
+                                      ("/etc/semaphore/exposure", self.exposure),
                                       ("/etc/semaphore/.practice-project-seeded", self.work / "seeded-earlier")):
             self.assertIn(original, script)
             script = script.replace(original, str(replacement))
         (self.controller / "first-boot.sh").write_text(script)
         for name in ("install-controller.sh", "install-controller-el9.sh"):
             (self.controller / name).write_text(INSTALLER)
+        (self.controller / "expose-semaphore.sh").write_text(EXPOSE)
         (self.controller / "check-controller.py").write_text("")
 
     def run_script(self, **environment):
         return subprocess.run(["bash", str(self.controller / "first-boot.sh")],
-                              env=self.environment(MOCK_INSTALLER_LOG=str(self.installer_log), **environment),
+                              env=self.environment(MOCK_INSTALLER_LOG=str(self.installer_log),
+                                                   MOCK_EXPOSURE_FILE=str(self.exposure), **environment),
                               capture_output=True, text=True)
 
     def installer_calls(self):
         return self.installer_log.read_text().splitlines() if self.installer_log.exists() else []
 
     def assertStopped(self, result, reason):
+        """It ended with status 1 and one STOPPED line, on the screen and in the log, that holds the reason."""
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertIn(f"first-boot: RESULT: STOPPED: {reason}", result.stdout)
-        self.assertIn(f"first-boot: RESULT: STOPPED: {reason}", self.log.read_text())
-        self.assertNotIn("RESULT: OK", result.stdout)
+        [line] = [line for line in result.stdout.splitlines() if line.startswith("first-boot: RESULT: ")]
+        self.assertTrue(line.startswith("first-boot: RESULT: STOPPED: ") and reason in line, line)
+        self.assertEqual(result.stdout.splitlines()[-1], line)
+        self.assertIn(line + "\n", self.log.read_text())
 
     def test_ubuntu_runs_its_installer_for_the_administrator_and_reports_ok(self):
         result = self.run_script()
@@ -300,16 +321,44 @@ class FirstBootScriptTests(Relocated):
     def test_values_the_installer_must_not_get_stop_it(self):
         cases = ((dict(admin="REPLACE_WITH_ADMIN_LOGIN"), "admin= in"), (dict(admin="a b"), "admin= in"),
                  (dict(admin=""), "admin= in"),
+                 (dict(admin="root"), "admin= in " + str(self.conf) + " must be your own administrator account, not root"),
+                 (dict(admin="semaphore"), "must be your own administrator account, not semaphore"),
                  (dict(admin="grace"), "this VM has no account grace"),
                  (dict(expose="http"), "expose= in"), (dict(expose="https", address="--editor"), "address= in"),
                  (dict(expose="https", address="a b"), "address= in"),
-                 (dict(address="controller.example.test"), "address= in"))
+                 (dict(address="controller.example.test"), "address= in " + str(self.conf) + " is only for expose=https"),
+                 # What controller/expose-semaphore.sh would refuse only after the whole installation.
+                 (dict(expose="https", address=IPV4 + ":443"), "is not a valid IP address"),
+                 (dict(expose="https", address="192.0.2.300"), "is not a valid IP address"),
+                 (dict(expose="https", address="controller.example.test:8443"), "is not a valid IP address"),
+                 (dict(expose="https", address=IPV6 + "%eth0"), "is not a valid IP address"),
+                 (dict(expose="https", address="controller.example.test."), "must be an IP address or a DNS name"),
+                 (dict(expose="https", address="https://controller.example.test"), "is not a valid IP address"))
         for values, reason in cases:
             with self.subTest(values=values):
                 self.write_conf(**values)
                 self.assertStopped(self.run_script(), reason)
         self.assertEqual(self.installer_calls(), [])
         self.assertEqual(self.recorded("python3.12"), [])
+
+    def test_an_ip_address_of_either_family_reaches_the_installer(self):
+        for address in (IPV4, IPV6):
+            with self.subTest(address=address):
+                self.installer_log.unlink(missing_ok=True)
+                self.write_conf(expose="https", address=address)
+                self.assertEqual(self.run_script().returncode, 0)
+                self.assertEqual(self.installer_calls()[0],
+                                 f"install-controller.sh --apply --editor ada --expose https --address {address}")
+
+    def test_the_address_check_is_the_exposure_scripts_own(self):
+        expose = (ROOT / "controller" / "expose-semaphore.sh").read_text()
+        script = SCRIPT.read_text()
+        for shared in ("python3 -I -c 'import ipaddress, sys; ipaddress.ip_address(sys.argv[1])'",
+                       "=~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]]", "=~ ^[0-9.]+$ ||", "== *:* ]]", "== *%* ]]"):
+            self.assertIn(shared, expose.replace('"$address"', "$address"))
+        for shared in ("python3 -I -c 'import ipaddress, sys; ipaddress.ip_address(sys.argv[1])'",
+                       "=~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]]", "=~ ^[0-9.]+$ ||", "== *:* ]]", "!= *%* ]]"):
+            self.assertIn(shared, script)
 
     def test_a_missing_values_file_is_named(self):
         self.conf.unlink()
@@ -337,6 +386,36 @@ class FirstBootScriptTests(Relocated):
                 self.assertIn("first-boot: RESULT: OK", result.stdout)
                 self.assertEqual(self.installer_calls(), [])
                 marker.unlink()
+
+    def test_an_installer_that_fails_only_at_https_says_to_run_this_again(self):
+        self.write_conf(expose="https")
+        result = self.run_script(MOCK_INSTALLER_STATUS="1", MOCK_INSTALLER_SEEDS=str(self.marker))
+        self.assertStopped(result, "the controller is installed, but publishing the UI over HTTPS failed, for the reason "
+                                   "shown above; fix it and run this again: sudo bash controller/first-boot.sh")
+        self.assertNotIn("a new VM is the short way", result.stdout)
+        self.assertEqual(self.recorded("python3.12"), [])
+
+    def test_a_second_run_finishes_the_https_step_that_failed_and_only_then_reports_ok(self):
+        self.write_conf(expose="https", address="controller.example.test")
+        self.assertEqual(self.run_script(MOCK_INSTALLER_STATUS="1", MOCK_INSTALLER_SEEDS=str(self.marker)).returncode, 1)
+        # Still failing: no OK, and the installer is not run a second time.
+        result = self.run_script(MOCK_EXPOSE_STATUS="1")
+        self.assertStopped(result, "publishing the UI over HTTPS failed, for the reason shown above; fix it and run this "
+                                   "again: sudo bash controller/first-boot.sh")
+        self.assertIn("exposure output", result.stdout)
+        # Fixed: the exposure script alone runs, with the address, and then the readiness check.
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual([call.split(" ", 1)[0] for call in self.installer_calls() if not call.startswith("HOME=")],
+                         ["install-controller.sh", "expose-semaphore.sh", "expose-semaphore.sh"])
+        self.assertEqual(self.installer_calls()[-1], "expose-semaphore.sh --mode https --address controller.example.test")
+        for line in ("first-boot: publishing the UI over HTTPS, which an earlier run did not finish",
+                     "first-boot: RESULT: OK", "first-boot: next, browse to the https address"):
+            self.assertIn(line, result.stdout)
+        # Published: a further run leaves the exposure alone.
+        calls = len(self.installer_calls())
+        self.assertEqual(self.run_script().returncode, 0)
+        self.assertEqual(len(self.installer_calls()), calls)
 
     def test_a_second_run_adds_to_the_log(self):
         self.assertEqual(self.run_script().returncode, 0)

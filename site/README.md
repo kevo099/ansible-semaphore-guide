@@ -21,6 +21,9 @@ a shared link opens the same steps.
   There is nothing to build and nothing to configure, and the page loads
   nothing from another site. Over plain HTTP the copy buttons use the
   browser's older copy command; over HTTPS they use the clipboard directly.
+  The page has no inline script or style, so it works under a strict policy.
+  If your server can add a response header, give it this one:
+  `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src data:; base-uri 'none'; form-action 'none'`.
 
 ## What it covers
 
@@ -34,6 +37,10 @@ a shared link opens the same steps.
 RHEL outside Azure always gets the commands, because a new RHEL VM must be
 registered before it can install packages. Every case ends with the same
 steps: open Semaphore, change the admin password, add the first machine.
+
+The page lets through only values the scripts take: a login, an IPv4 address
+or a DNS name, and a release tag. For an IPv6 address, choose the tunnel and
+run [`expose-semaphore.sh`](../controller/expose-semaphore.sh) afterwards.
 
 ## For maintainers
 

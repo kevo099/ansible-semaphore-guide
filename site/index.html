@@ -3,8 +3,6 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy"
-        content="default-src 'none'; script-src 'self'; style-src 'self'; img-src data:; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <title>Set up a controller · Ansible + Semaphore guide</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230f6cbd'/%3E%3Cpath d='M4 8.5l2.5 2.5L12 5.5' fill='none' stroke='%23fff' stroke-width='2'/%3E%3C/svg%3E">
@@ -41,7 +39,7 @@
       <fieldset>
         <legend>Which system will the VM run?</legend>
         <div id="systems" class="cards"></div>
-        <p id="method-reason" class="notice" hidden></p>
+        <p id="method-reason" class="notice" role="status" hidden></p>
       </fieldset>
       <div class="field">
         <label for="admin">Administrator login on the VM</label>
@@ -63,7 +61,7 @@
       </fieldset>
       <div class="field" id="address-field" hidden>
         <label for="address">Address you will browse to <span class="optional">(optional)</span></label>
-        <p id="address-help" class="help">An IP address or a DNS name, which the certificate will name. Leave it empty
+        <p id="address-help" class="help">An IPv4 address or a DNS name, which the certificate will name. Leave it empty
           to use the VM's own address. On a cloud VM behind NAT, as on Azure, that is the private address.</p>
         <input id="address" name="address" type="text" autocomplete="off" autocapitalize="none" spellcheck="false"
                maxlength="253" placeholder="controller.example.test" aria-describedby="address-help address-error">

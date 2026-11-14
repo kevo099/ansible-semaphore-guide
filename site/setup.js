@@ -60,11 +60,12 @@
     });
   }
 
-  function copyButton(text, label, what) {
-    var button = el('button', { type: 'button', className: 'copy', text: label });
+  function copyButton(text, label, what, of) {
+    var button = el('button', { type: 'button', className: 'copy', text: label, 'aria-label': label + ': ' + of });
     button.addEventListener('click', function () {
       copyText(text).then(function () {
         button.textContent = 'Copied';
+        button.focus();
         say(what + ' copied.');
         window.setTimeout(function () { button.textContent = label; }, 1600);
       }, function () {
@@ -125,7 +126,7 @@
   function updateAddress() {
     var view = current === 2 ? '&view=steps' : '';
     var hash = plan.encode(answers) + view;
-    window.history.replaceState(null, '', hash ? '#' + hash.replace(/^&/, '') : window.location.pathname);
+    window.history.replaceState(null, '', hash ? '#' + hash.replace(/^&/, '') : window.location.pathname + window.location.search);
   }
 
   // The first panel, up to and including `last`, that has a wrong value; -1 when none has.
@@ -180,7 +181,7 @@
     }
     if (step.file) {
       item.appendChild(el('div', { className: 'file-actions' }, [
-        copyButton(step.file.content, 'Copy the file', 'The file'),
+        copyButton(step.file.content, 'Copy the file', 'The file', step.title),
         (function () {
           var button = el('button', { type: 'button', className: 'download', text: 'Download ' + step.file.name });
           button.addEventListener('click', function () { download(step.file.name, step.file.content); });
@@ -197,7 +198,7 @@
         command.label ? el('div', { className: 'command-label', text: command.label }) : null,
         el('div', { className: 'command-box' }, [
           el('pre', { text: command.code, tabindex: '0' }),
-          copyButton(command.code, 'Copy', 'The command')
+          copyButton(command.code, 'Copy', 'The command', step.title + (command.label ? ', ' + command.label.toLowerCase() : ''))
         ])
       ]));
     });
@@ -209,7 +210,7 @@
       })));
     }
     if (step.checked) { item.appendChild(el('p', { className: 'checked', text: 'Checked: ' + step.checked })); }
-    var box = el('input', { type: 'checkbox' });
+    var box = el('input', { type: 'checkbox', 'aria-label': 'Done: ' + step.title });
     box.checked = Boolean(done[step.id]);
     box.addEventListener('change', function () {
       done[step.id] = box.checked;
@@ -265,11 +266,11 @@
     byId('previous').addEventListener('click', function () { show(current - 1); });
     byId('next').addEventListener('click', function () { show(current + 1); });
     byId('change').addEventListener('click', function () { show(0); });
-    // A saved or shared address opens on the steps when its answers are complete.
+    // A saved or shared address opens on the steps; with a value missing or wrong, on the
+    // field that needs it, with the reason.
     var wantsSteps = /(^|[#&])view=steps(&|$)/.test(window.location.hash);
     refreshForm();
-    show(wantsSteps && Object.keys(plan.validate(answers)).length === 0 ? 2 : 0);
-    if (!wantsSteps) { PANELS.forEach(function (panel) { panel.fields.forEach(function (field) { showError(field, ''); }); }); }
+    show(wantsSteps ? 2 : 0);
   }
 
   start();
