@@ -1,0 +1,75 @@
+#cloud-config
+# Install the guide's controller at the first boot of a new VM: Ubuntu 24.04, or
+# RHEL, AlmaLinux or Rocky Linux 9.4 or later. cloud-init installs Git, fetches
+# the guide at the release named below as the VM's administrator and runs
+# controller/first-boot.sh, which runs the installer and the readiness check.
+# About ten minutes after the VM starts, Semaphore is installed and seeded.
+#
+# Set the four values under "content:" and change nothing else; the setup page,
+# site/index.html, fills them in for you.
+#
+#   release  The guide's release tag to install.
+#   admin    The login of the administrator the VM is created with, who will own
+#            the guide's folder and the lab folder.
+#   expose   tunnel: the UI stays on loopback, for an SSH tunnel. https: nginx
+#            also serves it on port 443 of the VM's address.
+#   address  With https only: the IP address or DNS name you will browse to,
+#            which the certificate names. Empty: the VM's own address, which on
+#            a cloud VM behind NAT, as on Azure, is a private one.
+#
+# Give the file to the new VM's cloud-init: as vendor data where the platform
+# writes the user data itself (Proxmox: qm set VMID --cicustom vendor=...), and
+# as user data elsewhere (Azure: the Custom data field, or az vm create
+# --custom-data). docs/first-boot-controller.md shows each. cloud-init reads it
+# at first boot only; on a VM that already exists, follow Stage 1 instead.
+#
+# The file holds no secret, and the installation prints none: the initial admin
+# password is created on the VM and stays in a root-only file there. Do not add
+# a write_files: or runcmd: of your own beside vendor data; it would replace
+# this file's.
+write_files:
+  - path: /etc/ansible-semaphore-guide/first-boot.conf
+    owner: root:root
+    permissions: "0644"
+    content: |
+      release=v1.13.0
+      admin=REPLACE_WITH_ADMIN_LOGIN
+      expose=tunnel
+      address=
+
+packages:
+  - git
+
+runcmd:
+  - - /bin/bash
+    - -c
+    - |
+      # Fetch the guide as the administrator and hand over to its first-boot script.
+      set -euo pipefail
+      conf=/etc/ansible-semaphore-guide/first-boot.conf
+      log=/var/log/ansible-guide-first-boot.log
+      origin=https://github.com/kevo099/ansible-semaphore-guide.git
+      [[ -e $log ]] || install -m 0600 /dev/null "$log"
+      stop() {
+        printf 'first-boot: RESULT: STOPPED: %s\n' "$*" | tee -a "$log"
+        exit 1
+      }
+      value() { sed -n "s/^$1=//p" "$conf" | tr -d '\r' | sed 's/[[:space:]]*$//' | tail -n 1; }
+      release=$(value release)
+      admin=$(value admin)
+      [[ $release =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || stop "release= in $conf must be a release tag such as v1.13.0"
+      [[ $admin =~ ^[A-Za-z_][A-Za-z0-9_.-]*$ ]] ||
+        stop "admin= in $conf must be the login of this VM's administrator; it still holds the placeholder or is empty"
+      home=$(getent passwd "$admin" | cut -d: -f6) || home=
+      [[ -n $home && -d $home ]] ||
+        stop "this VM has no account $admin with a home folder; create the VM with that administrator, or continue by hand with docs/stage-1-controller.md"
+      command -v git >/dev/null ||
+        stop "Git is not installed, so cloud-init could not install packages. On RHEL, register the system first. Then continue by hand with docs/stage-1-controller.md"
+      guide=$home/ansible-semaphore-guide
+      if [[ ! -d $guide/.git ]]; then
+        runuser -u "$admin" -- env HOME="$home" git clone --quiet --branch "$release" "$origin" "$guide" >>"$log" 2>&1 ||
+          stop "could not fetch release $release from $origin; the reason is in $log. Check the VM's outbound HTTPS, then continue by hand with docs/stage-1-controller.md"
+      fi
+      [[ -f $guide/controller/first-boot.sh ]] ||
+        stop "release $release has no controller/first-boot.sh; an installation at first boot needs v1.13.0 or later"
+      exec /bin/bash "$guide/controller/first-boot.sh"

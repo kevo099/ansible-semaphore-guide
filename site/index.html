@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self'; img-src data:; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>Set up a controller · Ansible + Semaphore guide</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230f6cbd'/%3E%3Cpath d='M4 8.5l2.5 2.5L12 5.5' fill='none' stroke='%23fff' stroke-width='2'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="setup.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to the form</a>
+  <header class="top">
+    <div class="top-inner">
+      <span class="product">Ansible + Semaphore guide</span>
+      <span class="crumb" aria-hidden="true">›</span>
+      <h1>Set up a controller</h1>
+    </div>
+  </header>
+
+  <nav class="stepper" aria-label="Setup">
+    <ol id="stepper"></ol>
+  </nav>
+
+  <main id="main" tabindex="-1">
+    <noscript>
+      <p class="notice">This page builds its steps with JavaScript. The same steps, in full, are in the guide:
+        docs/ONBOARDING.md and docs/first-boot-controller.md.</p>
+    </noscript>
+
+    <section id="panel-basics" class="panel" hidden>
+      <h2>Basics</h2>
+      <p class="lead">Answer three questions. The page then gives you numbered steps with the exact commands,
+        and what each should show. Nothing you enter leaves this page.</p>
+      <fieldset>
+        <legend>Where will the controller run?</legend>
+        <div id="platforms" class="cards"></div>
+      </fieldset>
+      <fieldset>
+        <legend>Which system will the VM run?</legend>
+        <div id="systems" class="cards"></div>
+        <p id="method-reason" class="notice" hidden></p>
+      </fieldset>
+      <div class="field">
+        <label for="admin">Administrator login on the VM</label>
+        <p id="admin-help" class="help">The account you log in to the VM with, which can use sudo. It will own the
+          guide's folder and the lab folder.</p>
+        <input id="admin" name="admin" type="text" autocomplete="off" autocapitalize="none" spellcheck="false"
+               maxlength="32" aria-describedby="admin-help admin-error">
+        <p id="admin-error" class="error" role="alert" hidden></p>
+      </div>
+    </section>
+
+    <section id="panel-access" class="panel" hidden>
+      <h2>Access</h2>
+      <p class="lead">Semaphore's web UI listens on the VM itself only. Choose how your browser reaches it; you can
+        change it later with one command.</p>
+      <fieldset>
+        <legend>How will you open Semaphore?</legend>
+        <div id="exposures" class="cards"></div>
+      </fieldset>
+      <div class="field" id="address-field" hidden>
+        <label for="address">Address you will browse to <span class="optional">(optional)</span></label>
+        <p id="address-help" class="help">An IP address or a DNS name, which the certificate will name. Leave it empty
+          to use the VM's own address. On a cloud VM behind NAT, as on Azure, that is the private address.</p>
+        <input id="address" name="address" type="text" autocomplete="off" autocapitalize="none" spellcheck="false"
+               maxlength="253" placeholder="controller.example.test" aria-describedby="address-help address-error">
+        <p id="address-error" class="error" role="alert" hidden></p>
+      </div>
+      <details class="advanced">
+        <summary>Advanced</summary>
+        <div class="field">
+          <label for="release">Release of the guide to install</label>
+          <p id="release-help" class="help">A release tag. This page was written for the release it shows.</p>
+          <input id="release" name="release" type="text" autocomplete="off" autocapitalize="none" spellcheck="false"
+                 maxlength="100" aria-describedby="release-help release-error">
+          <p id="release-error" class="error" role="alert" hidden></p>
+        </div>
+      </details>
+    </section>
+
+    <section id="panel-steps" class="panel" hidden>
+      <h2>Your steps</h2>
+      <div class="summary">
+        <dl id="summary"></dl>
+        <button type="button" class="link" id="change">Change the answers</button>
+      </div>
+      <p id="progress" class="progress" aria-live="polite"></p>
+      <ol id="steps" class="steps"></ol>
+      <p class="after">From here the guide continues with patching, STIG audits and the daily runbooks:
+        <a id="guide-link" rel="noopener">open the guide</a>.</p>
+    </section>
+  </main>
+
+  <footer class="actions">
+    <div class="actions-inner">
+      <button type="button" id="previous" class="secondary">Previous</button>
+      <button type="button" id="next" class="primary">Next</button>
+      <span id="status" class="status" role="status" aria-live="polite"></span>
+    </div>
+  </footer>
+
+  <script src="plan.js"></script>
+  <script src="setup.js"></script>
+</body>
+</html>
