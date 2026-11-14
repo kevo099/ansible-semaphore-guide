@@ -58,7 +58,7 @@ runcmd:
       release=$(value release)
       admin=$(value admin)
       [[ $release =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || stop "release= in $conf must be a release tag such as v1.13.0"
-      [[ $admin =~ ^[A-Za-z_][A-Za-z0-9_.-]*$ ]] ||
+      [[ $admin != REPLACE_WITH_ADMIN_LOGIN && $admin =~ ^[A-Za-z_][A-Za-z0-9_.-]*$ ]] ||
         stop "admin= in $conf must be the login of this VM's administrator; it still holds the placeholder or is empty"
       home=$(getent passwd "$admin" | cut -d: -f6) || home=
       [[ -n $home && -d $home ]] ||

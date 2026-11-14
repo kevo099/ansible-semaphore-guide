@@ -32,7 +32,7 @@ main() {
   admin=$(value admin) expose=$(value expose) address=$(value address)
   : "${expose:=tunnel}"
 
-  [[ $admin =~ ^[A-Za-z_][A-Za-z0-9_.-]*$ ]] ||
+  [[ $admin != REPLACE_WITH_ADMIN_LOGIN && $admin =~ ^[A-Za-z_][A-Za-z0-9_.-]*$ ]] ||
     stop "admin= in $conf must be the login of this VM's administrator; it still holds the placeholder or is empty"
   getent passwd "$admin" >/dev/null ||
     stop "this VM has no account $admin; set admin= in $conf to the administrator the VM was created with"

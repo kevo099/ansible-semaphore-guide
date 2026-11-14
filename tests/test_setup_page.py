@@ -275,7 +275,7 @@ class PlanTests(unittest.TestCase):
         self.assertIn("var ADDRESS = /^[A-Za-z0-9][A-Za-z0-9.:-]{0,252}$/;", source)
         self.assertIn(r"var RELEASE_NAME = /^[A-Za-z0-9][A-Za-z0-9._\/-]{0,99}$/;", source)
         for text in (script, bootstrap):
-            self.assertIn("[[ $admin =~ ^[A-Za-z_][A-Za-z0-9_.-]*$ ]]", text)
+            self.assertIn("[[ $admin != REPLACE_WITH_ADMIN_LOGIN && $admin =~ ^[A-Za-z_][A-Za-z0-9_.-]*$ ]]", text)
         self.assertIn("$address =~ ^[A-Za-z0-9][A-Za-z0-9.:-]*$ ]]", script)
         self.assertIn("[[ $release =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]]", bootstrap)
 

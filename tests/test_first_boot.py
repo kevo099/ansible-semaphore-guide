@@ -177,8 +177,11 @@ class BootstrapTests(Relocated):
 
     def test_the_placeholder_stops_it_before_anything_is_fetched(self):
         self.write_conf(admin="REPLACE_WITH_ADMIN_LOGIN")
-        result = self.run_bootstrap(MOCK_ACCOUNTS="{}")
-        self.assertStopped(result, "this VM has no account REPLACE_WITH_ADMIN_LOGIN with a home folder")
+        # Even on a VM that has an account of that name, the placeholder is no answer.
+        for accounts in ("{}", json.dumps({"REPLACE_WITH_ADMIN_LOGIN": str(self.home)})):
+            self.assertStopped(self.run_bootstrap(MOCK_ACCOUNTS=accounts),
+                               "admin= in " + str(self.conf) + " must be the login of this VM's administrator; it still "
+                               "holds the placeholder or is empty")
         self.write_conf(admin="")
         self.assertStopped(self.run_bootstrap(), "admin= in")
         self.assertEqual(self.recorded("runuser"), [])
@@ -295,7 +298,8 @@ class FirstBootScriptTests(Relocated):
         self.assertEqual(self.installer_calls()[0], "install-controller.sh --apply --editor ada --expose https")
 
     def test_values_the_installer_must_not_get_stop_it(self):
-        cases = ((dict(admin="REPLACE WITH"), "admin= in"), (dict(admin=""), "admin= in"),
+        cases = ((dict(admin="REPLACE_WITH_ADMIN_LOGIN"), "admin= in"), (dict(admin="a b"), "admin= in"),
+                 (dict(admin=""), "admin= in"),
                  (dict(admin="grace"), "this VM has no account grace"),
                  (dict(expose="http"), "expose= in"), (dict(expose="https", address="--editor"), "address= in"),
                  (dict(expose="https", address="a b"), "address= in"),
