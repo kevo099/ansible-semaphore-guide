@@ -74,6 +74,7 @@ flowchart TD
 | Step | Stage page | Where | Check |
 | --- | --- | --- | --- |
 | Plan, and create the controller VM | [Stage 0](stage-0-plan.md) | Your hypervisor or cloud | The VM's own checks pass, and you can log in as its administrator. |
+| Or let a new controller VM install itself | [First boot](first-boot-controller.md) | Where you create the VM | `first-boot: RESULT: OK` in `/var/log/ansible-guide-first-boot.log`; skip **Install the controller**. |
 | Install the controller | [Stage 1](stage-1-controller.md#do-install-with-the-installer) | The controller VM | The readiness report says `"passed": true`, and Semaphore lists 24 templates on eight tabs. |
 | Check the service key copy | [Stage 1](stage-1-controller.md#do-save-the-service-key) | The controller | `~/svc_ansible.pub`, which the installer leaves, holds one line starting with `ssh-rsa`. |
 | Prepare a machine that exists, in one command | [Stage 2](stage-2-existing-machines.md#do-onboard-it-in-one-command-from-the-controller) | The controller, as your administrator, without `sudo` | `Prepared and in the inventory: ADMIN@ADDRESS`; the machine is also added, so skip **Add the target**. |

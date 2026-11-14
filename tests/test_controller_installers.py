@@ -130,7 +130,7 @@ class InlinePythonTests(unittest.TestCase):
                 scripts.add(script.name)
                 with self.subTest(script=script.name, command=match.group(0)):
                     self.assertIn("-I", match.group(1).split())
-        self.assertEqual(scripts, {"add-target.sh", "expose-semaphore.sh", "update-runtime.sh", *INSTALLERS})
+        self.assertEqual(scripts, {"add-target.sh", "expose-semaphore.sh", "first-boot.sh", "update-runtime.sh", *INSTALLERS})
 
 
 class SharedPreflightTests(unittest.TestCase):

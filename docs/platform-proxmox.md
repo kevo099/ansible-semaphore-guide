@@ -175,7 +175,7 @@ attached, a Stage 3 VM.
 7. **Wait for cloud-init**, in the guest, before any other work:
 
    ```bash
-   cloud-init status --wait
+   sudo cloud-init status --wait
    ```
 
 8. **Guest agent.** The VM option is on (`--agent enabled=1`), but Ubuntu's
@@ -312,7 +312,7 @@ python3 --version
 Confirm that each guest has the intended unique hostname (not `localhost` or
 the image's default), its own address, working package repositories and a
 usable administrator login. On cloud images, also run
-`cloud-init status --wait` and investigate errors rather than assuming that
+`sudo cloud-init status --wait` and investigate errors rather than assuming that
 SSH being up means the first boot has finished. Reboot each new VM once and
 confirm that disk boot and networking return.
 

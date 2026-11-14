@@ -15,6 +15,11 @@
 Stages 2 and 3 are alternatives, chosen per machine.
 [The whole path as one flowchart](ONBOARDING.md) shows every branch.
 
+[The setup page](../site/README.md) asks three questions and lists the steps
+of stages 0 and 1 for your case, each command ready to copy. For a new VM,
+[the controller can install itself at first boot](first-boot-controller.md)
+from one file, which the page fills in.
+
 ## Runbooks
 
 [Runbooks: common tasks](runbooks.md): onboard one or several machines,

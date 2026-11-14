@@ -172,7 +172,10 @@ ssh-keyscan -t rsa CONTROLLER_PUBLIC_ADDRESS | ssh-keygen -lf -
 
 Continue only when the two fingerprints match. Then install the controller as
 [Stage 1](stage-1-controller.md#do-install-with-the-installer) describes, from
-the current release. To publish the UI over HTTPS in the same run, give the
+the current release. A VM you create by hand in the portal can instead install
+itself at its first boot, from one file pasted into **Advanced → Custom data**:
+[install the controller at first boot](first-boot-controller.md#azure-custom-data).
+`controller.yml` does not pass that file. To publish the UI over HTTPS in the same run, give the
 installer the public address the certificate must name, as
 [Stage 1's publishing section](stage-1-controller.md#optional-publish-the-ui-on-the-controllers-address)
 explains:
