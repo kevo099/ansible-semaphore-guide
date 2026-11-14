@@ -404,10 +404,12 @@ password afterwards, as the last step shows.
 
 **Where: the VM's console, or the VM over SSH as its administrator.**
 
-First wait for cloud-init to finish:
+First wait for cloud-init to finish. Use `sudo`: on Enterprise Linux 9.8 the
+folder cloud-init keeps its status in is root-only, and without `sudo` the
+command waits forever:
 
 ```bash
-cloud-init status --wait
+sudo cloud-init status --wait
 ```
 
 ```text
@@ -455,8 +457,8 @@ it through a channel that does not depend on the VM's SSH host key: the
 hypervisor's console. On Proxmox that is `qm terminal VMID` or the VM's
 **Console** in the web UI, as
 [reading a VM's console](platform-proxmox.md#do-read-a-vms-console-and-host-key-fingerprint-from-the-node)
-shows. Over SSH as the administrator, `cloud-init status` and the log are fine
-for everything else; compare the fingerprint with the console once.
+shows. Over SSH as the administrator, `sudo cloud-init status` and the log are
+fine for everything else; compare the fingerprint with the console once.
 
 Two values can be missing on purpose:
 

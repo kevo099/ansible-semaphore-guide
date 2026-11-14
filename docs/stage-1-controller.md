@@ -23,6 +23,10 @@ installer leaves in your home folder.
   Enterprise Linux image older than 9.4: `sudo dnf -y upgrade`, then reboot.
 - A snapshot of the clean VM, and your worksheet from Stage 0.
 
+A VM you are about to create from a cloud image can run this whole stage by
+itself: [install the controller at first boot](first-boot-controller.md).
+[The setup page](../site/README.md) lists either way's steps for your case.
+
 ## Ubuntu or Enterprise Linux: the differences
 
 One page covers both installers. They run the same steps from the same shared

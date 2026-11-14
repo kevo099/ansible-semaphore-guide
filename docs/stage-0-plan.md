@@ -233,7 +233,11 @@ A cloud image can shorten repeat builds once you understand the ISO path:
    or authenticated provider control plane.
 
 The controller needs nothing from the guide's `cloud-init.yaml`; that file is
-for targets, in Stage 3.
+for targets, in Stage 3. To have the controller install itself at that first
+boot, give the VM
+[`controller/first-boot/user-data.yaml`](../controller/first-boot/user-data.yaml)
+instead, as [install the controller at first boot](first-boot-controller.md)
+shows; Stage 1 is then already done when you first log in.
 
 Enterprise Linux cloud images can ignore a short `hostname:` value in
 cloud-init user data and keep the static hostname `localhost`, because their
@@ -271,8 +275,11 @@ login, and that `systemctl --failed` lists nothing. On a cloud image, also run
 the following and expect `status: done`:
 
 ```bash
-cloud-init status --wait
+sudo cloud-init status --wait
 ```
+
+Use `sudo`: on Enterprise Linux 9.8 the folder cloud-init keeps its status in
+is root-only, and without `sudo` the command waits forever.
 
 On Enterprise Linux, if `systemctl --failed` lists `rngd.service` and
 `journalctl -u rngd` shows that it found no entropy source, the VM has no
