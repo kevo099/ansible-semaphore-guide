@@ -13,6 +13,8 @@
   var RELEASE = 'v1.13.0';
   var REPOSITORY = 'https://github.com/kevo099/ansible-semaphore-guide';
   var FILE_NAME = 'controller-first-boot.yaml';
+  // The controller's size from docs/stage-0-plan.md.
+  var SIZE = 'at least 2 vCPUs, 4 GiB of memory and a 32 GiB disk';
 
   // controller/first-boot/user-data.yaml, character for character. A test compares the two.
   /* user-data.yaml: begin */
@@ -220,7 +222,7 @@ runcmd:
 
   function createStep(a) {
     var system = SYSTEMS[a.system];
-    var size = 'at least 2 vCPUs, 4 GiB of memory and a 32 GiB disk';
+    var size = SIZE;
     if (a.platform === 'azure') {
       var ports = a.expose === 'https' ? 'SSH (22) and HTTPS (443)' : 'SSH (22)';
       return {
@@ -392,8 +394,8 @@ runcmd:
       result.push({
         id: 'wait', title: 'Wait for the first boot to finish', where: 'The new VM, over SSH as ' + a.admin,
         text: [
-          'The installation takes about ten minutes. The first command waits until cloud-init is done; the second ' +
-          'shows how it ended.'
+          'The installation takes several minutes; allow ten. The first command waits until cloud-init is done; the ' +
+          'second shows how it ended.'
         ],
         list: [],
         commands: [{ label: '', code: 'cloud-init status --wait\nsudo tail -n 4 /var/log/ansible-guide-first-boot.log' }],
@@ -405,7 +407,7 @@ runcmd:
       result.push({
         id: 'login', title: 'Log in to the VM', where: 'Your workstation',
         text: [
-          'The VM runs ' + system.label + ' with ' + 'at least 2 vCPUs, 4 GiB of memory and a 32 GiB disk' +
+          'The VM runs ' + system.label + ' with ' + SIZE +
           ', and nothing else is installed on it.' + (chosen.reason ? ' ' + chosen.reason : '')
         ],
         list: [],
@@ -436,7 +438,7 @@ runcmd:
       });
       result.push({
         id: 'install', title: 'Install the controller', where: 'The controller, in the guide\'s folder',
-        text: ['This installs PostgreSQL, Semaphore and Ansible and seeds the project. It takes about ten minutes and prints no secret.'],
+        text: ['This installs PostgreSQL, Semaphore and Ansible and seeds the project. It takes several minutes and prints no secret.'],
         list: [],
         commands: [{ label: '', code: 'sudo bash controller/' + system.installer + ' --apply' + options }],
         expect: 'Controller installed and seeded.',

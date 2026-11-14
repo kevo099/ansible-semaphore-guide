@@ -37,6 +37,12 @@ it does not replace the playbooks.
 Follow the stages in order. Each one is a page with the same shape: Goal, Do,
 Check, the values to save, and what to do when a step fails.
 
+For the short way through stages 0 and 1, open [the setup page](site/README.md),
+`site/index.html`: it asks where the controller will run, which system it
+runs and who its administrator is, and lists the steps for that case with each
+command ready to copy. A new VM can then
+[install the controller at its first boot](docs/first-boot-controller.md).
+
 ```mermaid
 flowchart LR
     s0["Stage 0<br/>Plan, and create<br/>the controller VM"] --> s1["Stage 1<br/>Install the<br/>controller"]
@@ -159,6 +165,7 @@ The folders follow where a file runs.
 | [`examples/semaphore/`](examples/semaphore/) | Small playbooks for the Semaphore feature chapters. | Optional |
 | [`inventories/`](inventories/) | Example inventories; your own stay private. | 2, by-hand path |
 | [`docs/`](docs/README.md) | The stage pages, chapters, appendices and validation records. | |
+| [`site/`](site/README.md) | The setup page: three questions, then the steps of stages 0 and 1 for your case, with each command ready to copy. Open `site/index.html` in a browser. | 0 and 1 |
 | [`scripts/`](scripts/) | `summarize_xccdf.py`, which the lab folder copies for the STIG lessons, `validate.py` for this repository's own checks, and the wrappers `add-target.sh` and `update-controller.sh`, which call the files in `controller/` for copies that still name the old path. | |
 | [`tests/`](tests/) | Offline tests of the scripts, playbooks and documents. | |
 
@@ -168,6 +175,7 @@ The files you run yourself, one by one:
 | --- | --- | --- |
 | [`controller/install-controller.sh`](controller/install-controller.sh) | The controller | Shows a plan by default; `--apply` installs a fresh Ubuntu 24.04 controller and seeds the project **Ansible Automation**, which runs the playbooks from a local folder. Supports `--editor`, `--lab-dir`, `--expose` and `--address`. |
 | [`controller/install-controller-el9.sh`](controller/install-controller-el9.sh) | The controller | The same installation and options for RHEL, AlmaLinux or Rocky Linux 9.4 or later. |
+| [`controller/first-boot/user-data.yaml`](controller/first-boot/user-data.yaml) | A new controller VM, at first boot | Installs the controller before you log in: vendor data on Proxmox or a seed ISO, custom data on Azure. It fetches the guide and runs [`controller/first-boot.sh`](controller/first-boot.sh), which runs the installer and the readiness check. [The first-boot page](docs/first-boot-controller.md) shows each way. |
 | [`controller/onboard-target.sh`](controller/onboard-target.sh) | The controller, as your administrator, without `sudo` | Prepares existing machines over SSH with `onboard-linux.sh` and adds each one with `add-target.sh`, in one command; asks once for the shared sudo password. |
 | [`onboard/existing/onboard-linux.sh`](onboard/existing/onboard-linux.sh) | The machine, as root | Prepares an existing machine: run for you by `onboard-target.sh`, or by hand with `sudo bash` over SSH or at the console (`--keys`, `--ask-password`, `--controller-address`), or through Azure Run Command. Prints the values that `add-target.sh --from-info` reads. |
 | [`onboard/existing/bootstrap-existing-vm.yml`](onboard/existing/bootstrap-existing-vm.yml) | The controller | Prepares an existing machine over SSH as its administrator, one host per run. |
